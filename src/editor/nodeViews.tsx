@@ -2,36 +2,25 @@ import { useEffect, useId, useState } from 'react'
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from '@tiptap/react'
 import { Code2, FileCode2, GitFork, ListTree, Pencil } from 'lucide-react'
 import katex from 'katex'
+import { renderDiagram } from '../document/diagrams'
 import { documentInfo } from '../document/metadata'
 import { BlockMath, InlineMath, MermaidBlock, RawBlock, Toc, WikiLink } from './schema'
-
-let mermaidLoader: Promise<typeof import('mermaid')['default']> | undefined
-let diagramJobs = Promise.resolve()
 
 function MermaidPreview({ value, id }: { value: string; id: string }) {
   const [result, setResult] = useState<{ svg?: string; error?: string }>({})
   useEffect(() => {
     if (!value.trim()) { setResult({}); return }
-    let active = true
+    const controller = new AbortController()
     setResult({})
-    const timeout = window.setTimeout(() => {
-      const render = async () => {
-        try {
-          mermaidLoader ??= import('mermaid').then(({ default: mermaid }) => {
-            mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true, theme: 'neutral', flowchart: { htmlLabels: false }, maxTextSize: 50000 })
-            return mermaid
-          })
-          const mermaid = await mermaidLoader
-          if (!active) return
-          const { svg } = await mermaid.render(id, value)
-          if (active) setResult({ svg })
-        } catch (error) {
-          if (active) setResult({ error: error instanceof Error ? error.message.split('\n')[0] : 'Invalid Mermaid syntax.' })
-        }
+    const timeout = window.setTimeout(async () => {
+      try {
+        const svg = await renderDiagram(id, value, { mode: 'preview', signal: controller.signal })
+        if (!controller.signal.aborted) setResult({ svg })
+      } catch (error) {
+        if (!controller.signal.aborted) setResult({ error: error instanceof Error ? error.message.split('\n')[0] : 'Invalid Mermaid syntax.' })
       }
-      diagramJobs = diagramJobs.then(render, render)
     }, 260)
-    return () => { active = false; window.clearTimeout(timeout) }
+    return () => { controller.abort(); window.clearTimeout(timeout) }
   }, [value, id])
   if (!value.trim()) return <span className="muted">Enter Mermaid code to preview the diagram.</span>
   if (result.error) return <p className="field-error" role="status">{result.error}</p>

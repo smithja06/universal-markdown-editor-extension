@@ -1,20 +1,22 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
+import { pathToFileURL } from 'node:url'
 import { expect, test, type Page } from '@playwright/test'
 
 const visualEditor = (page: Page) => page.getByRole('textbox', { name: 'Visual document editor' })
 const sourceEditor = (page: Page) => page.getByRole('textbox', { name: 'Markdown source editor' })
+const pngPixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9q/VEAAAAASUVORK5CYII='
 
 async function start(page: Page) {
   await page.goto('/')
   await expect(visualEditor(page).getByRole('heading', { name: 'Welcome to Folio' })).toBeVisible()
 }
 
-async function setSource(page: Page, content: string) {
+async function setSource(page: Page, content: string, returnToVisual = true) {
   await page.getByRole('button', { name: 'Markdown Source', exact: true }).click()
   await sourceEditor(page).click()
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.insertText(content)
-  await page.getByRole('button', { name: 'Visual Editor', exact: true }).click()
+  if (returnToVisual) await page.getByRole('button', { name: 'Visual Editor', exact: true }).click()
 }
 
 async function selectMenu(page: Page, menu: string, item: string) {
@@ -206,6 +208,126 @@ test('HTML download renders Markdown, tables, and math with safe links', async (
   expect(html).toContain('<math')
   expect(html).not.toContain('javascript:')
   expect(html).not.toContain('<script>')
+})
+
+test('self-contained HTML opens offline with rendered diagrams, math, and embedded images', async ({ page, context }, testInfo) => {
+  await start(page)
+  const pixel = `data:image/png;base64,${pngPixel}`
+  const source = [
+    '---', 'title: Offline Notes', 'description: A portable report', 'lang: en-CA', '---', '',
+    '# Offline export', '', 'Inline $x^2 + \\alpha$.', '', '$$', '\\frac{1}{2}', '$$', '',
+    '```Mermaid', 'flowchart LR', 'A[Start] --> B[Finish]', '```', '',
+    '```mermaid', 'sequenceDiagram', 'Alice->>Bob: Hello', '```', '',
+    '```mermaid', 'classDiagram', 'Animal <|-- Duck', '```', '',
+    '```mermaid', 'not a diagram <keep this>', '```', '',
+    '```mermaid', 'flowchart LR', 'A@{ img: "https://example.invalid/mermaid-image.png", label: "External image" }', '```', '',
+    `<picture><source srcset="https://example.invalid/unavailable.png"><img src="${pixel}" alt="Embedded"></picture>`, '',
+    '![Missing local image](./missing.png)', '',
+  ].join('\n')
+  const diagramRequests: string[] = []
+  page.on('request', request => { if (request.url().includes('mermaid-image.png')) diagramRequests.push(request.url()) })
+  await setSource(page, source, false)
+  const downloadEvent = page.waitForEvent('download')
+  await selectMenu(page, 'Export', 'Self-Contained HTML')
+  const download = await downloadEvent
+  expect(download.suggestedFilename()).toMatch(/-self-contained\.html$/)
+  await expect(page.getByRole('status').filter({ hasText: 'HTML download started' })).toContainText(/2 diagrams.*1 image/)
+  expect(diagramRequests).toEqual([])
+  await expect(sourceEditor(page)).toContainText('not a diagram <keep this>')
+  const markdownDownload = page.waitForEvent('download')
+  await selectMenu(page, 'Export', 'Download Markdown')
+  expect(await readFile(await (await markdownDownload).path(), 'utf8')).toBe(source)
+
+  const document = await context.newPage()
+  const networkRequests: string[] = []
+  document.on('request', request => { if (/^https?:/i.test(request.url())) networkRequests.push(request.url()) })
+  const outputPath = testInfo.outputPath('offline.html')
+  await download.saveAs(outputPath)
+  await context.setOffline(true)
+  await document.goto(pathToFileURL(outputPath).href)
+  await expect(document).toHaveTitle('Offline Notes')
+  await expect(document.locator('html')).toHaveAttribute('lang', 'en-CA')
+  await expect(document.locator('meta[name="description"]')).toHaveAttribute('content', 'A portable report')
+  await expect(document.locator('.katex math')).toHaveCount(2)
+  await expect(document.locator('.katex-display .katex-html')).toBeVisible()
+  expect(await document.evaluate(async () => (await window.document.fonts.load('1em KaTeX_Main')).length)).toBeGreaterThan(0)
+  const diagrams = document.getByRole('img', { name: /Mermaid diagram/ })
+  await expect(diagrams).toHaveCount(3)
+  for (const [index, label] of ['Finish', 'Hello', 'Duck'].entries()) {
+    const image = diagrams.nth(index)
+    await expect(image).toBeVisible()
+    const svg = decodeURIComponent((await image.getAttribute('src'))!.split(',')[1])
+    expect(svg).toContain('<svg')
+    expect(svg).toContain(label)
+    expect(await image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0)
+  }
+  const preservedDiagrams = document.locator('pre code.language-mermaid')
+  await expect(preservedDiagrams).toHaveCount(2)
+  await expect(preservedDiagrams.first()).toHaveText('not a diagram <keep this>\n')
+  await expect(preservedDiagrams.last()).toContainText('mermaid-image.png')
+  await expect(document.getByRole('img', { name: 'Embedded' })).toBeVisible()
+  expect(await document.getByRole('img', { name: 'Embedded' }).evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1)
+  await expect(document.locator('source[srcset]')).toHaveCount(0)
+  await expect(document.getByText(/Image unavailable offline.*Missing local image/)).toBeVisible()
+  await expect(document.locator('img[src="./missing.png"]')).toHaveCount(0)
+  expect(networkRequests).toEqual([])
+})
+
+test('HTML export preserves rich content and blocks active markup', async ({ page, context }, testInfo) => {
+  await start(page)
+  await setSource(page, [
+    '# Heading', '## Another', '### Third', '#### Fourth', '##### Fifth', '###### Sixth', '', '[[TOC]]', '',
+    '<p style="text-align: right; line-height: 2"><strong>Bold</strong> <em>Italic</em> <u>Underline</u> <s>Strike</s> x<sup>2</sup> H<sub>2</sub>O <span style="font-family: Georgia; font-size: 20px; color: rgb(0, 90, 100); background-color: #ffe792">Styled</span></p>', '',
+    '3. Ordered', '   - Nested', '', '- [x] Completed', '', '> Quoted', '', ':::note', 'A directive callout.', ':::', '',
+    ':::widget{key="value"}', 'Unrecognized content', ':::', '',
+    '| Left | Right |', '| :--- | ---: |', '| 1 | 2 |', '',
+    '<p><span data-folio-image="" data-folio-caption="Caption" data-folio-align="right" class="document-image"><img src="./image.png" alt="Diagram" width="200"><span class="image-caption">Caption</span></span></p>', '',
+    '```js', 'const answer = 42', '```', '',
+    '$$', '\\frac{1}{2}', '$$', '',
+    '<span id="custom">Anchor target</span> [Anchor](#custom)', '', 'Footnote[^one].', '', '[^one]: A footnote.', '', '---', '',
+    '<img src="javascript:alert(1)" srcset="https://example.invalid/1" onerror="window.injected=true" alt="Unsafe">', '',
+    '<script>window.injected=true</script><iframe src="https://example.invalid"></iframe>', '',
+    '<span style="color: green; background-image: url(https://example.invalid)">Safe style</span>', '',
+    '```mermaid', 'flowchart LR', 'A[Diagram] --> B[Safe]', 'click A "javascript:alert(1)"', '```', '',
+  ].join('\n'))
+  const downloadEvent = page.waitForEvent('download')
+  await selectMenu(page, 'Export', 'Export HTML')
+  const output = await context.newPage()
+  await output.emulateMedia({ colorScheme: 'dark' })
+  await output.setViewportSize({ width: 420, height: 740 })
+  const outputPath = testInfo.outputPath('rich.html')
+  await (await downloadEvent).saveAs(outputPath)
+  await writeFile(testInfo.outputPath('image.png'), Buffer.from(pngPixel, 'base64'))
+  await output.goto(pathToFileURL(outputPath).href)
+  await expect(output.getByRole('navigation', { name: 'Table of contents' }).getByRole('link')).toHaveCount(6)
+  await expect(output.getByText('Styled')).toHaveCSS('font-family', 'Georgia')
+  await expect(output.getByText('Styled')).toHaveCSS('font-size', '20px')
+  await expect(output.getByText('Styled')).toHaveCSS('background-color', 'rgb(255, 231, 146)')
+  await expect(output.locator('p').filter({ hasText: 'Styled' })).toHaveCSS('text-align', 'right')
+  for (const tag of ['strong', 'em', 'u', 's', 'sup', 'sub', 'ol[start="3"] ul', 'blockquote', 'hr']) expect(await output.locator(tag).count()).toBeGreaterThan(0)
+  await expect(output.getByRole('checkbox')).toBeChecked()
+  await expect(output.getByRole('checkbox')).toBeDisabled()
+  await expect(output.locator('aside.callout-note')).toContainText('A directive callout.')
+  await expect(output.locator('pre').filter({ hasText: ':::widget' })).toContainText('Unrecognized content')
+  await expect(output.getByRole('columnheader', { name: 'Right' })).toHaveCSS('text-align', 'right')
+  await expect(output.getByRole('img', { name: 'Diagram', exact: true })).toHaveAttribute('src', './image.png')
+  expect(await output.getByRole('img', { name: 'Diagram', exact: true }).evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(1)
+  await expect(output.getByText('Caption', { exact: true })).toBeVisible()
+  await expect(output.locator('code .hljs-keyword')).toHaveText('const')
+  await expect(output.locator('math[display="block"] mfrac')).toBeVisible()
+  await output.getByRole('link', { name: 'Anchor', exact: true }).click()
+  await expect(output.locator(':target')).toHaveText('Anchor target')
+  await output.locator('[data-footnote-ref]').click()
+  await expect(output.locator(':target')).toContainText('A footnote.')
+  await expect(output.locator('script, iframe, [onerror], [srcset]')).toHaveCount(0)
+  await expect(output.getByText('Safe style')).toHaveCSS('color', 'rgb(0, 128, 0)')
+  await expect(output.getByText('Safe style')).toHaveCSS('background-image', 'none')
+  const svg = decodeURIComponent((await output.getByRole('img', { name: /Mermaid diagram/ }).getAttribute('src'))!.split(',')[1])
+  expect(svg).not.toMatch(/javascript:|<script|onload=/i)
+  expect(await output.evaluate(() => document.documentElement.scrollWidth)).toBe(420)
+  await expect(output.locator('body')).toHaveCSS('background-color', 'rgb(32, 40, 35)')
+  await output.emulateMedia({ media: 'print' })
+  await expect(output.locator('body')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
 })
 
 test('visual undo restores the previous front matter without changing the body', async ({ page }) => {

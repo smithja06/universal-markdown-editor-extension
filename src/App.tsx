@@ -330,16 +330,24 @@ export default function App() {
     { label: 'Appearance', run: () => openProperties('Appearance') },
     { label: 'Statistics', run: () => openProperties('Statistics') },
   ]
+  const downloadHtml = async (selfContained: boolean) => {
+    try {
+      const current = doc.project()
+      const { exportHtml } = await import('./document/export')
+      const { failedDiagrams, unavailableImages } = await exportHtml(current.title, current.source, selfContained, {
+        fontFamily: fonts[appearance.font], fontSize: appearance.fontSize, lineHeight: appearance.lineHeight,
+      })
+      const notices = [
+        failedDiagrams ? `${failedDiagrams} diagram${failedDiagrams === 1 ? '' : 's'} kept as source` : '',
+        unavailableImages ? `${unavailableImages} image${unavailableImages === 1 ? '' : 's'} unavailable` : '',
+      ].filter(Boolean)
+      notify(notices.length ? `HTML download started with ${notices.join(' and ')}` : 'HTML download started')
+    } catch (error) { notify(errorMessage(error)) }
+  }
   const exportItems: Item[] = [
     { label: 'Download Markdown', icon: <ArrowDownToLine size={16} />, run: () => void doc.save({ download: true }) },
-    { label: 'Export HTML', icon: <FileCode2 size={16} />, run: async () => {
-      try {
-        const current = doc.project()
-        const { exportHtml } = await import('./document/export')
-        exportHtml(current.title, current.source)
-        notify('HTML download started')
-      } catch (error) { notify(errorMessage(error)) }
-    } },
+    { label: 'Export HTML', icon: <FileCode2 size={16} />, run: () => void downloadHtml(false) },
+    { label: 'Self-Contained HTML', icon: <FileCode2 size={16} />, run: () => void downloadHtml(true) },
     { label: '', divider: true },
     { label: 'Copy Markdown', icon: <Copy size={16} />, run: () => void copy('markdown') },
     { label: 'Copy rendered text', icon: <Copy size={16} />, run: () => void copy('text') },
