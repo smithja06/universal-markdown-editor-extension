@@ -359,6 +359,7 @@ kbd { font: 11px/1.4 "Cascadia Code", Consolas, monospace; color: var(--muted); 
 
 .modal { margin: auto; width: min(440px, calc(100vw - 22px)); max-height: min(88dvh, 780px); padding: 0; background: var(--ui); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 13px; box-shadow: 0 16px 60px #14231945; }
 .modal-wide { width: min(730px, calc(100vw - 22px)); }
+.modal:has(.version-history) { width: min(960px, calc(100vw - 22px)); }
 .modal::backdrop { background: #14251f55; backdrop-filter: blur(1.5px); }
 .modal-heading { display: flex; justify-content: space-between; align-items: center; padding: 13px 17px; border-bottom: 1px solid var(--line); }
 .modal h2 { margin: 0; font: 770 17px/1.25 "Manrope Variable", sans-serif; letter-spacing: -.02em; }
@@ -387,6 +388,38 @@ kbd { font: 11px/1.4 "Cascadia Code", Consolas, monospace; color: var(--muted); 
 .recent-list button:hover { background: var(--hover); border-radius: 5px; }
 .recent-list button span { flex: 1; overflow-wrap: anywhere; }
 .recent-list small { color: var(--muted); }
+.version-history { display: grid; gap: 12px; padding: 14px 17px 16px; }
+.version-history-top, .version-preview-top, .version-row-time { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.version-history-top h3 { margin: 0; color: var(--ink); font-size: 14px; overflow-wrap: anywhere; }
+.version-history-top p, .version-footer, .version-feedback { margin: 3px 0 0; }
+.version-create { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+.version-layout { display: grid; grid-template-columns: minmax(215px, .39fr) minmax(0, 1fr); min-height: 320px; height: min(54dvh, 520px); border: 1px solid var(--line-strong); border-radius: 8px; }
+.version-list { min-height: 0; min-width: 0; overflow: auto; border-inline-end: 1px solid var(--line-strong); background: var(--quiet); padding: 8px; border-radius: 7px 0 0 7px; }
+.version-list h4 { margin: 8px 6px 5px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.version-list ol { padding: 0; margin: 0 0 7px; list-style: none; }
+.version-row { display: grid; width: 100%; gap: 3px; text-align: start; padding: 6px 7px; border: 1px solid transparent; border-radius: 6px; color: var(--text); font-size: 11px; }
+.version-row:hover { background: var(--hover); }
+.version-row[aria-pressed="true"] { background: var(--accent-surface); border-color: var(--accent-outline); }
+.version-row-title { font-size: 12px; font-weight: 680; overflow-wrap: anywhere; }
+.version-kind { padding: 1px 5px; border-radius: 4px; border: 1px solid var(--line-strong); color: var(--muted); font-size: 10px; }
+.version-manual, .version-recovery { color: var(--accent-strong); border-color: var(--accent-outline); }
+.version-id { font-family: "Cascadia Code", Consolas, monospace; }
+.version-preview { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.version-preview-top { padding: 7px 9px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.version-formats { display: flex; gap: 3px; }
+.version-formats button { padding: 5px 7px; border-radius: 4px; font-size: 12px; }
+.version-formats button:hover { background: var(--hover); }
+.version-formats button[aria-pressed="true"] { color: var(--accent-strong); font-weight: 650; background: var(--accent-surface); }
+.version-frame, .version-markdown { display: block; flex: 1; width: 100%; min-height: 0; border: 0; border-radius: 0 0 7px 0; }
+.version-markdown { margin: 0; padding: 13px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); font: 12px/1.6 "Cascadia Code", Consolas, monospace; }
+.version-empty { display: grid; align-content: center; justify-items: center; flex: 1; text-align: center; color: var(--muted); font-size: 12px; }
+.version-confirm { padding: 8px 10px; background: var(--accent-surface); border-bottom: 1px solid var(--accent-outline); font-size: 12px; color: var(--text); }
+.version-confirm p { margin: 0; }
+@media (max-width: 620px) {
+  .version-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(90px, 1fr) minmax(180px, 1.75fr); }
+  .version-list { border-inline-end: 0; border-bottom: 1px solid var(--line-strong); border-radius: 7px 7px 0 0; }
+  .version-frame, .version-markdown { border-radius: 0 0 7px 7px; }
+}
 .emoji-grid { display: grid; grid-template-columns: repeat(5, 1fr); padding: 15px; gap: 5px; }
 .emoji-grid button { border: 1px solid var(--line); border-radius: 7px; min-height: 44px; font-size: 22px; }
 .emoji-grid button:hover { background: var(--hover); border-color: var(--accent-outline); }

@@ -331,6 +331,23 @@ async function highlightCode(body: DocumentFragment) {
   }
 }
 
+export async function renderVersionPreview(source: string) {
+  const template = document.createElement('template')
+  template.innerHTML = renderMarkdownHtml(source)
+  trimFolioMarkup(template.content)
+  prepareImages(template.content, true)
+  template.content.querySelectorAll('a[href]').forEach(link => {
+    if (!link.getAttribute('href')?.startsWith('#')) link.removeAttribute('href')
+  })
+  await Promise.all([
+    renderDiagrams(Array.from(template.content.querySelectorAll('pre > code.language-mermaid'))),
+    highlightCode(template.content),
+  ])
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; base-uri \'none\'; form-action \'none\'">' +
+    '<style>' + htmlCss + 'main{margin:1rem auto;font:16px/1.65 system-ui,sans-serif}</style></head><body><main>' + template.innerHTML + '</main></body></html>'
+}
+
 interface ExportAppearance { fontFamily: string; fontSize: number; lineHeight: number }
 
 export async function exportHtml(title: string, source: string, selfContained: boolean, appearance: ExportAppearance) {

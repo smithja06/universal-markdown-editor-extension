@@ -15,6 +15,8 @@ import { openMarkdown, rebaseMarkdown, setFrontMatter, writeMarkdown, type Markd
 import { decodeMarkdown, saveMarkdown, type WritableMarkdownHandle } from '../document/files'
 import { documentInfo, type Heading } from '../document/metadata'
 import { loadWorkspace, newDocument, recentLimit, storeWorkspace, useWorkspace, welcomeSource, type DocumentFile, type EditorMode, type EditorPane } from '../document/workspace'
+import { listVersions, recordVersion, restoreVersion as restoreStoredVersion, versionInterval, versionStorageError, type DocumentVersion, type VersionTrigger } from '../document/versions'
+import { WorkspaceRestoreConflict } from '../document/workspaceStorage'
 
 type LocalStatus = 'loading' | 'pending' | 'saved' | 'unavailable'
 const emptyInfo = { outline: [], statistics: { words: 0, characters: 0, compact: 0, minutes: 0, headings: 0, links: 0, images: 0 } }
@@ -32,6 +34,8 @@ export function useDocument(notify: (message: string) => void) {
   const [activeHeading, setActiveHeading] = useState('')
   const [activePane, setActivePane] = useState<EditorPane>('visual')
   const [previewIssue, setPreviewIssue] = useState<string | null>(null)
+  const [historyError, setHistoryError] = useState('')
+  const [editorEpoch, setEditorEpoch] = useState(0)
   const fileRef = useRef(file)
   const recentRef = useRef<DocumentFile[]>([])
   const sourceView = useRef<EditorView | null>(null)
@@ -49,10 +53,12 @@ export function useDocument(notify: (message: string) => void) {
   const selectionUpdate = useRef<() => void>(() => {})
   const writing = useRef(Promise.resolve())
   const timer = useRef<number | undefined>(undefined)
+  const versionTimer = useRef<number | undefined>(undefined)
   const mirrorTimer = useRef<number | undefined>(undefined)
   const editVersion = useRef(0)
   const revision = useRef(0)
   const transition = useRef(0)
+  const restoring = useRef(false)
 
   const editor = useEditor({
     extensions: createExtensions(nodeViewExtensions),
@@ -98,28 +104,57 @@ export function useDocument(notify: (message: string) => void) {
     setWarnings(value.warnings)
   }, [])
 
-  const snapshot = useCallback((next: DocumentFile, records = recentRef.current) => {
+  const rememberRecent = useCallback((next: DocumentFile, records = recentRef.current) => {
     const files = [next, ...records.filter(item => item.id !== next.id)].slice(0, recentLimit)
     recentRef.current = files
     setRecent(files)
-    const ticket = ++revision.current
-    writing.current = writing.current.catch(() => undefined).then(() => storeWorkspace({ currentId: next.id, files }))
-    void writing.current.then(
-      () => { if (ticket === revision.current) setStatus('saved') },
-      () => { if (ticket === revision.current) setStatus('unavailable') },
-    )
+    return files
   }, [])
 
-  const flush = useCallback(() => {
-    if (!editor || !session.current) return
+  const automaticVersion = useCallback(async (candidate: DocumentFile, trigger: Exclude<VersionTrigger, 'manual'>) => {
+    try {
+      const result = await recordVersion(candidate, trigger)
+      if (fileRef.current.id === candidate.id && result.status !== 'deferred') setHistoryError('')
+      return result
+    } catch (error) {
+      if (fileRef.current.id === candidate.id) setHistoryError(versionStorageError(error))
+    }
+  }, [])
+
+  const queueVersion = useCallback((candidate: DocumentFile, trigger: Exclude<VersionTrigger, 'manual'>) => {
+    const attempt = writing.current.then(() => automaticVersion(candidate, trigger))
+    writing.current = attempt.then(() => undefined)
+    return attempt
+  }, [automaticVersion])
+
+  const persistDraft = useCallback((next: DocumentFile, records = recentRef.current, checkpoints?: DocumentFile[]) => {
+    const files = rememberRecent(next, records)
+    const ticket = ++revision.current
+    const saved = writing.current.then(() => storeWorkspace({ currentId: next.id, files }))
+    void saved.then(
+      () => { if (ticket === revision.current) setStatus('saved') },
+      error => {
+        if (ticket !== revision.current) return
+        setStatus('unavailable')
+        if (error instanceof WorkspaceRestoreConflict) notify(error.message)
+      },
+    )
+    writing.current = saved.then(async () => {
+      if (!checkpoints) await automaticVersion(next, 'interval')
+      else for (const file of checkpoints) await automaticVersion(file, 'checkpoint')
+    }, () => undefined)
+  }, [automaticVersion, notify, rememberRecent])
+
+  const flush = useCallback((checkpoint = false) => {
+    if (!editor || !session.current || restoring.current) return
     window.clearTimeout(timer.current)
     timer.current = undefined
     try {
       const projected = project()
-      const next = { ...projected, updated: Date.now() }
+      const next = { ...projected, updated: Math.max(Date.now(), projected.updated + 1) }
       replaceFile(next)
       setVisualDirty(false)
-      snapshot(next)
+      persistDraft(next, recentRef.current, checkpoint ? [next] : undefined)
       if (useWorkspace.getState().mode === 'source' && !issue.current) summarize(parseSource(next.source))
       else if (!issue.current) {
         setInfo(documentInfo(editor.state.doc))
@@ -131,14 +166,29 @@ export function useDocument(notify: (message: string) => void) {
       setStatus('unavailable')
       notify(errorMessage(error))
     }
-  }, [editor, notify, parseSource, project, replaceFile, snapshot, summarize])
+  }, [editor, notify, parseSource, persistDraft, project, replaceFile, summarize])
+
+  const scheduleVersionCheck = useCallback(function checkLater(delay: number) {
+    const id = fileRef.current.id
+    versionTimer.current = window.setTimeout(() => {
+      versionTimer.current = undefined
+      if (restoring.current || fileRef.current.id !== id) return
+      if (timer.current !== undefined) flush()
+      void queueVersion(project(), 'interval').then(result => {
+        if (result?.status === 'deferred' && !restoring.current && fileRef.current.id === id && versionTimer.current === undefined) {
+          checkLater(Math.max(1, result.version.createdAt + versionInterval - Date.now()))
+        }
+      })
+    }, delay)
+  }, [flush, project, queueVersion])
 
   const schedule = useCallback(() => {
     revision.current++
     setStatus('pending')
     window.clearTimeout(timer.current)
     timer.current = window.setTimeout(flush, 480)
-  }, [flush])
+    if (versionTimer.current === undefined) scheduleVersionCheck(versionInterval)
+  }, [flush, scheduleVersionCheck])
 
   selectionUpdate.current = () => {
     if (!editor || useWorkspace.getState().mode === 'source') return
@@ -241,6 +291,7 @@ export function useDocument(notify: (message: string) => void) {
   }
 
   const activatePane = useCallback((pane: EditorPane) => {
+    if (restoring.current) return false
     const mode = useWorkspace.getState().mode
     if (mode !== 'split') return mode === pane && !(pane === 'visual' && issue.current)
     try {
@@ -273,15 +324,18 @@ export function useDocument(notify: (message: string) => void) {
       authority.current = 'visual'
       applySession(openMarkdown(loaded.source, editor.schema))
       setStatus(storageError ? 'unavailable' : stored ? 'saved' : 'pending')
-      if (!stored && !storageError) snapshot(loaded)
+      if (!stored && !storageError) persistDraft(loaded, [loaded], [loaded])
+      else if (!storageError) queueVersion(loaded, 'checkpoint')
     }
     void restore().catch(error => { if (active) { setStatus('unavailable'); notify(errorMessage(error)) } })
     return () => { active = false }
-  }, [editor, applySession, notify, replaceFile, snapshot])
+  }, [editor, applySession, notify, persistDraft, queueVersion, replaceFile])
 
   useEffect(() => {
     const onHidden = (event: Event) => {
-      if (timer.current !== undefined && (event.type === 'pagehide' || document.visibilityState === 'hidden')) flush()
+      if (restoring.current || !session.current || (event.type !== 'pagehide' && document.visibilityState !== 'hidden')) return
+      if (timer.current !== undefined) flush(true)
+      else queueVersion(project(), 'checkpoint')
     }
     document.addEventListener('visibilitychange', onHidden)
     window.addEventListener('pagehide', onHidden)
@@ -290,8 +344,9 @@ export function useDocument(notify: (message: string) => void) {
       window.removeEventListener('pagehide', onHidden)
       window.clearTimeout(timer.current)
       window.clearTimeout(mirrorTimer.current)
+      window.clearTimeout(versionTimer.current)
     }
-  }, [flush])
+  }, [flush, project, queueVersion])
 
   const setSource = useCallback((source: string) => {
     if (useWorkspace.getState().mode === 'visual') return
@@ -342,15 +397,17 @@ export function useDocument(notify: (message: string) => void) {
   }
 
   function openFile(next: DocumentFile) {
-    if (!editor) return
+    if (!editor || restoring.current) return
     try {
       const previous = project()
       const pending = timer.current !== undefined
       const baseline = openMarkdown(next.source, editor.schema)
       window.clearTimeout(timer.current)
       window.clearTimeout(mirrorTimer.current)
+      window.clearTimeout(versionTimer.current)
       editVersion.current++
       timer.current = undefined
+      versionTimer.current = undefined
       history.current = []
       transition.current++
       authority.current = 'visual'
@@ -360,9 +417,10 @@ export function useDocument(notify: (message: string) => void) {
       applySession(baseline)
       useWorkspace.getState().setMode('visual')
       replaceFile(next)
+      setHistoryError('')
       setVisualDirty(false)
-      const last = pending ? { ...previous, updated: Date.now() } : previous
-      snapshot(next, [last, ...recentRef.current.filter(item => item.id !== previous.id)])
+      const last = pending ? { ...previous, updated: Math.max(Date.now(), previous.updated + 1) } : previous
+      persistDraft(next, [last, ...recentRef.current.filter(item => item.id !== previous.id)], last.id === next.id ? [next] : [last, next])
     } catch (error) { notify(errorMessage(error)) }
   }
 
@@ -380,14 +438,63 @@ export function useDocument(notify: (message: string) => void) {
       const next = project()
       const result = await saveMarkdown(next, next.title, { ...options, handle: fileHandles.current.get(next.id) })
       if (result.handle) fileHandles.current.set(next.id, result.handle)
-      if (next.id === fileRef.current.id && !options.download) {
-        const updated = { ...project(), savedSource: next.source, savedTitle: next.title, updated: Date.now() }
+      if (next.id === fileRef.current.id && !options.download && !restoring.current) {
+        const current = project()
+        const updated = { ...current, savedSource: next.source, savedTitle: next.title, updated: Math.max(Date.now(), current.updated + 1) }
         replaceFile(updated)
-        snapshot(updated)
+        persistDraft(updated)
       }
       notify(result.handle ? 'Saved to ' + result.filename : 'Downloaded ' + result.filename)
     } catch (error) {
       if (!(error instanceof DOMException && error.name === 'AbortError')) notify('Could not save the file. ' + errorMessage(error))
+    }
+  }
+
+  const loadVersions = useCallback((id: string) => writing.current.then(() => listVersions(id)), [])
+
+  async function createVersion() {
+    const current = project()
+    const created = writing.current.then(() => recordVersion(current, 'manual'))
+    writing.current = created.then(() => undefined, () => undefined)
+    const result = await created
+    if (fileRef.current.id === current.id) setHistoryError('')
+    return result
+  }
+
+  async function restoreHistoryVersion(version: DocumentVersion) {
+    if (!editor || restoring.current) return
+    const current = project()
+    if (current.id !== version.documentId) throw new Error('This version belongs to another document.')
+    const baseline = openMarkdown(version.content.source, editor.schema)
+    const pending = timer.current !== undefined
+    window.clearTimeout(timer.current)
+    timer.current = undefined
+    restoring.current = true
+    const commit = writing.current.then(() => restoreStoredVersion(current, version.id, recentRef.current))
+    writing.current = commit.then(() => undefined, () => undefined)
+    try {
+      const next = await commit
+      window.clearTimeout(mirrorTimer.current)
+      window.clearTimeout(versionTimer.current)
+      versionTimer.current = undefined
+      editVersion.current++
+      revision.current++
+      transition.current++
+      history.current = []
+      authority.current = 'visual'
+      setIssue(null)
+      applySession(baseline)
+      replaceFile(next)
+      rememberRecent(next)
+      setEditorEpoch(value => value + 1)
+      setVisualDirty(false)
+      setHistoryError('')
+      setStatus('saved')
+    } catch (error) {
+      if (pending) schedule()
+      throw error
+    } finally {
+      restoring.current = false
     }
   }
 
@@ -464,6 +571,7 @@ export function useDocument(notify: (message: string) => void) {
     editor, file, recent, status, sourceView, setSource, info, metadata, warnings, activeHeading,
     activePane, activatePane, previewIssue, scrollAnchors,
     dirty: visualDirty || file.source !== file.savedSource || file.title !== file.savedTitle,
+    editorEpoch, historyError, loadVersions, createVersion, restoreHistoryVersion,
     project, switchMode, openFile, importFile, save, changeTitle, changeMetadata, jumpToHeading,
   }
 }

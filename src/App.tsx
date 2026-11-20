@@ -5,7 +5,7 @@ import { redo as redoSource, redoDepth, undo as undoSource, undoDepth } from '@c
 import { openSearchPanel } from '@codemirror/search'
 import {
   ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpRight, Braces, Check, ChevronDown, CircleAlert, CloudOff, Code2, Copy, Download, FileCode2,
-  FilePlus2, FileText, FolderOpen, GitFork, Hash, ImagePlus, Info, Link2, List, ListOrdered, ListTodo, ListTree, LoaderCircle,
+  FilePlus2, FileText, FolderOpen, GitFork, Hash, History, ImagePlus, Info, Link2, List, ListOrdered, ListTodo, ListTree, LoaderCircle,
   Columns2, Link, Maximize2, Minimize2, Minus, PanelRight, Pilcrow, Quote, Redo2, Search, Sigma, Smile, Table2, Undo2, Upload, X,
 } from 'lucide-react'
 import { SourceEditor, type SourceLocation } from './editor/SourceEditor'
@@ -22,6 +22,7 @@ import { Toolbar, formatItems, fullFormatItems, indent, paragraphStyle } from '.
 import { Properties, type PropertyTab } from './ui/Properties'
 import { InsertDialog, SearchDialog, diagramPresets, type InsertRequest } from './ui/InsertDialog'
 import { accentTheme } from './appearance'
+import { VersionHistory } from './ui/VersionHistory'
 
 const shortcutRows = [
   ['Save document', 'Ctrl + S'], ['Open Markdown file', 'Ctrl + O'], ['Find and replace', 'Ctrl + F'],
@@ -68,7 +69,7 @@ export default function App() {
   const [width, setWidth] = useState(304)
   const [location, setLocation] = useState<SourceLocation>({ line: 1, column: 1 })
   const [request, setRequest] = useState<InsertRequest | null>(null)
-  const [dialog, setDialog] = useState<'search' | 'shortcuts' | 'recent' | 'emoji' | null>(null)
+  const [dialog, setDialog] = useState<'search' | 'shortcuts' | 'recent' | 'history' | 'emoji' | null>(null)
   const [slash, setSlash] = useState<SlashState | null>(null)
   const [slashIndex, setSlashIndex] = useState(0)
   const [dragging, setDragging] = useState(false)
@@ -76,8 +77,8 @@ export default function App() {
   const draggedBlock = useRef<number | undefined>(undefined)
   const fileInput = useRef<HTMLInputElement>(null)
   const imageInput = useRef<HTMLInputElement>(null)
-  const fileId = useRef(doc.file.id)
-  fileId.current = doc.file.id
+  const editorIdentity = useRef('')
+  editorIdentity.current = doc.file.id + ':' + doc.editorEpoch
   const undoAvailable = doc.sourceView.current ? undoDepth(doc.sourceView.current.state) > 0 : false
   const redoAvailable = doc.sourceView.current ? redoDepth(doc.sourceView.current.state) > 0 : false
 
@@ -242,10 +243,10 @@ export default function App() {
   })
 
   async function addImage(file: File, position?: number, target: EditorPane = doc.activePane) {
-    const activeFile = fileId.current
+    const activeEditor = editorIdentity.current
     try {
       const asset = await embeddedAttachments.add(file)
-      if (!editor || activeFile !== fileId.current || !doc.activatePane(target)) return
+      if (!editor || activeEditor !== editorIdentity.current || !doc.activatePane(target)) return
       if (target === 'source') {
         const view = doc.sourceView.current
         if (!view) return
@@ -308,6 +309,7 @@ export default function App() {
     { label: 'New document', icon: <FilePlus2 size={16} />, run: newFile },
     { label: 'Open Markdown…', icon: <FolderOpen size={16} />, shortcut: 'Ctrl+O', run: () => fileInput.current?.click() },
     { label: 'Recent documents', icon: <FileText size={16} />, run: () => setDialog('recent') },
+    { label: 'Version History', icon: <History size={16} />, run: () => setDialog('history') },
     { label: '', divider: true },
     { label: 'Save', icon: <Download size={16} />, shortcut: 'Ctrl+S', run: () => void doc.save() },
     { label: 'Save as…', icon: <ArrowDownToLine size={16} />, shortcut: 'Ctrl+Shift+S', run: () => void doc.save({ saveAs: true }) },
@@ -428,7 +430,7 @@ export default function App() {
           <div className="source-pane-content" onPointerDownCapture={event => { if (split && !doc.activatePane('source')) event.preventDefault() }}
             onFocusCapture={() => { if (split) doc.activatePane('source') }}
             onBeforeInputCapture={event => { if (!doc.activatePane('source')) event.preventDefault() }}>
-            {ready && <SourceEditor key={doc.file.id} initial={doc.file.source} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} onChange={doc.setSource} onLocation={setLocation} onReady={view => { doc.sourceView.current = view }} />}
+            {ready && <SourceEditor key={doc.file.id + ':' + doc.editorEpoch} initial={doc.file.source} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} onChange={doc.setSource} onLocation={setLocation} onReady={view => { doc.sourceView.current = view }} />}
           </div>
         </section>
         {dragging && <div className="drop-overlay" aria-hidden="true"><Upload size={29} /><strong>Drop a Markdown file or image</strong></div>}
@@ -450,6 +452,7 @@ export default function App() {
     {dialog === 'search' && editor && <SearchDialog editor={editor} close={() => { setDialog(null); editor.commands.focus() }} />}
     {dialog === 'shortcuts' && <Modal title="Keyboard shortcuts" close={() => setDialog(null)}><dl className="shortcuts">{shortcutRows.map(([label, keys]) => <div key={label}><dt>{label}</dt><dd><kbd>{keys}</kbd></dd></div>)}</dl></Modal>}
     {dialog === 'recent' && <Modal title="Recent documents" close={() => setDialog(null)}><div className="recent-list">{doc.recent.map(file => <button key={file.id} type="button" onClick={() => { if (file.id !== doc.file.id) doc.openFile(file); setDialog(null) }}><FileText size={17} /><span>{file.title}</span>{file.id === doc.file.id && <small>Current</small>}</button>)}</div></Modal>}
+    {dialog === 'history' && <VersionHistory key={doc.file.id} documentId={doc.file.id} title={doc.file.title} theme={appearance.theme} automaticError={doc.historyError} load={doc.loadVersions} create={doc.createVersion} restore={async version => { await doc.restoreHistoryVersion(version); notify('Version restored') }} close={() => setDialog(null)} />}
     {dialog === 'emoji' && <Modal title="Insert emoji" close={() => setDialog(null)}><div className="emoji-grid">
       {['😀', '👋', '✨', '💡', '✅', '📌', '🗂️', '📝', '📚', '🔎', '🌿', '🎯', '🚀', '⚠️', '❤️', '🙌', '🎉', '📎', '⭐', '🔗'].map(emoji => <button type="button" key={emoji} onClick={() => { editor?.chain().focus().insertContent(emoji).run(); setDialog(null) }}>{emoji}</button>)}
     </div></Modal>}
