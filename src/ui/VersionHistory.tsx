@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { History, Plus } from 'lucide-react'
 import { Modal } from './controls'
-import { automaticVersionLimit, readVersion, recordVersion, versionStorageError, type DocumentVersion, type VersionSummary } from '../document/versions'
+import { automaticVersionLimit, versionStorageError, type DocumentVersion, type VersionSummary } from '../document/versions'
+import type { DocumentStorage } from '../host/contracts'
 
 const timestamp = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 const calendarDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'full' })
@@ -22,12 +23,13 @@ interface Props {
   theme: 'light' | 'dark'
   automaticError: string
   load(documentId: string): Promise<VersionSummary[]>
-  create(): ReturnType<typeof recordVersion>
+  read: DocumentStorage['readVersion']
+  create(): ReturnType<DocumentStorage['recordVersion']>
   restore(version: DocumentVersion): Promise<void>
   close(): void
 }
 
-export function VersionHistory({ documentId, title, theme, automaticError, load, create, restore, close }: Props) {
+export function VersionHistory({ documentId, title, theme, automaticError, load, read, create, restore, close }: Props) {
   const [versions, setVersions] = useState<VersionSummary[]>()
   const [selection, setSelection] = useState<{ id: string }>()
   const [preview, setPreview] = useState<DocumentVersion>()
@@ -48,13 +50,13 @@ export function VersionHistory({ documentId, title, theme, automaticError, load,
   useEffect(() => {
     if (!selection) return
     let active = true
-    void readVersion(documentId, selection.id).then(version => {
+    void read(documentId, selection.id).then(version => {
       if (!active) return
       if (version) setPreview(version)
       else setError('This version is no longer available.')
     }, failure => { if (active) setError(versionStorageError(failure)) })
     return () => { active = false }
-  }, [documentId, selection])
+  }, [documentId, read, selection])
 
   useEffect(() => {
     if (!preview || mode !== 'rendered') return

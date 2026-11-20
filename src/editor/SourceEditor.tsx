@@ -10,6 +10,7 @@ import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
 import { linter, lintGutter, lintKeymap } from '@codemirror/lint'
 import { validateSource } from './sourceDiagnostics'
+import { sourceSearchDecorations } from './searchDecorations'
 
 export interface SourceLocation { line: number; column: number }
 
@@ -29,6 +30,7 @@ const quickSnippets = [
   { label: 'Table of contents', apply: '[[TOC]]' },
   { label: 'Table', apply: '| Column 1 | Column 2 |\n| --- | --- |\n| Value | Value |' },
 ]
+const selectionKeymap = searchKeymap.filter(binding => ['Mod-Alt-g', 'Mod-d', 'Mod-Shift-l'].includes(binding.key ?? ''))
 
 interface Props {
   initial: string
@@ -42,7 +44,7 @@ interface Props {
 
 export interface SourceRuntime { view: EditorView; apply(value: string | EditorState): void }
 
-export function replaceSource(view: EditorView | null, source: string, origin: 'visual' | 'metadata', recordHistory = true) {
+export function replaceSource(view: EditorView | null, source: string, origin: 'visual' | 'metadata' | 'search', recordHistory = true) {
   if (!view) return
   const previous = view.state.doc.toString()
   if (previous === source) return
@@ -58,7 +60,7 @@ export function replaceSource(view: EditorView | null, source: string, origin: '
     changes: { from: start, to: beforeEnd, insert: source.slice(start, afterEnd) },
     annotations: [
       ...(recordHistory ? [isolateHistory.of('full')] : [Transaction.addToHistory.of(false)]),
-      Transaction.userEvent.of(origin === 'visual' ? 'folio.visual' : 'folio.metadata'),
+      Transaction.userEvent.of('folio.' + origin),
     ],
   })
 }
@@ -85,14 +87,14 @@ export function SourceEditor(props: Props) {
         doc,
         extensions: [
           EditorState.transactionFilter.of(transaction => !transaction.docChanged || latest.current.canEdit() ? transaction : []),
-          settings.current.of(configuration()), history(), highlightActiveLine(), highlightSelectionMatches(),
+          settings.current.of(configuration()), history(), highlightActiveLine(), highlightSelectionMatches(), sourceSearchDecorations,
           markdown({ base: markdownLanguage, extensions: [GFM] }), syntaxHighlighting(syntax), bracketMatching(), closeBrackets(), indentOnInput(),
           autocompletion({ addToOptions: [], override: [context => {
             const word = context.matchBefore(/\/[a-zA-Z -]*/)
             if (!word && !context.explicit) return null
             return { from: word?.from ?? context.pos, options: quickSnippets }
           }] }),
-          keymap.of([{ key: 'Mod-Shift-z', run: redo, preventDefault: true }, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap, ...completionKeymap, ...lintKeymap, indentWithTab]),
+          keymap.of([{ key: 'Mod-Shift-z', run: redo, preventDefault: true }, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...selectionKeymap, ...completionKeymap, ...lintKeymap, indentWithTab]),
           linter(current => validateSource(current.state.doc.toString()), { delay: 400 }), lintGutter(),
           EditorView.contentAttributes.of({ 'aria-label': 'Markdown source editor', 'aria-multiline': 'true' }),
           EditorView.updateListener.of(update => {

@@ -129,6 +129,32 @@ button:disabled { cursor: default; }
 .source-toolbar-label { padding: 0 9px; display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 12px; font-weight: 650; }
 .source-toolbar-label span { color: var(--muted); font-weight: 400; padding-left: 8px; }
 
+.find-panel { position: relative; z-index: 7; display: grid; gap: 5px; padding: 7px clamp(8px, 2vw, 22px); border-bottom: 1px solid var(--line-strong); background: var(--ui); }
+.find-row, .find-replace-row, .find-options, .find-navigation { display: flex; align-items: center; gap: 5px; }
+.find-row, .find-replace-row { flex-wrap: wrap; }
+.find-input, .find-row select { min-height: 31px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--ui); color: var(--text); font-size: 12px; }
+.find-input { display: flex; align-items: center; gap: 6px; padding: 0 8px; min-width: 110px; width: min(270px, 38vw); }
+.find-input:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.find-input input { width: 100%; outline: 0; min-width: 0; }
+.find-input svg { flex: none; color: var(--muted); }
+.find-row select { padding-inline: 7px; }
+.find-options .icon-button { font-size: 11px; font-weight: 650; }
+.find-count { min-width: 80px; color: var(--muted); font-size: 11.5px; padding-inline: 4px; }
+.find-replace-row { padding-inline-start: 35px; }
+.find-feedback { margin: 0; font-size: 11.5px; color: var(--muted); }
+.find-feedback button { color: var(--accent-strong); text-decoration: underline; }
+.find-feedback.field-error { color: var(--danger); }
+.tiptap .folio-find-hit, .cm-editor .folio-find-hit { background-color: #f4d16988; border-radius: 2px; }
+.tiptap .folio-find-current, .cm-editor .folio-find-current { background-color: #f2ae629c; outline: 1px solid #a8702b; }
+.app[data-theme='dark'] .folio-find-hit { background-color: #d7a95055; }
+.app[data-theme='dark'] .folio-find-current { background-color: #e4a04088; outline-color: #f0c073; }
+@media (max-width: 520px) {
+  .find-row { column-gap: 3px; }
+  .find-row select { max-width: 130px; }
+  .find-input { min-width: 110px; flex: 1 0 36%; }
+  .find-replace-row { padding-inline-start: 0; }
+}
+
 .icon-button, .menu-trigger {
   display: inline-flex;
   align-items: center;
@@ -384,6 +410,22 @@ kbd { font: 11px/1.4 "Cascadia Code", Consolas, monospace; color: var(--muted); 
 .modal-wide { width: min(730px, calc(100vw - 22px)); }
 .modal:has(.version-history) { width: min(960px, calc(100vw - 22px)); }
 .modal:has(.document-library) { width: min(810px, calc(100vw - 22px)); }
+.modal:has(.command-palette) { width: min(620px, calc(100vw - 22px)); margin-top: clamp(14px, 11dvh, 100px); }
+.command-palette { display: grid; gap: 9px; padding: 10px 13px 13px; }
+.palette-search { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--muted); }
+.palette-search:focus-within { border-color: var(--accent-outline); box-shadow: 0 0 0 1px var(--accent-outline); }
+.palette-search input { outline: 0; color: var(--ink); width: 100%; min-width: 0; }
+.palette-search svg { flex: none; }
+.palette-results { overflow: auto; max-height: min(54dvh, 440px); min-height: 0; }
+.palette-category { padding: 7px 8px 4px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.palette-option { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 8px; border-radius: 5px; cursor: pointer; color: var(--text); font-size: 12px; }
+.palette-option > span { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 9px; min-width: 0; }
+.palette-option strong { font-weight: 580; overflow-wrap: anywhere; }
+.palette-option small { color: var(--muted); }
+.palette-option[aria-selected='true'] { background: var(--accent-surface); color: var(--accent-strong); }
+.palette-option:hover { background: var(--hover); }
+.palette-option kbd { flex: none; white-space: nowrap; }
+.command-palette > p { margin: 2px 8px 8px; }
 .document-library { display: grid; gap: 11px; padding: 13px 17px 16px; }
 .document-library p { margin: 0; }
 .library-navigation, .library-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

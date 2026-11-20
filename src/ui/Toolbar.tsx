@@ -27,7 +27,7 @@ export function paragraphStyle(editor: Editor, value: string) {
   else editor.chain().focus().setParagraph().updateAttributes('paragraph', reset).run()
 }
 
-const styles = ['Normal text', 'Title', 'Subtitle', 'Heading 1', 'Heading 2', 'Heading 3', 'Heading 4', 'Heading 5', 'Heading 6', 'Quote', 'Preformatted', 'Code block']
+export const paragraphStyles = ['Normal text', 'Title', 'Subtitle', 'Heading 1', 'Heading 2', 'Heading 3', 'Heading 4', 'Heading 5', 'Heading 6', 'Quote', 'Preformatted', 'Code block']
 const fontName = (name?: string) => name === 'Inter Variable' ? 'Inter' : name ?? 'Inter'
 
 function setParagraphAttribute(editor: Editor, key: string, value: string | null) {
@@ -106,22 +106,23 @@ export function fullFormatItems(editor: Editor, openLink: () => void): Item[] {
   ]
 }
 
-export function Toolbar({ editor, source, ready, undo, redo, insertItems, openLink, sourceCanUndo, sourceCanRedo }: {
-  editor: Editor | null; source: boolean; ready: boolean; undo(): void; redo(): void; insertItems: Item[]; openLink(): void; sourceCanUndo: boolean; sourceCanRedo: boolean
+export function Toolbar({ editor, state, source, ready, execute, shortcut, insertItems, extraFormats, styleItems, sourceCanUndo, sourceCanRedo }: {
+  editor: Editor | null; source: boolean; ready: boolean; execute(id: string): void; shortcut(id: string): string | undefined;
+  state: ReturnType<typeof useFormatting>; insertItems: Item[]; extraFormats: Item[]; styleItems: Item[]; sourceCanUndo: boolean; sourceCanRedo: boolean
 }) {
-  const state = useFormatting(editor)
   const enabled = !!editor && !!state && ready && !source
   const active = (name: string) => state?.marks.includes(name) ?? false
   const CurrentAlign = alignments.find(([value]) => value === state?.alignment)?.[1] ?? AlignLeft
   const apply = (run: (current: Editor) => void) => () => { if (enabled) run(editor) }
+  const label = (name: string, id: string) => shortcut(id) ? `${name} (${shortcut(id)})` : name
   return <div className="toolbar" role="toolbar" aria-label={source ? 'Source controls' : 'Formatting controls'}>
     <div className="toolbar-group history-tools">
-      <IconButton label="Undo (Ctrl+Z)" onClick={undo} disabled={!ready || (source ? !sourceCanUndo : !state?.undo)}><Undo2 size={17} /></IconButton>
-      <IconButton label="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={!ready || (source ? !sourceCanRedo : !state?.redo)}><Redo2 size={17} /></IconButton>
+      <IconButton label={label('Undo', 'edit.undo')} onClick={() => execute('edit.undo')} disabled={!ready || (source ? !sourceCanUndo : !state?.undo)}><Undo2 size={17} /></IconButton>
+      <IconButton label={label('Redo', 'edit.redo')} onClick={() => execute('edit.redo')} disabled={!ready || (source ? !sourceCanRedo : !state?.redo)}><Redo2 size={17} /></IconButton>
     </div>
-    {source ? <div className="source-toolbar-label"><Code2 size={16} /> Markdown source <span>Ctrl+F to find</span></div> : <>
+    {source ? <div className="source-toolbar-label"><Code2 size={16} /> Markdown source <span>{shortcut('search.find')} to find</span></div> : <>
       <div className="toolbar-group style-tools">
-        <Menu label="Paragraph style" chevron disabled={!enabled} items={styles.map(label => ({ label, active: state?.style === label, run: apply(current => paragraphStyle(current, label)) }))}>
+        <Menu label="Paragraph style" chevron disabled={!enabled} items={styleItems.map(item => ({ ...item, active: state?.style === item.label }))}>
           <Pilcrow size={15} /><span>{state?.style ?? 'Normal text'}</span>
         </Menu>
       </div>
@@ -134,10 +135,10 @@ export function Toolbar({ editor, source, ready, undo, redo, insertItems, openLi
         </Menu>
       </div>
       <div className="toolbar-group mark-tools">
-        <IconButton label="Bold (Ctrl+B)" active={active('bold')} disabled={!enabled} onClick={apply(current => current.chain().focus().toggleBold().run())}><Bold size={16} /></IconButton>
-        <IconButton label="Italic (Ctrl+I)" active={active('italic')} disabled={!enabled} onClick={apply(current => current.chain().focus().toggleItalic().run())}><Italic size={16} /></IconButton>
-        <IconButton label="Underline (Ctrl+U)" active={active('underline')} disabled={!enabled} onClick={apply(current => current.chain().focus().toggleUnderline().run())}><Underline size={16} /></IconButton>
-        <IconButton label="Strikethrough" active={active('strike')} disabled={!enabled} onClick={apply(current => current.chain().focus().toggleStrike().run())}><Strikethrough size={16} /></IconButton>
+        <IconButton label={label('Bold', 'format.bold')} active={active('bold')} disabled={!enabled} onClick={() => execute('format.bold')}><Bold size={16} /></IconButton>
+        <IconButton label={label('Italic', 'format.italic')} active={active('italic')} disabled={!enabled} onClick={() => execute('format.italic')}><Italic size={16} /></IconButton>
+        <IconButton label={label('Underline', 'format.underline')} active={active('underline')} disabled={!enabled} onClick={() => execute('format.underline')}><Underline size={16} /></IconButton>
+        <IconButton label="Strikethrough" active={active('strike')} disabled={!enabled} onClick={() => execute('format.strikethrough')}><Strikethrough size={16} /></IconButton>
         <Menu label="Text color" disabled={!enabled} items={[...colors.map(([label, value]) => ({ label, icon: colorDot(value), run: apply(current => current.chain().focus().setColor(value).run()) })), { label: 'Reset text color', run: apply(current => current.chain().focus().unsetColor().run()) }]}>
           <span className="color-letter" style={{ borderBottomColor: state?.text.color ?? 'currentColor' }}>A</span><ChevronDown size={10} />
         </Menu>
@@ -147,14 +148,14 @@ export function Toolbar({ editor, source, ready, undo, redo, insertItems, openLi
       </div>
       <div className="toolbar-group list-tools">
         <Menu label="Alignment" chevron disabled={!enabled} items={alignments.map(([value, Icon]) => ({ label: 'Align ' + value, icon: <Icon size={15} />, active: state?.alignment === value, run: apply(current => value === 'left' ? current.chain().focus().unsetTextAlign().run() : current.chain().focus().setTextAlign(value).run()) }))}><CurrentAlign size={17} /></Menu>
-        <IconButton label="Bullet list" disabled={!enabled} active={active('bulletList')} onClick={apply(current => current.chain().focus().toggleBulletList().run())}><List size={18} /></IconButton>
-        <IconButton label="Numbered list" disabled={!enabled} active={active('orderedList')} onClick={apply(current => current.chain().focus().toggleOrderedList().run())}><ListOrdered size={18} /></IconButton>
-        <IconButton label="Task list" disabled={!enabled} active={active('taskList')} onClick={apply(current => current.chain().focus().toggleTaskList().run())}><ListTodo size={17} /></IconButton>
+        <IconButton label="Bullet list" disabled={!enabled} active={active('bulletList')} onClick={() => execute('insert.bullet-list')}><List size={18} /></IconButton>
+        <IconButton label="Numbered list" disabled={!enabled} active={active('orderedList')} onClick={() => execute('insert.numbered-list')}><ListOrdered size={18} /></IconButton>
+        <IconButton label="Task list" disabled={!enabled} active={active('taskList')} onClick={() => execute('insert.checklist')}><ListTodo size={17} /></IconButton>
       </div>
       <div className="toolbar-group insert-tools">
-        <IconButton label="Insert or edit link (Ctrl+K)" disabled={!enabled} active={active('link')} onClick={openLink}><Link2 size={17} /></IconButton>
+        <IconButton label={label('Insert or edit link', 'format.edit-link')} disabled={!enabled} active={active('link')} onClick={() => execute('format.edit-link')}><Link2 size={17} /></IconButton>
         <Menu label="Insert content" align="right" chevron disabled={!enabled} items={insertItems}><Plus size={17} /></Menu>
-        <Menu label="More formatting" align="right" disabled={!enabled} items={editor ? formatItems(editor, openLink) : []}><Ellipsis size={19} /></Menu>
+        <Menu label="More formatting" align="right" disabled={!enabled} items={extraFormats}><Ellipsis size={19} /></Menu>
       </div>
       {active('table') && editor && <div className="toolbar-group"><Menu label="Table controls" chevron items={tableItems(editor)}>Table</Menu></div>}
     </>}

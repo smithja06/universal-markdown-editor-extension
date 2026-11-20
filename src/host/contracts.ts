@@ -1,0 +1,42 @@
+import type { Command, ShortcutPlatform } from '../core/commands'
+import type { MarkdownFile, WritableMarkdownHandle } from '../document/files'
+import type { DocumentFile, DocumentSummary, WorkspaceLayout } from '../document/workspace'
+import type { DocumentVersion, VersionResult, VersionSummary, VersionTrigger } from '../document/versions'
+import type { SearchOptions, TextMatch } from '../core/search'
+
+export class WorkspaceRestoreConflict extends Error {
+  constructor() { super('This document changed in another Folio tab. Download any edits from this tab before reloading.') }
+}
+
+export interface DocumentStorage {
+  loadLibrary(): Promise<DocumentSummary[]>
+  loadLayout(): Promise<WorkspaceLayout | undefined>
+  storeLayout(layout: WorkspaceLayout): Promise<void>
+  readDraft(id: string): Promise<DocumentFile | undefined>
+  insertDraft(file: DocumentFile, words?: number): Promise<DocumentSummary>
+  writeDraft(file: DocumentFile, words?: number, expected?: DocumentFile): Promise<DocumentSummary>
+  touchDocument(id: string, openedAt: number): Promise<DocumentSummary>
+  trashDocument(id: string): Promise<DocumentSummary>
+  recoverDocument(id: string): Promise<DocumentSummary>
+  listVersions(id: string): Promise<VersionSummary[]>
+  readVersion(documentId: string, id: string): Promise<DocumentVersion | undefined>
+  recordVersion(file: DocumentFile, trigger: VersionTrigger): Promise<VersionResult>
+  restoreVersion(file: DocumentFile, id: string, known?: DocumentFile, words?: number): Promise<DocumentFile>
+}
+
+export interface FileInput { name: string; arrayBuffer(): Promise<ArrayBuffer> }
+export interface FileOperations {
+  readMarkdown(input: FileInput): Promise<MarkdownFile>
+  saveMarkdown(file: MarkdownFile, title: string, options: { handle?: WritableMarkdownHandle; saveAs?: boolean; download?: boolean }): Promise<{ filename: string; handle?: WritableMarkdownHandle }>
+  download(filename: string, data: string | Uint8Array<ArrayBuffer>, mediaType: string): void
+  addAttachment(input: FileInput & { type: string }): Promise<{ url: string; alt: string }>
+}
+
+export interface FolioHost {
+  storage: DocumentStorage
+  files: FileOperations
+  keyboard: { platform: ShortcutPlatform; handledByHost?: ReadonlySet<string> }
+  commands?: { attach(api: { commands(): Command[]; execute(id: string, argument?: string): boolean }): () => void }
+  search(texts: string[], term: string, options: SearchOptions, signal: AbortSignal): Promise<TextMatch[]>
+  recentCommands: { read(): string[]; write(ids: string[]): void }
+}
