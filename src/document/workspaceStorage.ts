@@ -1,4 +1,5 @@
 import { draftSummary, emptyLayout, withoutTabs, type DocumentFile, type DocumentSummary, type WorkspaceLayout } from './workspace'
+import { WorkspaceRestoreConflict } from '../host/contracts'
 
 export const sessionsStore = 'sessions'
 export const documentsStore = 'documents'
@@ -7,10 +8,6 @@ export const versionsStore = 'document-versions'
 export const versionContentStore = 'version-content'
 export const versionOrderIndex = 'document-date'
 export const versionKindIndex = 'document-kind-date'
-
-export class WorkspaceRestoreConflict extends Error {
-  constructor() { super('This document changed in another Folio tab. Download any edits from this tab before reloading.') }
-}
 
 let database: Promise<IDBDatabase> | undefined
 let blockedUpgrade: Error | undefined

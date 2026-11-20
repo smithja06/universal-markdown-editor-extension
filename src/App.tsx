@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { EditorContent } from '@tiptap/react'
 import { NodeSelection } from '@tiptap/pm/state'
 import { redo as redoSource, redoDepth, undo as undoSource, undoDepth } from '@codemirror/commands'
-import { openSearchPanel } from '@codemirror/search'
 import {
   ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpRight, Braces, Check, ChevronDown, CircleAlert, CloudOff, Code2, Copy, Download, FileCode2,
   FilePlus2, FileText, FolderOpen, GitFork, Hash, History, ImagePlus, Info, Link2, List, ListOrdered, ListTodo, ListTree, LoaderCircle,
@@ -14,24 +13,28 @@ import { useDocument, errorMessage } from './editor/useDocument'
 import { dividerWidth, useSplitLayout } from './editor/useSplitLayout'
 import { scrollToSplitHeading, useSplitScroll } from './editor/splitScroll'
 import { calloutKinds } from './editor/schema'
-import { embeddedAttachments } from './document/files'
 import { useWorkspace, type EditorMode, type EditorPane } from './document/workspace'
 import type { Heading } from './document/metadata'
 import { IconButton, Menu, Modal, type Item } from './ui/controls'
-import { Toolbar, formatItems, fullFormatItems, indent, paragraphStyle } from './ui/Toolbar'
+import { Toolbar, fullFormatItems, paragraphStyle, paragraphStyles, useFormatting } from './ui/Toolbar'
 import { Properties, type PropertyTab } from './ui/Properties'
-import { InsertDialog, SearchDialog, diagramPresets, type InsertRequest } from './ui/InsertDialog'
+import { InsertDialog, diagramPresets, type InsertRequest } from './ui/InsertDialog'
 import { accentTheme } from './appearance'
 import { VersionHistory } from './ui/VersionHistory'
 import { DocumentLibrary } from './ui/DocumentLibrary'
 import { DocumentTabs } from './ui/DocumentTabs'
+import { CommandPalette, type PaletteEntry } from './ui/CommandPalette'
+import { FindPanel, type FindPanelHandle } from './ui/FindPanel'
+import { registerItems } from './ui/commandItems'
+import { CommandRegistry, matchesShortcut, shortcutLabel } from './core/commands'
+import { browserHost } from './host/browser'
+import type { FolioHost } from './host/contracts'
 
-const shortcutRows = [
-  ['Save document', 'Ctrl + S'], ['Open Markdown file', 'Ctrl + O'], ['Find and replace', 'Ctrl + F'],
-  ['Undo', 'Ctrl + Z'], ['Redo', 'Ctrl + Shift + Z'], ['Bold', 'Ctrl + B'], ['Italic', 'Ctrl + I'],
-  ['Underline', 'Ctrl + U'], ['Inline code', 'Ctrl + E'], ['Insert or edit link', 'Ctrl + K'],
-  ['Clear formatting', 'Ctrl + \\'], ['Insert menu', '/ on an empty line'], ['Indent list item', 'Tab'],
-]
+const windowCommands = ['workspace.palette', 'document.save', 'document.save-as', 'document.open-markdown', 'search.find', 'search.replace',
+  'search.next', 'search.previous', 'format.edit-link', 'format.clear-formatting', 'format.increase-indentation', 'format.decrease-indentation',
+  'format.bold', 'format.italic', 'format.underline', 'format.inline-code']
+
+const selectionCommands = new Set(windowCommands.filter(id => id.startsWith('format.')))
 
 const fonts = {
   Default: 'Inter Variable, Inter, system-ui, sans-serif',
@@ -48,7 +51,7 @@ const editorModes = [
   { mode: 'split', label: 'Split Editor', short: 'Split', icon: Columns2 },
 ] satisfies { mode: EditorMode; label: string; short: string; icon: typeof Code2 }[]
 
-export default function App() {
+export default function App({ host = browserHost }: { host?: FolioHost } = {}) {
   const [toast, setToast] = useState('')
   const toastTimer = useRef<number | undefined>(undefined)
   const notify = useCallback((message: string) => {
@@ -57,8 +60,9 @@ export default function App() {
     toastTimer.current = window.setTimeout(() => setToast(''), 4300)
   }, [])
   const visualScroll = useRef<HTMLDivElement>(null)
-  const doc = useDocument(notify, visualScroll)
+  const doc = useDocument(notify, visualScroll, host)
   const { editor } = doc
+  const formatting = useFormatting(editor)
   const { mode, sidebar, setSidebar, appearance, setAppearance } = useWorkspace()
   const accents = useMemo(() => accentTheme(appearance.accentColor, appearance.theme), [appearance.accentColor, appearance.theme])
   const split = mode === 'split'
@@ -72,7 +76,11 @@ export default function App() {
   const [width, setWidth] = useState(304)
   const [location, setLocation] = useState<SourceLocation>({ line: 1, column: 1 })
   const [request, setRequest] = useState<InsertRequest | null>(null)
-  const [dialog, setDialog] = useState<'search' | 'shortcuts' | 'recent' | 'history' | 'library' | 'emoji' | null>(null)
+  const [dialog, setDialog] = useState<'shortcuts' | 'recent' | 'history' | 'library' | 'emoji' | null>(null)
+  const [palette, setPalette] = useState<'all' | 'documents' | 'headings' | null>(null)
+  const [recentCommands, setRecentCommands] = useState(() => host.recentCommands.read())
+  const [findPanel, setFindPanel] = useState<{ replace: boolean } | null>(null)
+  const findRef = useRef<FindPanelHandle>(null)
   const [slash, setSlash] = useState<SlashState | null>(null)
   const [slashIndex, setSlashIndex] = useState(0)
   const [dragging, setDragging] = useState(false)
@@ -85,6 +93,17 @@ export default function App() {
   editorIdentity.current = doc.file.id + ':' + doc.editorEpoch
   const undoAvailable = doc.sourceView.current ? undoDepth(doc.sourceView.current.state) > 0 : false
   const redoAvailable = doc.sourceView.current ? redoDepth(doc.sourceView.current.state) > 0 : false
+  const registry = new CommandRegistry()
+  const commandRef = useRef(registry)
+  commandRef.current = registry
+  const platform = host.keyboard.platform
+  const execute = (id: string, argument?: string) => {
+    try { registry.execute(id, argument) } catch (error) { notify(errorMessage(error)) }
+  }
+  const commandShortcut = (id: string) => {
+    const binding = registry.get(id)?.shortcuts?.find(item => !item.platform || item.platform === platform)
+    return binding ? shortcutLabel(binding, platform) : undefined
+  }
 
   useEffect(() => {
     draggedBlock.current = undefined
@@ -100,9 +119,15 @@ export default function App() {
   }
 
   function openLink(preset?: string) { if (!source && doc.activatePane('visual')) setRequest({ name: 'link', preset }) }
-  function showSearch() {
-    if (source && doc.sourceView.current) openSearchPanel(doc.sourceView.current)
-    else if (editable) setDialog('search')
+  function showSearch(replace = false) {
+    if (!ready) return
+    if (findRef.current) findRef.current.focus(replace)
+    else setFindPanel({ replace })
+  }
+  function closeSearch() {
+    setFindPanel(null)
+    if (source) doc.sourceView.current?.focus()
+    else editor?.view.focus()
   }
   function undo() {
     if (!doc.activatePane(source ? 'source' : 'visual')) return
@@ -122,7 +147,7 @@ export default function App() {
   }
   function addNode(type: string, attrs?: Record<string, unknown>) { editor?.chain().focus().insertContent({ type, attrs }).run() }
   const insert = (name: InsertRequest['name'], preset?: string) => () => setRequest({ name, preset })
-  const actions: Item[] = [
+  const actions = registerItems(registry, platform, 'Insert', 'insert', [
     { label: 'Paragraph', icon: <Pilcrow size={16} />, run: () => editor?.chain().focus().setParagraph().run() },
     { label: 'Heading', icon: <Hash size={16} />, run: () => editor && paragraphStyle(editor, 'Heading 2') },
     { label: 'Quote', icon: <Quote size={16} />, run: () => editor?.chain().focus().toggleBlockquote().run() },
@@ -130,7 +155,7 @@ export default function App() {
     { label: 'Code block', icon: <Code2 size={16} />, run: () => editor?.chain().focus().toggleCodeBlock().run() },
     { label: 'Bullet list', icon: <List size={16} />, run: () => editor?.chain().focus().toggleBulletList().run() },
     { label: 'Numbered list', icon: <ListOrdered size={16} />, run: () => editor?.chain().focus().toggleOrderedList().run() },
-    { label: 'Checklist', icon: <ListTodo size={16} />, run: () => editor?.chain().focus().toggleTaskList().run() },
+    { label: 'Checklist', keywords: 'task list', icon: <ListTodo size={16} />, run: () => editor?.chain().focus().toggleTaskList().run() },
     { label: '', divider: true },
     ...calloutKinds.map(kind => ({
       label: kind[0].toUpperCase() + kind.slice(1) + ' callout', icon: <Info size={16} />,
@@ -153,7 +178,7 @@ export default function App() {
     { label: 'Mermaid diagram', icon: <GitFork size={16} />, run: insert('mermaid', diagramPresets.Flowchart) },
     { label: 'Inline equation', icon: <Sigma size={16} />, run: insert('inlineMath') },
     { label: 'Block equation', icon: <Braces size={16} />, run: insert('blockMath') },
-  ]
+  ], editable && !source)
 
   const slashItems = slash ? actions.filter(item => !item.divider && item.label.toLowerCase().includes(slash.word)).slice(0, 11) : []
   const runSlash = (item: Item) => {
@@ -208,23 +233,6 @@ export default function App() {
   })
 
   useEffect(() => {
-    const handle = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.altKey || request || dialog) return
-      const key = event.key.toLowerCase()
-      if (key === 's') { event.preventDefault(); if (ready) void doc.save({ saveAs: event.shiftKey }); return }
-      if (key === 'o') { event.preventDefault(); if (started) fileInput.current?.click(); return }
-      if (key === 'f') { event.preventDefault(); showSearch(); return }
-      if (!source && editor?.isFocused) {
-        if (key === 'k') { event.preventDefault(); openLink() }
-        if (key === '\\') { event.preventDefault(); formatItems(editor, () => openLink()).find(item => item.label === 'Clear formatting')?.run?.() }
-        if (key === ']' || key === '[') { event.preventDefault(); indent(editor, key === ']' ? 1 : -1) }
-      }
-    }
-    window.addEventListener('keydown', handle, true)
-    return () => window.removeEventListener('keydown', handle, true)
-  })
-
-  useEffect(() => {
     if (!editor) return
     const element = editor.view.dom
     const edit = (event: Event) => { if (doc.activatePane('visual')) setRequest((event as CustomEvent<InsertRequest>).detail) }
@@ -257,7 +265,7 @@ export default function App() {
   async function addImage(file: File, position?: number, target: EditorPane = doc.activePane) {
     const activeEditor = editorIdentity.current
     try {
-      const asset = await embeddedAttachments.add(file)
+      const asset = await host.files.addAttachment(file)
       if (!editor || activeEditor !== editorIdentity.current || !doc.activatePane(target)) return
       if (target === 'source') {
         const view = doc.sourceView.current
@@ -318,7 +326,7 @@ export default function App() {
     } catch (error) { notify('Could not copy to the clipboard. ' + errorMessage(error)) }
   }
 
-  const fileItems: Item[] = [
+  const fileItems = registerItems(registry, platform, 'Document', 'document', [
     { label: 'New document', icon: <FilePlus2 size={16} />, run: newFile },
     { label: 'Open Markdown…', icon: <FolderOpen size={16} />, shortcut: 'Ctrl+O', run: () => fileInput.current?.click() },
     { label: 'Document library', icon: <FolderOpen size={16} />, run: () => setDialog('library') },
@@ -327,32 +335,38 @@ export default function App() {
     { label: '', divider: true },
     { label: 'Save', icon: <Download size={16} />, shortcut: 'Ctrl+S', disabled: !ready, run: () => void doc.save() },
     { label: 'Save as…', icon: <ArrowDownToLine size={16} />, shortcut: 'Ctrl+Shift+S', disabled: !ready, run: () => void doc.save({ saveAs: true }) },
-  ]
-  const editItems: Item[] = [
-    { label: 'Undo', icon: <Undo2 size={16} />, shortcut: 'Ctrl+Z', run: undo, disabled: source ? !undoAvailable : !editor?.can().undo() },
-    { label: 'Redo', icon: <Redo2 size={16} />, shortcut: 'Ctrl+Shift+Z', run: redo, disabled: source ? !redoAvailable : !editor?.can().redo() },
     { label: '', divider: true },
-    { label: 'Find and replace', icon: <Search size={16} />, shortcut: 'Ctrl+F', run: showSearch },
+    { label: 'Rename document', disabled: !ready, run: () => requestAnimationFrame(() => { titleInput.current?.focus(); titleInput.current?.select() }) },
+    { label: 'Duplicate document', disabled: !ready, run: () => report(doc.duplicateDocument(doc.file.id)) },
+  ], started)
+  const editItems = registerItems(registry, platform, 'Editing', 'edit', [
+    { label: 'Undo', icon: <Undo2 size={16} />, shortcut: 'Ctrl+Z', run: undo, disabled: source ? !undoAvailable : !formatting?.undo,
+      available: () => ready && (source ? !!doc.sourceView.current && undoDepth(doc.sourceView.current.state) > 0 : !!editor?.can().undo()) },
+    { label: 'Redo', icon: <Redo2 size={16} />, shortcut: 'Ctrl+Shift+Z', run: redo, disabled: source ? !redoAvailable : !formatting?.redo,
+      available: () => ready && (source ? !!doc.sourceView.current && redoDepth(doc.sourceView.current.state) > 0 : !!editor?.can().redo()) },
+    { label: '', divider: true },
+    { id: 'search.find', label: 'Find and replace', keywords: 'search text match', icon: <Search size={16} />, shortcut: 'Ctrl+F', disabled: !ready, run: () => showSearch() },
+    { id: 'workspace.palette', label: 'Command Palette', shortcut: 'Ctrl+Shift+P', run: () => setPalette(previous => previous ? null : 'all') },
     { label: 'Move block up', icon: <ArrowUp size={16} />, disabled: source || !editable, run: () => editor && moveSelectedBlock(editor, -1) },
     { label: 'Move block down', icon: <ArrowDown size={16} />, disabled: source || !editable, run: () => editor && moveSelectedBlock(editor, 1) },
     { label: 'Keyboard shortcuts', run: () => setDialog('shortcuts') },
-  ]
-  const viewItems: Item[] = [
-    ...editorModes.map(({ mode: choice, label, icon: Icon }) => ({ label, icon: <Icon size={16} />, active: mode === choice, run: () => doc.switchMode(choice) })),
+  ], started)
+  const viewItems = registerItems(registry, platform, 'View', 'view', [
+    ...editorModes.map(({ mode: choice, label, icon: Icon }) => ({ id: 'view.mode.' + choice, label, keywords: 'switch editor mode ' + choice, icon: <Icon size={16} />, active: mode === choice, run: () => doc.switchMode(choice) })),
     ...(split ? [{ label: 'Sync Scroll', active: appearance.syncScroll, run: () => setAppearance({ syncScroll: !appearance.syncScroll }) }] : []),
-    { label: sidebar ? 'Hide document properties' : 'Show document properties', icon: <PanelRight size={16} />, run: () => setSidebar(!sidebar) },
+    { id: 'view.properties', label: sidebar ? 'Hide document properties' : 'Show document properties', keywords: 'toggle sidebar', icon: <PanelRight size={16} />, run: () => setSidebar(!sidebar) },
     { label: 'Document outline', icon: <ListTree size={16} />, run: () => openProperties('Outline') },
-    { label: appearance.width === 'full' ? 'Page width' : 'Full width', icon: appearance.width === 'full' ? <Minimize2 size={16} /> : <Maximize2 size={16} />, run: () => setAppearance({ width: appearance.width === 'full' ? 'page' : 'full' }) },
+    { id: 'view.width', label: appearance.width === 'full' ? 'Page width' : 'Full width', keywords: 'toggle document width', icon: appearance.width === 'full' ? <Minimize2 size={16} /> : <Maximize2 size={16} />, run: () => setAppearance({ width: appearance.width === 'full' ? 'page' : 'full' }) },
     { label: 'Appearance', run: () => openProperties('Appearance') },
     { label: 'Statistics', run: () => openProperties('Statistics') },
-  ]
+  ], ready)
   const downloadHtml = async (selfContained: boolean) => {
     try {
       const current = doc.project()
       const { exportHtml } = await import('./document/export')
       const { failedDiagrams, unavailableImages } = await exportHtml(current.title, current.source, selfContained, {
         fontFamily: fonts[appearance.font], fontSize: appearance.fontSize, lineHeight: appearance.lineHeight,
-      })
+      }, host.files.download)
       const notices = [
         failedDiagrams ? `${failedDiagrams} diagram${failedDiagrams === 1 ? '' : 's'} kept as source` : '',
         unavailableImages ? `${unavailableImages} image${unavailableImages === 1 ? '' : 's'} unavailable` : '',
@@ -360,14 +374,90 @@ export default function App() {
       notify(notices.length ? `HTML download started with ${notices.join(' and ')}` : 'HTML download started')
     } catch (error) { notify(errorMessage(error)) }
   }
-  const exportItems: Item[] = [
+  const exportItems = registerItems(registry, platform, 'Export', 'export', [
     { label: 'Download Markdown', icon: <ArrowDownToLine size={16} />, run: () => void doc.save({ download: true }) },
     { label: 'Export HTML', icon: <FileCode2 size={16} />, run: () => void downloadHtml(false) },
     { label: 'Self-Contained HTML', icon: <FileCode2 size={16} />, run: () => void downloadHtml(true) },
     { label: '', divider: true },
     { label: 'Copy Markdown', icon: <Copy size={16} />, run: () => void copy('markdown') },
     { label: 'Copy rendered text', icon: <Copy size={16} />, run: () => void copy('text') },
-  ]
+  ], ready)
+
+  const formatMenu = registerItems(registry, platform, 'Formatting', 'format', editor ? fullFormatItems(editor, () => openLink()).map(item => ({
+    ...item, shortcut: item.label === 'Increase indentation' ? 'Ctrl+]' : item.label === 'Decrease indentation' ? 'Ctrl+[' : item.shortcut,
+  })) : [], editable && !source)
+  const styleItems = registerItems(registry, platform, 'Formatting', 'style', paragraphStyles.map(label => ({
+    label, run: () => { if (editor) paragraphStyle(editor, label) }, keywords: 'paragraph style',
+  })), editable && !source)
+
+  registry.register({ id: 'search.replace', label: 'Replace text', category: 'Editing', available: () => ready,
+    shortcuts: [{ key: 'h', primary: true, platform: 'other' }, { key: 'f', primary: true, alt: true, platform: 'mac' }], run: () => showSearch(true) })
+  registry.register({ id: 'search.next', label: 'Find next match', category: 'Editing', available: () => !!findPanel && ready,
+    shortcuts: [{ key: 'F3' }], run: () => findRef.current?.move(1) })
+  registry.register({ id: 'search.previous', label: 'Find previous match', category: 'Editing', available: () => !!findPanel && ready,
+    shortcuts: [{ key: 'F3', shift: true }], run: () => findRef.current?.move(-1) })
+  registry.register({ id: 'navigation.documents', label: 'Switch document', category: 'Navigation', keywords: 'open tab library recent',
+    available: () => started, run: () => setPalette('documents') })
+  registry.register({ id: 'navigation.headings', label: 'Go to heading', category: 'Navigation', keywords: 'outline jump section',
+    available: () => ready && doc.info.outline.length > 0, run: () => setPalette('headings') })
+  registry.register({ id: 'navigation.open-document', label: 'Open saved document', category: 'Navigation',
+    available: () => started, run: id => { if (id) report(doc.openDocument(id)); else setPalette('documents') } })
+  registry.register({ id: 'navigation.jump', label: 'Jump to section', category: 'Navigation', keywords: 'heading outline',
+    available: () => ready && doc.info.outline.length > 0, run: anchor => {
+      const heading = doc.info.outline.find(item => item.anchor === anchor)
+      if (heading) requestAnimationFrame(() => jump(heading))
+      else setPalette('headings')
+    } })
+
+  useEffect(() => host.commands?.attach({
+    commands: () => commandRef.current.list(),
+    execute: (id, argument) => commandRef.current.execute(id, argument),
+  }), [host.commands])
+
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => {
+      if (event.isComposing || event.defaultPrevented || request || dialog) return
+      for (const id of windowCommands) {
+        if ((palette && id !== 'workspace.palette') || host.keyboard.handledByHost?.has(id)) continue
+        if (selectionCommands.has(id) && (!editor?.isFocused || source)) continue
+        const command = registry.get(id)
+        if (!command?.shortcuts?.some(shortcut => matchesShortcut(shortcut, event, platform)) || command.available?.() === false) continue
+        event.preventDefault()
+        event.stopPropagation()
+        execute(id)
+        return
+      }
+    }
+    window.addEventListener('keydown', handle, true)
+    return () => window.removeEventListener('keydown', handle, true)
+  })
+
+  function paletteEntries(): PaletteEntry[] {
+    const open = new Set(doc.tabs.map(item => item.id))
+    const documents = doc.library.filter(item => item.deletedAt === undefined).slice().sort((left, right) => Number(open.has(right.id)) - Number(open.has(left.id)) || (right.openedAt ?? right.updated) - (left.openedAt ?? left.updated))
+    const documentEntries = documents.map(item => ({ key: 'doc:' + item.id, id: 'navigation.open-document', argument: item.id, label: item.title,
+      category: open.has(item.id) ? 'Open tabs' : 'Library', keywords: 'open switch document', hint: open.has(item.id) ? 'Open tab' : 'Library document' }))
+    const headings = doc.info.outline.map(heading => ({ key: `heading:${doc.file.id}:${heading.anchor}`, id: 'navigation.jump', argument: heading.anchor,
+      label: heading.title, category: 'Headings', keywords: 'jump heading', hint: `H${heading.level}` }))
+    if (palette === 'documents') return documentEntries
+    if (palette === 'headings') return headings
+    const commands = registry.list().filter(command => command.available?.() !== false && !['navigation.open-document', 'navigation.jump'].includes(command.id))
+    return [...commands.map(command => ({ key: command.id, id: command.id, label: command.label, category: command.category, keywords: command.keywords,
+      shortcut: commandShortcut(command.id) })), ...documentEntries, ...headings]
+  }
+
+  function runPalette(entry: PaletteEntry) {
+    const recent = [entry.key, ...recentCommands.filter(id => id !== entry.key)].slice(0, 12)
+    setRecentCommands(recent)
+    host.recentCommands.write(recent)
+    setPalette(null)
+    execute(entry.id, entry.argument)
+  }
+
+  const shortcutRows = registry.list().flatMap(command => {
+    const label = commandShortcut(command.id)
+    return label ? [[command.label, label]] : []
+  }).concat([['Insert menu', '/ on an empty line'], ['Indent list item', 'Tab']])
 
   const statusLabel = doc.status === 'loading' ? 'Opening workspace…' : !ready ? 'No open documents' : doc.status === 'pending' ? 'Saving draft…' : doc.status === 'unavailable' ? 'Local storage unavailable' : 'Saved locally'
   const StatusIcon = doc.status === 'unavailable' ? CloudOff : doc.status === 'saved' ? Check : LoaderCircle
@@ -387,24 +477,27 @@ export default function App() {
           <Menu label="Edit" items={editItems} disabled={!ready} />
           <Menu label="View" items={viewItems} disabled={!ready} />
           <Menu label="Insert" items={actions} disabled={!editable || source} />
-          <Menu label="Format" items={editor ? fullFormatItems(editor, () => openLink()) : []} disabled={!editable || source} />
+          <Menu label="Format" items={formatMenu} disabled={!editable || source} />
         </nav>
       </div>
       <div className="topbar-actions">
-        <IconButton label="Open document library" disabled={!started} onClick={() => setDialog('library')}><FolderOpen size={18} /></IconButton>
+        <IconButton label="Open document library" disabled={!started} onClick={() => execute('document.document-library')}><FolderOpen size={18} /></IconButton>
         <span className={'save-status status-' + doc.status} role="status" title={statusLabel}><StatusIcon size={14} /><span>{statusLabel}</span></span>
         <div className="topbar-action-divider" />
         <div className="mode-selector" role="group" aria-label="Editing mode">
           {editorModes.map(({ mode: choice, label, short, icon: Icon }) => <button type="button" key={choice} disabled={!ready}
-            aria-label={label} title={label} aria-pressed={mode === choice} onClick={() => doc.switchMode(choice)}><Icon size={15} /><span>{short}</span></button>)}
+            aria-label={label} title={label} aria-pressed={mode === choice} onClick={() => execute('view.mode.' + choice)}><Icon size={15} /><span>{short}</span></button>)}
         </div>
-        <IconButton label="Toggle document properties" active={sidebar} onClick={() => setSidebar(!sidebar)} className="sidebar-toggle"><PanelRight size={18} /></IconButton>
+        <IconButton label="Toggle document properties" active={sidebar} disabled={!ready} onClick={() => execute('view.properties')} className="sidebar-toggle"><PanelRight size={18} /></IconButton>
         <Menu label="Export" items={exportItems} align="right" disabled={!ready} className="export-menu"><Download size={16} /><span>Export</span><ChevronDown size={12} /></Menu>
       </div>
     </header>
     <DocumentTabs tabs={doc.tabs} activeId={doc.layout.activeId} canReopen={doc.layout.closed.length > 0} disabled={!started}
-      select={id => report(doc.openDocument(id))} close={id => report(doc.closeTab(id))} closeOthers={id => report(doc.closeOtherTabs(id))} reopen={() => report(doc.reopenTab())} create={newFile} />
-    <Toolbar editor={editor} source={source} ready={editable} undo={undo} redo={redo} insertItems={actions} openLink={() => openLink()} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} />
+      select={id => execute('navigation.open-document', id)} close={id => report(doc.closeTab(id))} closeOthers={id => report(doc.closeOtherTabs(id))} reopen={() => report(doc.reopenTab())} create={() => execute('document.new-document')} />
+    <Toolbar editor={editor} state={formatting} source={source} ready={editable} execute={execute} shortcut={commandShortcut} insertItems={actions} extraFormats={formatMenu.slice(5)} styleItems={styleItems} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} />
+    {findPanel && doc.layout.activeId && <FindPanel panelRef={findRef} documentId={doc.layout.activeId} title={doc.file.title} mode={mode} startReplace={findPanel.replace}
+      find={host.search} capture={doc.captureSearch} subscribe={doc.subscribeSearch} present={doc.presentSearch} replace={doc.applySearch}
+      clear={doc.clearSearch} openSource={() => doc.switchMode('source', false)} close={closeSearch} />}
     <div className="workspace">
       <main ref={splitLayout.container} id="document-panel" role={ready ? 'tabpanel' : undefined} aria-labelledby={doc.layout.activeId ? 'document-tab-' + doc.layout.activeId : undefined} className={['canvas', split && 'split-mode', split && splitLayout.stacked && 'split-stacked', splitLayout.dragging && 'split-dragging', appearance.width === 'full' && 'full-width'].filter(Boolean).join(' ')}
         style={split ? { '--visual-share': splitLayout.ratio + 'fr', '--source-share': (1 - splitLayout.ratio) + 'fr', '--divider-width': dividerWidth + 'px' } as CSSProperties : undefined}
@@ -419,7 +512,7 @@ export default function App() {
           {doc.previewIssue && <div className="preview-notice" role="status"><CircleAlert size={15} /><span><strong>Preview paused.</strong> {doc.previewIssue}</span></div>}
           <div className="visual-scroll" ref={visualScroll} onScroll={() => { if (grip) setGrip(null); doc.trackView() }}>
             <div className="visual-shell">
-              <div className="canvas-strip"><span><FileText size={15} /> Markdown document</span><button type="button" className="width-toggle" onClick={() => setAppearance({ width: appearance.width === 'full' ? 'page' : 'full' })} title="Toggle document width">{appearance.width === 'page' ? <Maximize2 size={14} /> : <Minimize2 size={14} />}{appearance.width === 'page' ? 'Page width' : 'Full width'}</button></div>
+            <div className="canvas-strip"><span><FileText size={15} /> Markdown document</span><button type="button" className="width-toggle" onClick={() => execute('view.width')} title="Toggle document width">{appearance.width === 'page' ? <Maximize2 size={14} /> : <Minimize2 size={14} />}{appearance.width === 'page' ? 'Page width' : 'Full width'}</button></div>
               <article className="paper" onPointerDownCapture={event => { if (split && !doc.activatePane('visual')) event.preventDefault() }}
                 onFocusCapture={() => { if (split) doc.activatePane('visual') }}
                 onBeforeInputCapture={event => { if (!doc.activatePane('visual')) event.preventDefault() }}
@@ -446,7 +539,7 @@ export default function App() {
         {split && <div className="split-divider" role="separator" tabIndex={0} aria-label="Resize editor panes" aria-orientation="vertical" hidden={splitLayout.stacked} {...splitLayout.separator}><i /></div>}
         <section className="source-shell" aria-label="Markdown pane" hidden={!ready || mode === 'visual'}>
           <div className="source-banner"><FileCode2 size={16} /><span>{split ? 'Markdown Source' : /\.(md|markdown)$/i.test(doc.file.title) ? doc.file.title : doc.file.title + '.md'}</span>
-            {split && <button type="button" className="sync-scroll" aria-pressed={appearance.syncScroll} onClick={() => setAppearance({ syncScroll: !appearance.syncScroll })}><Link size={14} /> Sync Scroll</button>}
+            {split && <button type="button" className="sync-scroll" aria-pressed={appearance.syncScroll} onClick={() => execute('view.sync-scroll')}><Link size={14} /> Sync Scroll</button>}
           </div>
           <div className="source-pane-content" onPointerDownCapture={event => { if (split && !doc.activatePane('source')) event.preventDefault() }}
             onFocusCapture={() => { if (split) doc.activatePane('source') }}
@@ -470,15 +563,15 @@ export default function App() {
     <input ref={fileInput} type="file" accept=".md,.markdown,text/markdown" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void doc.importFile(file); event.target.value = '' }} />
     <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/avif,image/bmp,image/x-icon" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void addImage(file); event.target.value = '' }} />
     {request && editor && <InsertDialog request={request} editor={editor} anchors={doc.info.outline} close={() => setRequest(null)} chooseLocalImage={() => imageInput.current?.click()} />}
-    {dialog === 'search' && editor && <SearchDialog editor={editor} close={() => { setDialog(null); editor.commands.focus() }} />}
+    {palette && <CommandPalette key={palette} entries={paletteEntries()} recent={recentCommands} scope={palette} run={runPalette} close={() => setPalette(null)} />}
     {dialog === 'shortcuts' && <Modal title="Keyboard shortcuts" close={() => setDialog(null)}><dl className="shortcuts">{shortcutRows.map(([label, keys]) => <div key={label}><dt>{label}</dt><dd><kbd>{keys}</kbd></dd></div>)}</dl></Modal>}
     {dialog === 'recent' && <Modal title="Recent documents" close={() => setDialog(null)}><div className="recent-list">{doc.recent.map(file => <button key={file.id} type="button" onClick={() => report(doc.openDocument(file.id).then(() => setDialog(null)))}><FileText size={17} /><span>{file.title}</span>{file.id === doc.layout.activeId && <small>Current</small>}</button>)}{!doc.recent.length && <p className="muted">Recently opened documents will appear here.</p>}</div></Modal>}
     {dialog === 'library' && <DocumentLibrary items={doc.library} tabs={doc.tabs.map(item => item.id)} close={() => setDialog(null)} create={doc.createDocument} open={doc.openDocument} rename={doc.renameDocument} duplicate={doc.duplicateDocument} remove={doc.deleteDocument} restore={doc.restoreDocument} />}
-    {dialog === 'history' && <VersionHistory key={doc.file.id} documentId={doc.file.id} title={doc.file.title} theme={appearance.theme} automaticError={doc.historyError} load={doc.loadVersions} create={doc.createVersion} restore={async version => { await doc.restoreHistoryVersion(version); notify('Version restored') }} close={() => setDialog(null)} />}
+    {dialog === 'history' && <VersionHistory key={doc.file.id} documentId={doc.file.id} title={doc.file.title} theme={appearance.theme} automaticError={doc.historyError} load={doc.loadVersions} read={host.storage.readVersion} create={doc.createVersion} restore={async version => { await doc.restoreHistoryVersion(version); notify('Version restored') }} close={() => setDialog(null)} />}
     {dialog === 'emoji' && <Modal title="Insert emoji" close={() => setDialog(null)}><div className="emoji-grid">
       {['😀', '👋', '✨', '💡', '✅', '📌', '🗂️', '📝', '📚', '🔎', '🌿', '🎯', '🚀', '⚠️', '❤️', '🙌', '🎉', '📎', '⭐', '🔗'].map(emoji => <button type="button" key={emoji} onClick={() => { editor?.chain().focus().insertContent(emoji).run(); setDialog(null) }}>{emoji}</button>)}
     </div></Modal>}
-    {slash && slashItems.length > 0 && !dialog && !request && <div className="dropdown slash-menu" role="listbox" aria-label="Insert command" style={{ top: slash.top, left: slash.left }}>
+    {slash && slashItems.length > 0 && !dialog && !request && !palette && <div className="dropdown slash-menu" role="listbox" aria-label="Insert command" style={{ top: slash.top, left: slash.left }}>
       <div className="slash-menu-heading">Insert block</div>
       {slashItems.map((item, index) => <button type="button" role="option" key={item.label} aria-selected={index === slashIndex} onMouseDown={event => event.preventDefault()} onClick={() => runSlash(item)}><span className="item-icon">{item.icon}</span><span>{item.label}</span></button>)}
     </div>}

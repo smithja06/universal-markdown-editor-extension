@@ -9,7 +9,8 @@ import { markdownProcessor } from './markdown'
 import DOMPurify from 'dompurify'
 import { headingSlug, readMetadata } from './metadata'
 import { calloutKinds, safeUrl } from '../editor/schema'
-import { downloadFile, markdownFilename } from './files'
+import { markdownFilename } from './files'
+import type { FileOperations } from '../host/contracts'
 import { renderDiagram } from './diagrams'
 import htmlCss from './export.css?raw'
 
@@ -350,7 +351,7 @@ export async function renderVersionPreview(source: string) {
 
 interface ExportAppearance { fontFamily: string; fontSize: number; lineHeight: number }
 
-export async function exportHtml(title: string, source: string, selfContained: boolean, appearance: ExportAppearance) {
+export async function exportHtml(title: string, source: string, selfContained: boolean, appearance: ExportAppearance, download: FileOperations['download']) {
   const { html, metadata } = renderBody(source, selfContained)
   const template = document.createElement('template')
   template.innerHTML = html
@@ -399,6 +400,6 @@ export async function exportHtml(title: string, source: string, selfContained: b
   output.body.append(main)
 
   const suffix = selfContained ? '-self-contained.html' : '.html'
-  downloadFile(markdownFilename(title).replace(/\.(md|markdown)$/i, suffix), new Blob(['<!doctype html>\n' + output.documentElement.outerHTML], { type: 'text/html;charset=utf-8' }))
+  download(markdownFilename(title).replace(/\.(md|markdown)$/i, suffix), '<!doctype html>\n' + output.documentElement.outerHTML, 'text/html;charset=utf-8')
   return { failedDiagrams, unavailableImages }
 }

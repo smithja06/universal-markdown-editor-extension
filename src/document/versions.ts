@@ -26,7 +26,7 @@ export interface VersionSummary {
 
 export interface DocumentVersion extends VersionSummary { content: MarkdownFile }
 
-interface VersionResult {
+export interface VersionResult {
   status: 'created' | 'existing' | 'promoted' | 'deferred'
   version: VersionSummary
 }
