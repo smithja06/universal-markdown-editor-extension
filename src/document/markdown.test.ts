@@ -64,6 +64,24 @@ describe('Markdown source preservation', () => {
     reopened.editor.destroy()
   })
 
+  it.each(['# Welcome to Folio\n', 'Welcome to Folio\n================\n'])('preserves native heading syntax when choosing left alignment in %j', source => {
+    const { editor, session } = open(source)
+    editor.commands.setTextAlign('left')
+    expect(writeMarkdown(session, editor.state.doc).source).toBe(source)
+    editor.commands.setTextAlign('right')
+    expect(writeMarkdown(session, editor.state.doc).source).toBe('<h1 style="text-align: right;">Welcome to Folio</h1>\n')
+    editor.destroy()
+  })
+
+  it('uses native Markdown when editing a heading with a redundant imported left alignment', () => {
+    const source = '<h1 style="text-align: left;">Welcome to Folio</h1>\n\n<p style="text-align: center;">Centered</p>\n'
+    const { editor, session } = open(source)
+    expect(writeMarkdown(session, editor.state.doc).source).toBe(source)
+    editor.commands.insertContentAt(1, 'Hello! ')
+    expect(writeMarkdown(session, editor.state.doc).source).toBe('# Hello! Welcome to Folio\n\n<p style="text-align: center;">Centered</p>\n')
+    editor.destroy()
+  })
+
   it('keeps legacy source exact until an edit and then writes the smallest block HTML', () => {
     const legacy = "<div data-folio-block='1'>\n  <p data-folio-style='title'>Hello</p>\n</div>\n"
     const { editor, session } = open(legacy)
