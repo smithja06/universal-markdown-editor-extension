@@ -2,6 +2,7 @@ import { useEffect, useId, useState, type KeyboardEvent, type ReactNode } from '
 import { BarChart3, ChevronDown, ChevronRight, FileSliders, Layers3, ListTree, PanelRightClose, Palette, Tags } from 'lucide-react'
 import { readMetadata, updateMetadata, type Heading, type Statistics } from '../document/metadata'
 import { useWorkspace } from '../document/workspace'
+import { accentAtHue, accentHex, accentHue, accentSpectrum } from '../appearance'
 import { IconButton } from './controls'
 
 const tabs = [
@@ -115,9 +116,17 @@ function FrontMatter({ value, update }: { value: string; update(value: string): 
 
 function AppearancePanel() {
   const { appearance, setAppearance } = useWorkspace()
+  const hex = accentHex(appearance.accentColor)
   return <section className="properties-content fields-panel">
     <div className="section-heading"><h3>Appearance</h3></div>
-    <label className="field">Theme<select value={appearance.theme} onChange={event => setAppearance({ theme: event.target.value as typeof appearance.theme })}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+    <label className="field">Theme<select value={appearance.theme} onChange={event => setAppearance({ theme: event.target.value === 'dark' ? 'dark' : 'light' })}><option value="light">Light</option><option value="dark">Dark</option></select></label>
+    <fieldset className="accent-field">
+      <legend>Accent color</legend>
+      <div className="accent-preview"><span aria-hidden="true" /><output aria-label="Accent hex value">{hex}</output></div>
+      <input type="range" className="accent-hue" aria-label="Accent hue" aria-valuetext={hex} min={0} max={359}
+        value={accentHue(appearance.accentColor)} style={{ '--accent-spectrum': accentSpectrum } as React.CSSProperties}
+        onChange={event => setAppearance({ accentColor: accentAtHue(event.currentTarget.valueAsNumber) })} />
+    </fieldset>
     <label className="field">Editor font<select value={appearance.font} onChange={event => setAppearance({ font: event.target.value as typeof appearance.font })}><option>Default</option><option>Sans serif</option><option>Serif</option><option>Monospace</option></select></label>
     <label className="field">Editor font size<select value={appearance.fontSize} onChange={event => setAppearance({ fontSize: Number(event.target.value) })}>{[12, 14, 15, 16, 18, 20, 22, 24].map(size => <option key={size} value={size}>{size} px</option>)}</select></label>
     <label className="field">Editor line height<select value={appearance.lineHeight} onChange={event => setAppearance({ lineHeight: Number(event.target.value) })}>{[1.25, 1.5, 1.7, 1.9, 2.2].map(value => <option key={value}>{value}</option>)}</select></label>

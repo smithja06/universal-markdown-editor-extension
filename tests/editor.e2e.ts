@@ -108,6 +108,57 @@ test('mobile view keeps both editors and the properties drawer accessible', asyn
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
 })
 
+test('shares a single hue slider between light and dark themes and retains it after reload', async ({ page }) => {
+  await start(page)
+  const appearance = page.getByRole('tab', { name: 'Appearance' })
+  await appearance.click()
+  const theme = page.getByRole('combobox', { name: 'Theme', exact: true })
+  await expect(theme.locator('option')).toHaveText(['Light', 'Dark'])
+  await expect(theme).toHaveValue('light')
+  await expect(page.getByRole('slider')).toHaveCount(1)
+  const hue = page.getByRole('slider', { name: 'Accent hue' })
+  await expect(page.getByText('#226548', { exact: true })).toBeVisible()
+  await hue.fill('270')
+  await expect(page.getByText('#732EB8', { exact: true })).toBeVisible()
+  const exportButton = page.getByRole('button', { name: 'Export', exact: true })
+  await expect(exportButton).toHaveCSS('background-color', 'rgb(115, 46, 184)')
+  await theme.selectOption('dark')
+  await expect(page.locator('.app')).toHaveAttribute('data-theme', 'dark')
+  await expect(exportButton).toHaveCSS('background-color', 'rgb(115, 46, 184)')
+  await theme.press('Tab')
+  await expect(hue).toBeFocused()
+  await expect(hue).toHaveCSS('outline-style', 'solid')
+  await page.reload()
+  await expect(visualEditor(page).getByRole('heading', { name: 'Welcome to Folio' })).toBeVisible()
+  await appearance.click()
+  await expect(theme).toHaveValue('dark')
+  await expect(hue).toHaveValue('270')
+  await expect(exportButton).toHaveCSS('background-color', 'rgb(115, 46, 184)')
+  await hue.press('Home')
+  await expect(page.getByText('#B82E2E', { exact: true })).toBeVisible()
+})
+
+test('migrates a System theme and preserves an existing custom RGB accent', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.addInitScript(() => {
+    const key = 'folio.appearance.v1'
+    if (!localStorage.getItem(key)) {
+      localStorage.setItem(key, JSON.stringify({ theme: 'system', font: 'Serif', accentColor: { red: 255, green: 255, blue: 255 } }))
+    }
+  })
+  await start(page)
+  await page.getByRole('tab', { name: 'Appearance' }).click()
+  const theme = page.getByRole('combobox', { name: 'Theme', exact: true })
+  await expect(theme).toHaveValue('dark')
+  await expect(page.getByRole('combobox', { name: 'Editor font', exact: true })).toHaveValue('Serif')
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.reload()
+  await expect(page.locator('.app')).toHaveAttribute('data-theme', 'dark')
+  const exportButton = page.getByRole('button', { name: 'Export', exact: true })
+  await expect(exportButton).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(exportButton).toHaveCSS('color', 'rgb(0, 0, 0)')
+})
+
 test('source undo can revert a visual edit across the mode switch', async ({ page }) => {
   await start(page)
   await setSource(page, '# Plan\n\nDraft text.\n')

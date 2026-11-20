@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { MarkdownFile } from './files'
+import { forestAccent, normalizeAccent, type AccentColor, type Theme } from '../appearance'
 
 export interface DocumentFile extends MarkdownFile {
   id: string
@@ -10,7 +11,8 @@ export interface DocumentFile extends MarkdownFile {
 }
 
 export interface Appearance {
-  theme: 'light' | 'dark' | 'system'
+  theme: Theme
+  accentColor: AccentColor
   font: 'Default' | 'Sans serif' | 'Serif' | 'Monospace'
   fontSize: number
   lineHeight: number
@@ -21,7 +23,7 @@ export interface Appearance {
   syncScroll: boolean
 }
 
-const defaultAppearance: Appearance = { theme: 'system', font: 'Default', fontSize: 16, lineHeight: 1.7, width: 'page', lineNumbers: true, wordWrap: true, splitRatio: 0.5, syncScroll: false }
+const defaultAppearance: Appearance = { theme: 'light', accentColor: forestAccent, font: 'Default', fontSize: 16, lineHeight: 1.7, width: 'page', lineNumbers: true, wordWrap: true, splitRatio: 0.5, syncScroll: false }
 
 export function newDocument(title = 'Untitled document', file: MarkdownFile = { source: '', lineEnding: '\n', bom: false }): DocumentFile {
   return { ...file, title, id: crypto.randomUUID(), savedSource: file.source, savedTitle: title, updated: Date.now() }
@@ -40,8 +42,20 @@ export const welcomeSource = [
 
 const appearanceKey = 'folio.appearance.v1'
 export const recentLimit = 15
+function persistAppearance(appearance: Appearance) {
+  try { localStorage.setItem(appearanceKey, JSON.stringify(appearance)) } catch { /* Preferences still work for this tab. */ }
+}
+
 function initialAppearance(): Appearance {
-  try { return { ...defaultAppearance, ...JSON.parse(localStorage.getItem(appearanceKey) ?? '{}') } }
+  try {
+    const stored: Partial<Omit<Appearance, 'theme' | 'accentColor'>> & { theme?: unknown; accentColor?: unknown } =
+      JSON.parse(localStorage.getItem(appearanceKey) ?? '{}') ?? {}
+    const systemDark = stored.theme === 'system' && globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches
+    const theme = stored.theme === 'dark' || systemDark ? 'dark' : 'light'
+    const appearance = { ...defaultAppearance, ...stored, theme, accentColor: normalizeAccent(stored.accentColor) } satisfies Appearance
+    if (stored.theme === 'system') persistAppearance(appearance)
+    return appearance
+  }
   catch { return defaultAppearance }
 }
 
@@ -65,7 +79,7 @@ export const useWorkspace = create<Workspace>(set => ({
   setSidebar: sidebar => set({ sidebar }),
   setAppearance: update => set(state => {
     const appearance = { ...state.appearance, ...update }
-    try { localStorage.setItem(appearanceKey, JSON.stringify(appearance)) } catch { /* Preferences still work for this tab. */ }
+    persistAppearance(appearance)
     return { appearance }
   }),
 }))

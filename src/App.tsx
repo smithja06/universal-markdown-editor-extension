@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react'
 import { EditorContent } from '@tiptap/react'
 import { NodeSelection } from '@tiptap/pm/state'
 import { redo as redoSource, redoDepth, undo as undoSource, undoDepth } from '@codemirror/commands'
@@ -21,6 +21,7 @@ import { IconButton, Menu, Modal, type Item } from './ui/controls'
 import { Toolbar, formatItems, fullFormatItems, indent, paragraphStyle } from './ui/Toolbar'
 import { Properties, type PropertyTab } from './ui/Properties'
 import { InsertDialog, SearchDialog, diagramPresets, type InsertRequest } from './ui/InsertDialog'
+import { accentTheme } from './appearance'
 
 const shortcutRows = [
   ['Save document', 'Ctrl + S'], ['Open Markdown file', 'Ctrl + O'], ['Find and replace', 'Ctrl + F'],
@@ -55,6 +56,7 @@ export default function App() {
   const doc = useDocument(notify)
   const { editor } = doc
   const { mode, sidebar, setSidebar, appearance, setAppearance } = useWorkspace()
+  const accents = useMemo(() => accentTheme(appearance.accentColor, appearance.theme), [appearance.accentColor, appearance.theme])
   const split = mode === 'split'
   const source = mode === 'source' || (split && doc.activePane === 'source')
   const ready = !!editor && doc.status !== 'loading'
@@ -345,7 +347,7 @@ export default function App() {
 
   const statusLabel = doc.status === 'loading' ? 'Opening workspace…' : doc.status === 'pending' ? 'Saving draft…' : doc.status === 'unavailable' ? 'Local storage unavailable' : 'Saved locally'
   const StatusIcon = doc.status === 'unavailable' ? CloudOff : doc.status === 'saved' ? Check : LoaderCircle
-  const style = { '--writing-font': fonts[appearance.font], '--writing-size': appearance.fontSize + 'px', '--writing-leading': appearance.lineHeight } as CSSProperties
+  const style = { ...accents, '--writing-font': fonts[appearance.font], '--writing-size': appearance.fontSize + 'px', '--writing-leading': appearance.lineHeight } as CSSProperties
   return <div className="app" data-theme={appearance.theme} style={style}>
     <header className="topbar">
       <div className="brand" aria-label="Folio"><span className="brand-icon"><FileText size={21} strokeWidth={1.9} /></span><span>folio<span className="brand-period">.</span></span></div>
