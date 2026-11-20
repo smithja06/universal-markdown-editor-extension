@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { useEditor } from '@tiptap/react'
-import { EditorState, Selection } from '@tiptap/pm/state'
+import { Extension } from '@tiptap/core'
+import { EditorState, Plugin, Selection, TextSelection } from '@tiptap/pm/state'
 import { closeHistory } from '@tiptap/pm/history'
 import type { EditorView } from '@codemirror/view'
+import type { EditorState as SourceState } from '@codemirror/state'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { createExtensions } from './schema'
 import { nodeViewExtensions } from './nodeViews'
-import { replaceSource } from './SourceEditor'
+import { replaceSource, type SourceRuntime } from './SourceEditor'
+import { useDocumentCollection } from './useDocumentCollection'
 import { sourceToVisual, visualToSource } from './markdownSelection'
 import { validateSource } from './sourceDiagnostics'
 import { visualProjection } from './visualProjection'
@@ -14,18 +17,29 @@ import { splitAnchors, type BlockAnchor } from './splitScroll'
 import { openMarkdown, rebaseMarkdown, setFrontMatter, writeMarkdown, type MarkdownSession } from '../document/markdown'
 import { decodeMarkdown, saveMarkdown, type WritableMarkdownHandle } from '../document/files'
 import { documentInfo, type Heading } from '../document/metadata'
-import { loadWorkspace, newDocument, recentLimit, storeWorkspace, useWorkspace, welcomeSource, type DocumentFile, type EditorMode, type EditorPane } from '../document/workspace'
+import { availableTitle, draftSummary, emptyLayout, newDocument, useWorkspace, welcomeSource, withoutTabs, type DocumentFile, type EditorMode, type EditorPane, type TabView, type WorkspaceLayout } from '../document/workspace'
 import { listVersions, recordVersion, restoreVersion as restoreStoredVersion, versionInterval, versionStorageError, type DocumentVersion, type VersionTrigger } from '../document/versions'
-import { WorkspaceRestoreConflict } from '../document/workspaceStorage'
+import { loadLayout, loadLibrary, recoverDocument, trashDocument, WorkspaceRestoreConflict } from '../document/workspaceStorage'
 
 type LocalStatus = 'loading' | 'pending' | 'saved' | 'unavailable'
 const emptyInfo = { outline: [], statistics: { words: 0, characters: 0, compact: 0, minutes: 0, headings: 0, links: 0, images: 0 } }
 
+interface TabSession {
+  state: EditorState
+  source?: SourceState
+  markdown: MarkdownSession
+  authority: EditorPane
+  issue: string | null
+  history: { document: ProseMirrorNode; source: string }[]
+  paired: { source: string; document: ProseMirrorNode } | null
+}
+
 export function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error) }
 
-export function useDocument(notify: (message: string) => void) {
+export function useDocument(notify: (message: string) => void, visualScroll: RefObject<HTMLDivElement | null>) {
+  const collection = useDocumentCollection()
+  const { workspace, documents, drafts, persisted, writing, enqueue, changeLayout, loadCollection, loadFile, persist, cache: cacheFile, opened, updateSummary, forget } = collection
   const [file, setFile] = useState<DocumentFile>(() => newDocument('Getting started', { source: welcomeSource, lineEnding: '\n', bom: false }))
-  const [recent, setRecent] = useState<DocumentFile[]>([])
   const [info, setInfo] = useState<ReturnType<typeof documentInfo>>(emptyInfo)
   const [metadata, setMetadata] = useState('')
   const [warnings, setWarnings] = useState(0)
@@ -36,8 +50,12 @@ export function useDocument(notify: (message: string) => void) {
   const [previewIssue, setPreviewIssue] = useState<string | null>(null)
   const [historyError, setHistoryError] = useState('')
   const [editorEpoch, setEditorEpoch] = useState(0)
+  const [saveStatuses, setSaveStatuses] = useState<Record<string, LocalStatus>>({})
   const fileRef = useRef(file)
-  const recentRef = useRef<DocumentFile[]>([])
+  const tabSessions = useRef(new Map<string, TabSession>())
+  const sourceRuntime = useRef<SourceRuntime | null>(null)
+  const initialView = useRef<TabView | undefined>(undefined)
+  const pendingScroll = useRef<TabView | undefined>(undefined)
   const sourceView = useRef<EditorView | null>(null)
   const authority = useRef<EditorPane>('visual')
   const active = useRef<EditorPane>('visual')
@@ -51,17 +69,23 @@ export function useDocument(notify: (message: string) => void) {
   const fileHandles = useRef(new Map<string, WritableMarkdownHandle>())
   const visualUpdate = useRef<() => void>(() => {})
   const selectionUpdate = useRef<() => void>(() => {})
-  const writing = useRef(Promise.resolve())
   const timer = useRef<number | undefined>(undefined)
+  const viewTimer = useRef<number | undefined>(undefined)
   const versionTimer = useRef<number | undefined>(undefined)
   const mirrorTimer = useRef<number | undefined>(undefined)
   const editVersion = useRef(0)
-  const revision = useRef(0)
+  const revision = useRef(new Map<string, number>())
+  const saveStatusRef = useRef(new Map<string, LocalStatus>())
   const transition = useRef(0)
+  const openIntent = useRef(0)
   const restoring = useRef(false)
+  const canEdit = useCallback(() => !!workspace.current.activeId && !restoring.current, [workspace])
 
   const editor = useEditor({
-    extensions: createExtensions(nodeViewExtensions),
+    extensions: createExtensions([...nodeViewExtensions, Extension.create({
+      name: 'workspaceEditing',
+      addProseMirrorPlugins: () => [new Plugin({ filterTransaction: transaction => !transaction.docChanged || canEdit() })],
+    })]),
     shouldRerenderOnTransaction: false,
     editorProps: { attributes: { 'aria-label': 'Visual document editor', 'aria-multiline': 'true', role: 'textbox', spellcheck: 'true' } },
     onUpdate: () => visualUpdate.current(),
@@ -104,12 +128,45 @@ export function useDocument(notify: (message: string) => void) {
     setWarnings(value.warnings)
   }, [])
 
-  const rememberRecent = useCallback((next: DocumentFile, records = recentRef.current) => {
-    const files = [next, ...records.filter(item => item.id !== next.id)].slice(0, recentLimit)
-    recentRef.current = files
-    setRecent(files)
-    return files
-  }, [])
+  const markStatus = useCallback((id: string, value: LocalStatus) => {
+    saveStatusRef.current.set(id, value)
+    setSaveStatuses(previous => previous[id] === value ? previous : { ...previous, [id]: value })
+    if (workspace.current.activeId === id) setStatus(value)
+  }, [workspace])
+
+  const saveLayout = useCallback((next: WorkspaceLayout) => {
+    void changeLayout(next).catch(error => notify('Could not save the tab layout. ' + errorMessage(error)))
+  }, [changeLayout, notify])
+
+  const captureView = useCallback((): TabView | undefined => {
+    if (!editor || !workspace.current.activeId) return
+    const previous = workspace.current.tabs.find(tab => tab.id === workspace.current.activeId)
+    const { selection } = editor.state
+    const source = sourceView.current
+    const visual = visualScroll.current
+    const mode = useWorkspace.getState().mode
+    const restoringView = pendingScroll.current?.id === previous?.id ? pendingScroll.current : undefined
+    return {
+      id: workspace.current.activeId, mode, pane: active.current,
+      visual: { anchor: selection.anchor, head: selection.head, top: restoringView?.visual?.top ?? (visual?.clientHeight ? visual.scrollTop : previous?.visual?.top ?? 0), left: restoringView?.visual?.left ?? (visual?.clientWidth ? visual.scrollLeft : previous?.visual?.left ?? 0) },
+      source: source ? { anchor: source.state.selection.main.anchor, head: source.state.selection.main.head,
+        top: restoringView?.source?.top ?? (source.scrollDOM.clientHeight ? source.scrollDOM.scrollTop : previous?.source?.top ?? 0), left: restoringView?.source?.left ?? (source.scrollDOM.clientWidth ? source.scrollDOM.scrollLeft : previous?.source?.left ?? 0) } : previous?.source,
+    }
+  }, [editor, visualScroll, workspace])
+
+  const saveView = useCallback(() => {
+    const view = captureView()
+    if (view) saveLayout({ ...workspace.current, tabs: workspace.current.tabs.map(tab => tab.id === view.id ? view : tab) })
+  }, [captureView, saveLayout, workspace])
+
+  const trackView = useCallback(() => {
+    const id = workspace.current.activeId
+    if (!id || restoring.current || pendingScroll.current?.id === id) return
+    window.clearTimeout(viewTimer.current)
+    viewTimer.current = window.setTimeout(() => {
+      if (!restoring.current && workspace.current.activeId === id) saveView()
+    }, 350)
+  }, [saveView, workspace])
 
   const automaticVersion = useCallback(async (candidate: DocumentFile, trigger: Exclude<VersionTrigger, 'manual'>) => {
     try {
@@ -122,28 +179,28 @@ export function useDocument(notify: (message: string) => void) {
   }, [])
 
   const queueVersion = useCallback((candidate: DocumentFile, trigger: Exclude<VersionTrigger, 'manual'>) => {
-    const attempt = writing.current.then(() => automaticVersion(candidate, trigger))
-    writing.current = attempt.then(() => undefined)
-    return attempt
-  }, [automaticVersion])
+    return enqueue(() => automaticVersion(candidate, trigger))
+  }, [automaticVersion, enqueue])
 
-  const persistDraft = useCallback((next: DocumentFile, records = recentRef.current, checkpoints?: DocumentFile[]) => {
-    const files = rememberRecent(next, records)
-    const ticket = ++revision.current
-    const saved = writing.current.then(() => storeWorkspace({ currentId: next.id, files }))
+  const persistDraft = useCallback((next: DocumentFile, trigger: Exclude<VersionTrigger, 'manual'> = 'interval', words?: number, created = false) => {
+    const ticket = (revision.current.get(next.id) ?? 0) + 1
+    revision.current.set(next.id, ticket)
+    markStatus(next.id, 'pending')
+    const saved = persist(next, words, created)
     void saved.then(
-      () => { if (ticket === revision.current) setStatus('saved') },
+      () => { if (ticket === revision.current.get(next.id)) markStatus(next.id, 'saved') },
       error => {
-        if (ticket !== revision.current) return
-        setStatus('unavailable')
+        if (ticket !== revision.current.get(next.id)) return
+        markStatus(next.id, 'unavailable')
         if (error instanceof WorkspaceRestoreConflict) notify(error.message)
       },
     )
-    writing.current = saved.then(async () => {
-      if (!checkpoints) await automaticVersion(next, 'interval')
-      else for (const file of checkpoints) await automaticVersion(file, 'checkpoint')
-    }, () => undefined)
-  }, [automaticVersion, notify, rememberRecent])
+    void enqueue(async () => {
+      await saved
+      await automaticVersion(next, trigger)
+    }).catch(() => undefined)
+    return saved
+  }, [automaticVersion, enqueue, markStatus, notify, persist])
 
   const flush = useCallback((checkpoint = false) => {
     if (!editor || !session.current || restoring.current) return
@@ -154,7 +211,9 @@ export function useDocument(notify: (message: string) => void) {
       const next = { ...projected, updated: Math.max(Date.now(), projected.updated + 1) }
       replaceFile(next)
       setVisualDirty(false)
-      persistDraft(next, recentRef.current, checkpoint ? [next] : undefined)
+      const words = documentInfo(authority.current === 'source' ? parseSource(next.source).document : editor.state.doc).statistics.words
+      void persistDraft(next, checkpoint ? 'checkpoint' : 'interval', words)
+      saveView()
       if (useWorkspace.getState().mode === 'source' && !issue.current) summarize(parseSource(next.source))
       else if (!issue.current) {
         setInfo(documentInfo(editor.state.doc))
@@ -166,7 +225,7 @@ export function useDocument(notify: (message: string) => void) {
       setStatus('unavailable')
       notify(errorMessage(error))
     }
-  }, [editor, notify, parseSource, persistDraft, project, replaceFile, summarize])
+  }, [editor, notify, parseSource, persistDraft, project, replaceFile, saveView, summarize])
 
   const scheduleVersionCheck = useCallback(function checkLater(delay: number) {
     const id = fileRef.current.id
@@ -183,15 +242,17 @@ export function useDocument(notify: (message: string) => void) {
   }, [flush, project, queueVersion])
 
   const schedule = useCallback(() => {
-    revision.current++
-    setStatus('pending')
+    const id = fileRef.current.id
+    revision.current.set(id, (revision.current.get(id) ?? 0) + 1)
+    markStatus(id, 'pending')
     window.clearTimeout(timer.current)
     timer.current = window.setTimeout(flush, 480)
     if (versionTimer.current === undefined) scheduleVersionCheck(versionInterval)
-  }, [flush, scheduleVersionCheck])
+  }, [flush, markStatus, scheduleVersionCheck])
 
   selectionUpdate.current = () => {
     if (!editor || useWorkspace.getState().mode === 'source') return
+    trackView()
     const selection = editor.state.selection
     let position = selection.from
     for (let depth = selection.$from.depth; depth > 0; depth--) {
@@ -275,7 +336,7 @@ export function useDocument(notify: (message: string) => void) {
     window.clearTimeout(mirrorTimer.current)
     if (useWorkspace.getState().mode !== 'split') return
     mirrorTimer.current = window.setTimeout(() => {
-      if (version !== editVersion.current || useWorkspace.getState().mode !== 'split') return
+      if (restoring.current || version !== editVersion.current || useWorkspace.getState().mode !== 'split') return
       try { synchronize(false, true) }
       catch (error) {
         if (origin === 'source') setIssue(errorMessage(error))
@@ -285,13 +346,13 @@ export function useDocument(notify: (message: string) => void) {
   }, [notify, schedule, setIssue, synchronize])
 
   visualUpdate.current = () => {
-    if (useWorkspace.getState().mode === 'source' || issue.current) return
+    if (!canEdit() || useWorkspace.getState().mode === 'source' || issue.current) return
     if (editor) setMetadata(editor.state.doc.attrs.frontMatter ?? '')
     queueEdit('visual')
   }
 
   const activatePane = useCallback((pane: EditorPane) => {
-    if (restoring.current) return false
+    if (restoring.current || !workspace.current.activeId) return false
     const mode = useWorkspace.getState().mode
     if (mode !== 'split') return mode === pane && !(pane === 'visual' && issue.current)
     try {
@@ -306,36 +367,162 @@ export function useDocument(notify: (message: string) => void) {
       notify(errorMessage(error))
       return false
     }
-  }, [notify, synchronize])
+  }, [notify, synchronize, workspace])
+
+  const restoreScroll = useCallback((view: TabView) => {
+    pendingScroll.current = view
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (pendingScroll.current !== view || workspace.current.activeId !== view.id) return
+      const visual = visualScroll.current
+      const source = sourceView.current?.scrollDOM
+      if (visual) { visual.scrollTop = view.visual?.top ?? 0; visual.scrollLeft = view.visual?.left ?? 0 }
+      if (source) { source.scrollTop = view.source?.top ?? 0; source.scrollLeft = view.source?.left ?? 0 }
+      pendingScroll.current = undefined
+    }))
+  }, [visualScroll, workspace])
+
+  const applySourceSelection = useCallback((view: TabView) => {
+    const source = sourceView.current
+    if (source && view.source) {
+      const { anchor, head } = view.source
+      source.dispatch({ selection: { anchor: Math.min(anchor, source.state.doc.length), head: Math.min(head, source.state.doc.length) } })
+    }
+  }, [])
+
+  const registerSource = useCallback((runtime: SourceRuntime | null) => {
+    sourceRuntime.current?.view.scrollDOM.removeEventListener('scroll', trackView)
+    sourceRuntime.current = runtime
+    sourceView.current = runtime?.view ?? null
+    runtime?.view.scrollDOM.addEventListener('scroll', trackView, { passive: true })
+    const view = initialView.current
+    if (runtime && view?.id === workspace.current.activeId) {
+      applySourceSelection(view)
+      restoreScroll(view)
+    }
+  }, [applySourceSelection, restoreScroll, trackView, workspace])
+
+  const showTab = useCallback((next: DocumentFile, view: TabView) => {
+    if (!editor) return
+    const resumed = tabSessions.current.get(next.id)
+    tabSessions.current.delete(next.id)
+    const baseline = resumed?.markdown ?? openMarkdown(next.source, editor.schema)
+    transition.current++
+    editVersion.current++
+    parsed.current = null
+    cache.current = null
+    anchors.current = null
+    history.current = resumed?.history ?? []
+    authority.current = resumed?.authority ?? (view.mode === 'source' ? 'source' : 'visual')
+    active.current = view.mode === 'split' ? view.pane ?? 'visual' : view.mode
+    useWorkspace.getState().setMode(view.mode)
+    setActivePane(active.current)
+    setIssue(resumed?.issue ?? null)
+    if (resumed) {
+      editor.view.updateState(resumed.state)
+      session.current = baseline
+      paired.current = resumed.paired ? { ...resumed.paired, version: editVersion.current } : null
+      setActiveHeading('')
+    } else {
+      applySession(baseline)
+      if (view.visual) {
+        const { doc, tr } = editor.state
+        editor.view.dispatch(tr.setSelection(TextSelection.between(doc.resolve(Math.min(view.visual.anchor, doc.content.size)), doc.resolve(Math.min(view.visual.head, doc.content.size)))).setMeta('addToHistory', false))
+      }
+    }
+    replaceFile(next)
+    const visible = view.mode === 'source' ? openMarkdown(next.source, editor.schema) : baseline
+    summarize(visible, view.mode === 'source' ? visible.document : editor.state.doc)
+    if (view.mode !== 'source') {
+      setMetadata(editor.state.doc.attrs.frontMatter ?? '')
+      let preserved = 0
+      editor.state.doc.descendants(node => { if (node.type.name === 'rawBlock' || node.type.name === 'rawInline') preserved++ })
+      setWarnings(preserved)
+    }
+    if (sourceRuntime.current) {
+      sourceRuntime.current.apply(resumed?.source ?? next.source)
+      if (!resumed?.source) applySourceSelection(view)
+    }
+    initialView.current = view
+    restoreScroll(view)
+    setVisualDirty(false)
+    setHistoryError('')
+    setEditorEpoch(value => value + 1)
+    setStatus(saveStatusRef.current.get(next.id) ?? 'saved')
+  }, [applySession, applySourceSelection, editor, replaceFile, restoreScroll, setIssue, summarize])
+
+  const stashTab = useCallback(() => {
+    const id = workspace.current.activeId
+    if (!id || !editor || !session.current) return
+    const pending = timer.current !== undefined
+    if (useWorkspace.getState().mode === 'split') synchronize(false, true)
+    const current = project()
+    window.clearTimeout(timer.current)
+    window.clearTimeout(viewTimer.current)
+    window.clearTimeout(versionTimer.current)
+    window.clearTimeout(mirrorTimer.current)
+    timer.current = undefined
+    versionTimer.current = undefined
+    // Preserve the exact draft and both histories before reusing either editor view.
+    tabSessions.current.set(id, { state: editor.state, source: sourceView.current?.state, markdown: session.current,
+      authority: authority.current, issue: issue.current, history: history.current, paired: paired.current })
+    const known = drafts.current.get(id)
+    if (pending || !known || current.source !== known.source || current.title !== known.title || saveStatusRef.current.get(id) === 'unavailable') {
+      const next = { ...current, updated: Math.max(Date.now(), current.updated + 1) }
+      const words = documentInfo(authority.current === 'source' ? parseSource(next.source).document : editor.state.doc).statistics.words
+      void persistDraft(next, 'checkpoint', words)
+      replaceFile(next)
+    } else void queueVersion(current, 'checkpoint')
+    return captureView()
+  }, [captureView, drafts, editor, parseSource, persistDraft, project, queueVersion, replaceFile, synchronize, workspace])
 
   useEffect(() => {
     if (!editor) return
     let active = true
     const restore = async () => {
-      let stored: Awaited<ReturnType<typeof loadWorkspace>>
-      let storageError = false
-      try { stored = await loadWorkspace() } catch { storageError = true }
-      if (!active) return
-      const loaded = stored?.files.find(item => item.id === stored?.currentId) ?? fileRef.current
-      replaceFile(loaded)
-      recentRef.current = stored?.files ?? [loaded]
-      setRecent(recentRef.current)
-      useWorkspace.getState().setMode('visual')
-      authority.current = 'visual'
-      applySession(openMarkdown(loaded.source, editor.schema))
-      setStatus(storageError ? 'unavailable' : stored ? 'saved' : 'pending')
-      if (!stored && !storageError) persistDraft(loaded, [loaded], [loaded])
-      else if (!storageError) queueVersion(loaded, 'checkpoint')
+      try {
+        const [items, stored] = await Promise.all([loadLibrary(), loadLayout()])
+        if (!active) return
+        const live = new Set(items.filter(item => item.deletedAt === undefined).map(item => item.id))
+        if (stored || items.length) {
+          const value = stored ?? emptyLayout
+          const invalid = new Set([...value.tabs, ...value.closed].filter(tab => !live.has(tab.id)).map(tab => tab.id))
+          const allowed = withoutTabs(value, invalid, false)
+          loadCollection(items, allowed)
+          const view = allowed.tabs.find(tab => tab.id === allowed.activeId)
+          if (!view) { setStatus('saved'); return }
+          const loaded = await loadFile(view.id)
+          if (!active) return
+          if (!loaded) { saveLayout(withoutTabs(allowed, new Set([view.id]), false)); setStatus('saved'); return }
+          showTab(loaded, view)
+          void queueVersion(loaded, 'checkpoint')
+          return
+        }
+        const current = fileRef.current
+        const first: TabView = { id: current.id, mode: 'visual' }
+        loadCollection([], emptyLayout)
+        void persistDraft(current, 'checkpoint', documentInfo(openMarkdown(current.source, editor.schema).document).statistics.words, true)
+        void opened(current.id)?.catch(() => undefined)
+        saveLayout({ activeId: current.id, tabs: [first], closed: [] })
+        showTab(current, first)
+      } catch {
+        if (!active) return
+        const current = fileRef.current
+        const view: TabView = { id: current.id, mode: 'visual' }
+        loadCollection([draftSummary(current)], { activeId: current.id, tabs: [view], closed: [] })
+        cacheFile(current, undefined, true)
+        showTab(current, view)
+        markStatus(current.id, 'unavailable')
+      }
     }
     void restore().catch(error => { if (active) { setStatus('unavailable'); notify(errorMessage(error)) } })
     return () => { active = false }
-  }, [editor, applySession, notify, persistDraft, queueVersion, replaceFile])
+  }, [editor, cacheFile, loadCollection, loadFile, markStatus, notify, opened, persistDraft, queueVersion, saveLayout, showTab])
 
   useEffect(() => {
     const onHidden = (event: Event) => {
       if (restoring.current || !session.current || (event.type !== 'pagehide' && document.visibilityState !== 'hidden')) return
       if (timer.current !== undefined) flush(true)
-      else queueVersion(project(), 'checkpoint')
+      else { void queueVersion(project(), 'checkpoint'); saveView() }
     }
     document.addEventListener('visibilitychange', onHidden)
     window.addEventListener('pagehide', onHidden)
@@ -343,20 +530,21 @@ export function useDocument(notify: (message: string) => void) {
       document.removeEventListener('visibilitychange', onHidden)
       window.removeEventListener('pagehide', onHidden)
       window.clearTimeout(timer.current)
+      window.clearTimeout(viewTimer.current)
       window.clearTimeout(mirrorTimer.current)
       window.clearTimeout(versionTimer.current)
     }
-  }, [flush, project, queueVersion])
+  }, [flush, project, queueVersion, saveView])
 
   const setSource = useCallback((source: string) => {
-    if (useWorkspace.getState().mode === 'visual') return
+    if (useWorkspace.getState().mode === 'visual' || !workspace.current.activeId || restoring.current) return
     fileRef.current = { ...fileRef.current, source }
     queueEdit('source')
-  }, [queueEdit])
+  }, [queueEdit, workspace])
 
   function switchMode(mode: EditorMode, focus = true) {
     const previous = useWorkspace.getState().mode
-    if (!editor || !session.current || mode === previous) return
+    if (!editor || !session.current || mode === previous || restoring.current) return
     try {
       const next = project()
       const view = sourceView.current
@@ -378,6 +566,7 @@ export function useDocument(notify: (message: string) => void) {
       useWorkspace.getState().setMode(mode)
       setVisualDirty(false)
       if (timer.current !== undefined) flush()
+      else saveView()
       const token = ++transition.current
       if (focus) requestAnimationFrame(() => {
         if (token !== transition.current || next.id !== fileRef.current.id || useWorkspace.getState().mode !== mode) return
@@ -392,57 +581,148 @@ export function useDocument(notify: (message: string) => void) {
           }
           editor.view.focus()
         }
+        saveView()
       })
     } catch (error) { notify(errorMessage(error)) }
   }
 
-  function openFile(next: DocumentFile) {
-    if (!editor || restoring.current) return
+  function displayFile(next: DocumentFile, created = false) {
+    if (!editor || restoring.current) throw new Error('Wait for the current document operation to finish.')
+    if (workspace.current.activeId === next.id) return
+    const outgoing = stashTab()
+    const current = workspace.current
+    const view = current.tabs.find(tab => tab.id === next.id) ?? current.closed.find(tab => tab.id === next.id) ?? { id: next.id, mode: 'visual' as const }
+    if (created) {
+      const words = documentInfo(openMarkdown(next.source, editor.schema).document).statistics.words
+      void persistDraft(next, 'checkpoint', words, true)
+    } else void queueVersion(next, 'checkpoint')
+    void opened(next.id)?.catch(() => undefined)
+    const tabs = current.tabs.map(tab => tab.id === outgoing?.id ? outgoing : tab)
+    if (!tabs.some(tab => tab.id === next.id)) tabs.push(view)
+    saveLayout({ activeId: next.id, tabs, closed: current.closed.filter(tab => tab.id !== next.id) })
+    showTab(next, view)
+  }
+
+  async function openDocument(id: string) {
+    const intent = ++openIntent.current
+    if (workspace.current.activeId === id) return
+    const previous = drafts.current.get(id)
+    const next = previous ?? await loadFile(id)
+    if (intent !== openIntent.current) return
+    if (!next || documents.current.get(id)?.deletedAt !== undefined) throw new Error('This document is unavailable.')
+    displayFile(next)
+  }
+
+  function createDocument() {
+    openIntent.current++
+    displayFile(newDocument(availableTitle('Untitled document', documents.current.values())), true)
+  }
+
+  async function renameDocument(id: string, title: string) {
+    const nextTitle = title.trim().slice(0, 155) || 'Untitled document'
+    const stored = drafts.current.get(id) ?? await loadFile(id)
+    if (!stored) throw new Error('This document could not be found.')
+    const current = workspace.current.activeId === id ? project() : stored
+    if (current.title === nextTitle) return
+    const next = { ...current, title: nextTitle, updated: Math.max(Date.now(), current.updated + 1) }
+    if (workspace.current.activeId === id) replaceFile(next)
+    await persistDraft(next)
+    if (!workspace.current.tabs.some(tab => tab.id === id)) forget(id)
+  }
+
+  async function duplicateDocument(id: string) {
+    const intent = ++openIntent.current
+    const original = workspace.current.activeId === id ? project() : await loadFile(id)
+    if (!original) throw new Error('This document could not be found.')
+    const { source, lineEnding, bom, original: encoding } = original
+    const extension = /\.(md|markdown)$/i.exec(original.title)?.[0] ?? ''
+    const stem = extension ? original.title.slice(0, -extension.length) : original.title
+    const copy = newDocument(availableTitle(stem + ' copy' + extension, documents.current.values()), { source, bom, lineEnding, original: encoding })
+    if (intent === openIntent.current) displayFile(copy, true)
+    else await persistDraft(copy, 'checkpoint', undefined, true)
+    if (!workspace.current.tabs.some(tab => tab.id === id)) forget(id)
+  }
+
+  async function removeTabs(ids: Set<string>, deleting?: string) {
+    if (restoring.current) throw new Error('Wait for the current document operation to finish.')
+    openIntent.current++
+    const before = workspace.current
+    const wasActive = before.activeId !== null && ids.has(before.activeId)
+    if (!wasActive && timer.current !== undefined) flush()
+    const view = wasActive ? stashTab() : captureView()
+    restoring.current = true
     try {
-      const previous = project()
-      const pending = timer.current !== undefined
-      const baseline = openMarkdown(next.source, editor.schema)
-      window.clearTimeout(timer.current)
-      window.clearTimeout(mirrorTimer.current)
-      window.clearTimeout(versionTimer.current)
-      editVersion.current++
-      timer.current = undefined
-      versionTimer.current = undefined
-      history.current = []
-      transition.current++
-      authority.current = 'visual'
-      active.current = 'visual'
-      setActivePane('visual')
-      setIssue(null)
-      applySession(baseline)
-      useWorkspace.getState().setMode('visual')
-      replaceFile(next)
-      setHistoryError('')
-      setVisualDirty(false)
-      const last = pending ? { ...previous, updated: Math.max(Date.now(), previous.updated + 1) } : previous
-      persistDraft(next, [last, ...recentRef.current.filter(item => item.id !== previous.id)], last.id === next.id ? [next] : [last, next])
-    } catch (error) { notify(errorMessage(error)) }
+      await writing.current
+      for (const id of ids) if (saveStatusRef.current.get(id) === 'unavailable') throw new Error('This draft could not be saved locally. Keep its tab open and download a copy of your changes.')
+      const next = withoutTabs({ ...before, tabs: before.tabs.map(tab => tab.id === view?.id ? view : tab) }, ids, !deleting)
+      const successor = wasActive ? next.tabs.find(tab => tab.id === next.activeId) : undefined
+      const file = successor ? await loadFile(successor.id) : undefined
+      if (successor && !file) throw new Error('The next document could not be opened.')
+      if (deleting) {
+        updateSummary(await enqueue(() => trashDocument(deleting)))
+        saveLayout(next)
+      } else await changeLayout(next, true)
+      if (successor && file) {
+        void opened(file.id)?.catch(() => undefined)
+        showTab(file, successor)
+      } else if (wasActive) {
+        transition.current++
+        session.current = null
+        paired.current = null
+        cache.current = null
+        setInfo(emptyInfo)
+        setMetadata('')
+        setIssue(null)
+        useWorkspace.getState().setMode('visual')
+        setStatus('saved')
+        setVisualDirty(false)
+        setEditorEpoch(value => value + 1)
+      }
+      for (const id of ids) {
+        tabSessions.current.delete(id)
+        forget(id)
+        if (deleting) fileHandles.current.delete(id)
+      }
+    } finally { restoring.current = false }
+  }
+
+  function closeTab(id: string) { return removeTabs(new Set([id])) }
+  function closeOtherTabs(id: string) { return removeTabs(new Set(workspace.current.tabs.filter(tab => tab.id !== id).map(tab => tab.id))) }
+  function deleteDocument(id: string) { return removeTabs(new Set([id]), id) }
+  function reopenTab() {
+    const previous = workspace.current.closed[0]
+    return previous ? openDocument(previous.id) : Promise.resolve()
+  }
+  async function restoreDocument(id: string) {
+    updateSummary(await enqueue(() => recoverDocument(id)))
   }
 
   async function importFile(input: File) {
     if (!/\.(md|markdown)$/i.test(input.name)) { notify('Choose a .md or .markdown file.'); return }
     try {
       const decoded = decodeMarkdown(new Uint8Array(await input.arrayBuffer()))
-      openFile(newDocument(input.name.replace(/\.md$/i, ''), decoded))
+      const title = availableTitle(input.name.replace(/\.md$/i, ''), documents.current.values())
+      openIntent.current++
+      displayFile(newDocument(title, decoded), true)
       notify('Opened ' + input.name)
     } catch (error) { notify('Could not open the UTF-8 file. ' + errorMessage(error)) }
   }
 
   async function save(options: { saveAs?: boolean; download?: boolean } = {}) {
     try {
+      if (!workspace.current.activeId) return
       const next = project()
       const result = await saveMarkdown(next, next.title, { ...options, handle: fileHandles.current.get(next.id) })
       if (result.handle) fileHandles.current.set(next.id, result.handle)
-      if (next.id === fileRef.current.id && !options.download && !restoring.current) {
-        const current = project()
-        const updated = { ...current, savedSource: next.source, savedTitle: next.title, updated: Math.max(Date.now(), current.updated + 1) }
-        replaceFile(updated)
-        persistDraft(updated)
+      if (!options.download && !restoring.current) {
+        const stored = next.id === workspace.current.activeId ? undefined : await loadFile(next.id)
+        const current = next.id === workspace.current.activeId ? project() : drafts.current.get(next.id) ?? stored
+        if (current && current.historyEpoch === next.historyEpoch && documents.current.get(next.id)?.deletedAt === undefined) {
+          const updated = { ...current, savedSource: next.source, savedTitle: next.title, updated: Math.max(Date.now(), current.updated + 1) }
+          if (workspace.current.activeId === next.id) replaceFile(updated)
+          await persistDraft(updated)
+          if (!workspace.current.tabs.some(tab => tab.id === next.id)) forget(next.id)
+        }
       }
       notify(result.handle ? 'Saved to ' + result.filename : 'Downloaded ' + result.filename)
     } catch (error) {
@@ -450,13 +730,11 @@ export function useDocument(notify: (message: string) => void) {
     }
   }
 
-  const loadVersions = useCallback((id: string) => writing.current.then(() => listVersions(id)), [])
+  const loadVersions = useCallback((id: string) => writing.current.then(() => listVersions(id)), [writing])
 
   async function createVersion() {
     const current = project()
-    const created = writing.current.then(() => recordVersion(current, 'manual'))
-    writing.current = created.then(() => undefined, () => undefined)
-    const result = await created
+    const result = await enqueue(() => recordVersion(current, 'manual'))
     if (fileRef.current.id === current.id) setHistoryError('')
     return result
   }
@@ -470,26 +748,31 @@ export function useDocument(notify: (message: string) => void) {
     window.clearTimeout(timer.current)
     timer.current = undefined
     restoring.current = true
-    const commit = writing.current.then(() => restoreStoredVersion(current, version.id, recentRef.current))
-    writing.current = commit.then(() => undefined, () => undefined)
+    openIntent.current++
+    const words = documentInfo(baseline.document).statistics.words
+    const commit = enqueue(() => restoreStoredVersion(current, version.id, persisted.current.get(current.id), words))
     try {
       const next = await commit
       window.clearTimeout(mirrorTimer.current)
       window.clearTimeout(versionTimer.current)
       versionTimer.current = undefined
       editVersion.current++
-      revision.current++
+      revision.current.set(next.id, (revision.current.get(next.id) ?? 0) + 1)
       transition.current++
       history.current = []
       authority.current = 'visual'
       setIssue(null)
       applySession(baseline)
       replaceFile(next)
-      rememberRecent(next)
+      sourceRuntime.current?.apply(next.source)
+      cacheFile(next, words)
+      persisted.current.set(next.id, next)
+      tabSessions.current.delete(next.id)
+      saveView()
       setEditorEpoch(value => value + 1)
       setVisualDirty(false)
       setHistoryError('')
-      setStatus('saved')
+      markStatus(next.id, 'saved')
     } catch (error) {
       if (pending) schedule()
       throw error
@@ -499,6 +782,7 @@ export function useDocument(notify: (message: string) => void) {
   }
 
   function changeTitle(title: string) {
+    if (!canEdit()) return
     const normalized = title.trim() || 'Untitled document'
     if (normalized === fileRef.current.title) return
     replaceFile({ ...fileRef.current, title: normalized })
@@ -567,11 +851,20 @@ export function useDocument(notify: (message: string) => void) {
     }
   }
 
+  const dirty = visualDirty || file.source !== file.savedSource || file.title !== file.savedTitle
+  const tabs = collection.layout.tabs.map(tab => {
+    const summary = documents.current.get(tab.id)
+    const current = tab.id === collection.layout.activeId
+    return { ...tab, title: current ? file.title : summary?.title ?? 'Untitled document', dirty: current ? dirty : Boolean(summary?.dirty), status: saveStatuses[tab.id] }
+  })
+  const recent = collection.library.filter(item => item.openedAt !== undefined && item.deletedAt === undefined).sort((first, second) => second.openedAt! - first.openedAt!).slice(0, 15)
+
   return {
-    editor, file, recent, status, sourceView, setSource, info, metadata, warnings, activeHeading,
+    editor, file, recent, status, sourceView, registerSource, setSource, canEdit, trackView, info, metadata, warnings, activeHeading,
     activePane, activatePane, previewIssue, scrollAnchors,
-    dirty: visualDirty || file.source !== file.savedSource || file.title !== file.savedTitle,
+    dirty, tabs, library: collection.library, layout: collection.layout,
     editorEpoch, historyError, loadVersions, createVersion, restoreHistoryVersion,
-    project, switchMode, openFile, importFile, save, changeTitle, changeMetadata, jumpToHeading,
+    project, switchMode, createDocument, openDocument, renameDocument, duplicateDocument, deleteDocument, restoreDocument, closeTab, closeOtherTabs, reopenTab,
+    importFile, save, changeTitle, changeMetadata, jumpToHeading,
   }
 }

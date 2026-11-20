@@ -1,8 +1,8 @@
 import type { MarkdownFile } from './files'
 import type { DocumentFile } from './workspace'
 import {
-  readWorkspaceRecord, requestResult, sessionsStore, versionContentStore, versionKindIndex,
-  versionOrderIndex, versionsStore, workspaceTransaction, writeWorkspaceRecord,
+  documentsStore, draftStores, getDraft, getSummary, putDraft, requestResult, requireLiveDocument,
+  versionContentStore, versionKindIndex, versionOrderIndex, versionsStore, workspaceTransaction,
 } from './workspaceStorage'
 
 export const versionInterval = 60_000
@@ -89,7 +89,10 @@ async function appendVersion(transaction: IDBTransaction, file: DocumentFile, tr
 }
 
 export function recordVersion(file: DocumentFile, trigger: VersionTrigger, now = Date.now()) {
-  return workspaceTransaction(historyStores, 'readwrite', transaction => appendVersion(transaction, file, trigger, now))
+  return workspaceTransaction([...historyStores, documentsStore], 'readwrite', async transaction => {
+    requireLiveDocument(await getSummary(transaction, file.id))
+    return appendVersion(transaction, file, trigger, now)
+  })
 }
 
 export function listVersions(documentId: string): Promise<VersionSummary[]> {
@@ -111,15 +114,16 @@ export function readVersion(documentId: string, id: string) {
   return workspaceTransaction(historyStores, 'readonly', transaction => versionIn(transaction, documentId, id))
 }
 
-export function restoreVersion(current: DocumentFile, id: string, recent: DocumentFile[]) {
-  return workspaceTransaction([...historyStores, sessionsStore], 'readwrite', async transaction => {
+export function restoreVersion(current: DocumentFile, id: string, known?: DocumentFile, words?: number) {
+  return workspaceTransaction([...historyStores, ...draftStores], 'readwrite', async transaction => {
     const version = await versionIn(transaction, current.id, id)
     if (!version) throw new Error('This version is no longer available.')
-    const saved = await readWorkspaceRecord(transaction)
-    const persisted = saved?.files.find(file => file.id === current.id)
-    const known = recent.find(file => file.id === current.id)
-    const changedElsewhere = persisted && !sameDraft(persisted, current) && (persisted.updated > current.updated ||
-      (persisted.updated === current.updated && known?.updated === current.updated && !sameDraft(persisted, known)))
+    const summary = await getSummary(transaction, current.id)
+    requireLiveDocument(summary)
+    const persisted = await getDraft(transaction, current.id)
+    const changedElsewhere = persisted && !sameDraft(persisted, current) && (known
+      ? (persisted.updated !== known.updated || !sameDraft(persisted, known))
+      : persisted.updated > current.updated)
     if (persisted && (persisted.historyEpoch !== current.historyEpoch || changedElsewhere)) {
       throw new Error('This draft changed in another Folio tab. Reopen the document to restore from history.')
     }
@@ -130,7 +134,7 @@ export function restoreVersion(current: DocumentFile, id: string, recent: Docume
       updated: Math.max(now, current.updated + 1, (persisted?.updated ?? -1) + 1),
       historyEpoch: crypto.randomUUID(),
     }
-    await writeWorkspaceRecord(transaction, { currentId: current.id, files: [restored, ...recent.filter(file => file.id !== current.id)] }, saved, current.id)
+    await putDraft(transaction, restored, summary, words)
     return restored
   }, { durability: 'strict' })
 }

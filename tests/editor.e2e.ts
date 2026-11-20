@@ -34,6 +34,8 @@ test('real editor edits both modes, saves its draft, and restores it after reloa
   await expect(sourceEditor(page)).toContainText('A **strong** word.')
   await expect(page.getByText('Saved locally', { exact: true })).toBeVisible()
   await page.reload()
+  await expect(sourceEditor(page)).toContainText('- [x] An open item')
+  await page.getByRole('button', { name: 'Visual Editor', exact: true }).click()
   await expect(visualEditor(page).getByRole('heading', { name: 'Source title' })).toBeVisible()
   await expect(visualEditor(page).getByRole('checkbox')).toBeChecked()
 })
