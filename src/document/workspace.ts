@@ -2,8 +2,6 @@ import { create } from 'zustand'
 import type { MarkdownFile } from './files'
 import { forestAccent, normalizeAccent, type AccentColor, type Theme } from '../appearance'
 
-export { loadWorkspace, recentLimit, storeWorkspace } from './workspaceStorage'
-
 export interface DocumentFile extends MarkdownFile {
   id: string
   title: string
@@ -86,4 +84,47 @@ export const useWorkspace = create<Workspace>(set => ({
   }),
 }))
 
-export interface WorkspaceSnapshot { currentId: string; files: DocumentFile[] }
+export interface DocumentSummary {
+  id: string
+  title: string
+  createdAt: number
+  updated: number
+  openedAt?: number
+  deletedAt?: number
+  words?: number
+  dirty: boolean
+}
+
+export interface TabView {
+  id: string
+  mode: EditorMode
+  pane?: EditorPane
+  visual?: { anchor: number; head: number; top: number; left: number }
+  source?: { anchor: number; head: number; top: number; left: number }
+}
+
+export interface WorkspaceLayout { activeId: string | null; tabs: TabView[]; closed: TabView[] }
+export const emptyLayout: WorkspaceLayout = { activeId: null, tabs: [], closed: [] }
+
+export function draftSummary(file: DocumentFile, existing?: DocumentSummary, words?: number): DocumentSummary {
+  return { ...existing, id: file.id, title: file.title, createdAt: existing?.createdAt ?? file.updated,
+    updated: file.updated, words: words ?? existing?.words, dirty: file.source !== file.savedSource || file.title !== file.savedTitle }
+}
+
+export function withoutTabs(layout: WorkspaceLayout, ids: Set<string>, remember: boolean): WorkspaceLayout {
+  const index = layout.tabs.findIndex(tab => tab.id === layout.activeId)
+  const removed = layout.tabs.filter(tab => ids.has(tab.id))
+  const tabs = layout.tabs.filter(tab => !ids.has(tab.id))
+  const activeId = layout.activeId && !ids.has(layout.activeId) ? layout.activeId : tabs[Math.min(Math.max(index, 0), tabs.length - 1)]?.id ?? null
+  const closed = [...(remember ? [...removed].reverse() : []), ...layout.closed.filter(tab => !ids.has(tab.id))].slice(0, 20)
+  return { activeId, tabs, closed }
+}
+
+export function availableTitle(requested: string, existing: Iterable<DocumentSummary>) {
+  const titles = new Set(Array.from(existing).filter(item => item.deletedAt === undefined).map(item => item.title.normalize('NFKC').toLowerCase().replace(/\.(md|markdown)$/i, '')))
+  const extension = /\.(?:md|markdown)$/i.exec(requested)?.[0] ?? ''
+  const stem = extension ? requested.slice(0, -extension.length) : requested
+  let title = stem
+  for (let suffix = 2; titles.has(title.normalize('NFKC').toLowerCase()); suffix++) title = `${stem} (${suffix})`
+  return title + extension
+}

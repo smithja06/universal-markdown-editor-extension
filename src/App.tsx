@@ -15,7 +15,7 @@ import { dividerWidth, useSplitLayout } from './editor/useSplitLayout'
 import { scrollToSplitHeading, useSplitScroll } from './editor/splitScroll'
 import { calloutKinds } from './editor/schema'
 import { embeddedAttachments } from './document/files'
-import { newDocument, useWorkspace, type EditorMode, type EditorPane } from './document/workspace'
+import { useWorkspace, type EditorMode, type EditorPane } from './document/workspace'
 import type { Heading } from './document/metadata'
 import { IconButton, Menu, Modal, type Item } from './ui/controls'
 import { Toolbar, formatItems, fullFormatItems, indent, paragraphStyle } from './ui/Toolbar'
@@ -23,6 +23,8 @@ import { Properties, type PropertyTab } from './ui/Properties'
 import { InsertDialog, SearchDialog, diagramPresets, type InsertRequest } from './ui/InsertDialog'
 import { accentTheme } from './appearance'
 import { VersionHistory } from './ui/VersionHistory'
+import { DocumentLibrary } from './ui/DocumentLibrary'
+import { DocumentTabs } from './ui/DocumentTabs'
 
 const shortcutRows = [
   ['Save document', 'Ctrl + S'], ['Open Markdown file', 'Ctrl + O'], ['Find and replace', 'Ctrl + F'],
@@ -54,37 +56,47 @@ export default function App() {
     window.clearTimeout(toastTimer.current)
     toastTimer.current = window.setTimeout(() => setToast(''), 4300)
   }, [])
-  const doc = useDocument(notify)
+  const visualScroll = useRef<HTMLDivElement>(null)
+  const doc = useDocument(notify, visualScroll)
   const { editor } = doc
   const { mode, sidebar, setSidebar, appearance, setAppearance } = useWorkspace()
   const accents = useMemo(() => accentTheme(appearance.accentColor, appearance.theme), [appearance.accentColor, appearance.theme])
   const split = mode === 'split'
   const source = mode === 'source' || (split && doc.activePane === 'source')
-  const ready = !!editor && doc.status !== 'loading'
+  const started = !!editor && doc.status !== 'loading'
+  const ready = started && !!doc.layout.activeId
   const editable = ready && (source || !doc.previewIssue)
   const splitLayout = useSplitLayout(appearance.splitRatio, ratio => setAppearance({ splitRatio: ratio }))
-  const visualScroll = useRef<HTMLDivElement>(null)
   useSplitScroll(split && ready && appearance.syncScroll && !doc.previewIssue, editor, visualScroll, doc.sourceView, doc.scrollAnchors, doc.file.id)
   const [tab, setTab] = useState<PropertyTab>('Outline')
   const [width, setWidth] = useState(304)
   const [location, setLocation] = useState<SourceLocation>({ line: 1, column: 1 })
   const [request, setRequest] = useState<InsertRequest | null>(null)
-  const [dialog, setDialog] = useState<'search' | 'shortcuts' | 'recent' | 'history' | 'emoji' | null>(null)
+  const [dialog, setDialog] = useState<'search' | 'shortcuts' | 'recent' | 'history' | 'library' | 'emoji' | null>(null)
   const [slash, setSlash] = useState<SlashState | null>(null)
   const [slashIndex, setSlashIndex] = useState(0)
   const [dragging, setDragging] = useState(false)
   const [grip, setGrip] = useState<Grip | null>(null)
   const draggedBlock = useRef<number | undefined>(undefined)
   const fileInput = useRef<HTMLInputElement>(null)
+  const titleInput = useRef<HTMLInputElement>(null)
   const imageInput = useRef<HTMLInputElement>(null)
   const editorIdentity = useRef('')
   editorIdentity.current = doc.file.id + ':' + doc.editorEpoch
   const undoAvailable = doc.sourceView.current ? undoDepth(doc.sourceView.current.state) > 0 : false
   const redoAvailable = doc.sourceView.current ? redoDepth(doc.sourceView.current.state) > 0 : false
 
+  useEffect(() => {
+    draggedBlock.current = undefined
+    setGrip(null)
+    setSlash(null)
+  }, [doc.editorEpoch])
+
+  const report = (operation: Promise<void>) => { void operation.catch(error => notify(errorMessage(error))) }
+
   function newFile() {
-    doc.openFile(newDocument())
-    requestAnimationFrame(() => editor?.commands.focus())
+    try { doc.createDocument(); requestAnimationFrame(() => editor?.commands.focus()) }
+    catch (error) { notify(errorMessage(error)) }
   }
 
   function openLink(preset?: string) { if (!source && doc.activatePane('visual')) setRequest({ name: 'link', preset }) }
@@ -200,7 +212,7 @@ export default function App() {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || request || dialog) return
       const key = event.key.toLowerCase()
       if (key === 's') { event.preventDefault(); if (ready) void doc.save({ saveAs: event.shiftKey }); return }
-      if (key === 'o') { event.preventDefault(); if (ready) fileInput.current?.click(); return }
+      if (key === 'o') { event.preventDefault(); if (started) fileInput.current?.click(); return }
       if (key === 'f') { event.preventDefault(); showSearch(); return }
       if (!source && editor?.isFocused) {
         if (key === 'k') { event.preventDefault(); openLink() }
@@ -268,6 +280,7 @@ export default function App() {
   function acceptDrop(event: DragEvent) {
     if (!event.dataTransfer.files.length) return
     event.preventDefault()
+    titleInput.current?.blur()
     setDragging(false)
     const files = Array.from(event.dataTransfer.files)
     const markdown = files.find(file => /\.(md|markdown)$/i.test(file.name))
@@ -308,11 +321,12 @@ export default function App() {
   const fileItems: Item[] = [
     { label: 'New document', icon: <FilePlus2 size={16} />, run: newFile },
     { label: 'Open Markdown…', icon: <FolderOpen size={16} />, shortcut: 'Ctrl+O', run: () => fileInput.current?.click() },
+    { label: 'Document library', icon: <FolderOpen size={16} />, run: () => setDialog('library') },
     { label: 'Recent documents', icon: <FileText size={16} />, run: () => setDialog('recent') },
-    { label: 'Version History', icon: <History size={16} />, run: () => setDialog('history') },
+    { label: 'Version History', icon: <History size={16} />, disabled: !ready, run: () => setDialog('history') },
     { label: '', divider: true },
-    { label: 'Save', icon: <Download size={16} />, shortcut: 'Ctrl+S', run: () => void doc.save() },
-    { label: 'Save as…', icon: <ArrowDownToLine size={16} />, shortcut: 'Ctrl+Shift+S', run: () => void doc.save({ saveAs: true }) },
+    { label: 'Save', icon: <Download size={16} />, shortcut: 'Ctrl+S', disabled: !ready, run: () => void doc.save() },
+    { label: 'Save as…', icon: <ArrowDownToLine size={16} />, shortcut: 'Ctrl+Shift+S', disabled: !ready, run: () => void doc.save({ saveAs: true }) },
   ]
   const editItems: Item[] = [
     { label: 'Undo', icon: <Undo2 size={16} />, shortcut: 'Ctrl+Z', run: undo, disabled: source ? !undoAvailable : !editor?.can().undo() },
@@ -355,19 +369,21 @@ export default function App() {
     { label: 'Copy rendered text', icon: <Copy size={16} />, run: () => void copy('text') },
   ]
 
-  const statusLabel = doc.status === 'loading' ? 'Opening workspace…' : doc.status === 'pending' ? 'Saving draft…' : doc.status === 'unavailable' ? 'Local storage unavailable' : 'Saved locally'
+  const statusLabel = doc.status === 'loading' ? 'Opening workspace…' : !ready ? 'No open documents' : doc.status === 'pending' ? 'Saving draft…' : doc.status === 'unavailable' ? 'Local storage unavailable' : 'Saved locally'
   const StatusIcon = doc.status === 'unavailable' ? CloudOff : doc.status === 'saved' ? Check : LoaderCircle
   const style = { ...accents, '--writing-font': fonts[appearance.font], '--writing-size': appearance.fontSize + 'px', '--writing-leading': appearance.lineHeight } as CSSProperties
-  return <div className="app" data-theme={appearance.theme} style={style}>
+  return <div className="app" data-theme={appearance.theme} style={style} onClickCapture={event => {
+    if (document.activeElement === titleInput.current && event.target !== titleInput.current) titleInput.current?.blur()
+  }}>
     <header className="topbar">
       <div className="brand" aria-label="Folio"><span className="brand-icon"><FileText size={21} strokeWidth={1.9} /></span><span>folio<span className="brand-period">.</span></span></div>
       <div className="topbar-divider" />
       <div className="document-identity">
-        <div className="title-line"><input aria-label="Document name" key={doc.file.id + doc.file.title} defaultValue={doc.file.title} maxLength={155} disabled={!ready} onBlur={event => doc.changeTitle(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { event.currentTarget.value = doc.file.title; event.currentTarget.blur() } }} style={{ width: Math.min(240, Math.max(120, doc.file.title.length * 8.6 + 17)) }} />
+        {ready ? <div className="title-line"><input ref={titleInput} aria-label="Document name" key={doc.file.id + doc.file.title} defaultValue={doc.file.title} maxLength={155} onBlur={event => doc.changeTitle(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { event.currentTarget.value = doc.file.title; event.currentTarget.blur() } }} style={{ width: Math.min(240, Math.max(120, doc.file.title.length * 8.6 + 17)) }} />
           {doc.dirty && <span className="unsaved-dot" aria-label="Changes since last file save" title="Changes since last file save" />}
-        </div>
+        </div> : <span className="workspace-title">Workspace</span>}
         <nav className="menubar" aria-label="Document menu">
-          <Menu label="File" items={fileItems} disabled={!ready} />
+          <Menu label="File" items={fileItems} disabled={!started} />
           <Menu label="Edit" items={editItems} disabled={!ready} />
           <Menu label="View" items={viewItems} disabled={!ready} />
           <Menu label="Insert" items={actions} disabled={!editable || source} />
@@ -375,6 +391,7 @@ export default function App() {
         </nav>
       </div>
       <div className="topbar-actions">
+        <IconButton label="Open document library" disabled={!started} onClick={() => setDialog('library')}><FolderOpen size={18} /></IconButton>
         <span className={'save-status status-' + doc.status} role="status" title={statusLabel}><StatusIcon size={14} /><span>{statusLabel}</span></span>
         <div className="topbar-action-divider" />
         <div className="mode-selector" role="group" aria-label="Editing mode">
@@ -385,18 +402,22 @@ export default function App() {
         <Menu label="Export" items={exportItems} align="right" disabled={!ready} className="export-menu"><Download size={16} /><span>Export</span><ChevronDown size={12} /></Menu>
       </div>
     </header>
+    <DocumentTabs tabs={doc.tabs} activeId={doc.layout.activeId} canReopen={doc.layout.closed.length > 0} disabled={!started}
+      select={id => report(doc.openDocument(id))} close={id => report(doc.closeTab(id))} closeOthers={id => report(doc.closeOtherTabs(id))} reopen={() => report(doc.reopenTab())} create={newFile} />
     <Toolbar editor={editor} source={source} ready={editable} undo={undo} redo={redo} insertItems={actions} openLink={() => openLink()} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} />
     <div className="workspace">
-      <main ref={splitLayout.container} className={['canvas', split && 'split-mode', split && splitLayout.stacked && 'split-stacked', splitLayout.dragging && 'split-dragging', appearance.width === 'full' && 'full-width'].filter(Boolean).join(' ')}
+      <main ref={splitLayout.container} id="document-panel" role={ready ? 'tabpanel' : undefined} aria-labelledby={doc.layout.activeId ? 'document-tab-' + doc.layout.activeId : undefined} className={['canvas', split && 'split-mode', split && splitLayout.stacked && 'split-stacked', splitLayout.dragging && 'split-dragging', appearance.width === 'full' && 'full-width'].filter(Boolean).join(' ')}
         style={split ? { '--visual-share': splitLayout.ratio + 'fr', '--source-share': (1 - splitLayout.ratio) + 'fr', '--divider-width': dividerWidth + 'px' } as CSSProperties : undefined}
         onDragOverCapture={event => { if (draggedBlock.current !== undefined && event.dataTransfer.types.includes(blockDragType)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move' } }}
         onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDragging(true) } }}
         onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false) }} onDropCapture={dropBlock} onDrop={acceptDrop}>
-        {!ready && <div className="opening-state"><LoaderCircle size={20} className="spinner" /> Opening workspace</div>}
+        {!started ? <div className="opening-state"><LoaderCircle size={20} className="spinner" /> Opening workspace</div> : !ready && <div className="empty-workspace">
+          <FileText size={27} aria-hidden="true" /><h2>No open documents</h2><div><button type="button" className="primary-button" onClick={newFile}>New document</button><button type="button" className="secondary-button" onClick={() => setDialog('library')}>Browse library</button></div>
+        </div>}
         <section className="visual-pane" aria-label="Visual pane" hidden={!ready || mode === 'source'}>
           {split && <div className="split-pane-header"><Pilcrow size={15} /><span>Visual Editor</span></div>}
           {doc.previewIssue && <div className="preview-notice" role="status"><CircleAlert size={15} /><span><strong>Preview paused.</strong> {doc.previewIssue}</span></div>}
-          <div className="visual-scroll" ref={visualScroll} onScroll={() => { if (grip) setGrip(null) }}>
+          <div className="visual-scroll" ref={visualScroll} onScroll={() => { if (grip) setGrip(null); doc.trackView() }}>
             <div className="visual-shell">
               <div className="canvas-strip"><span><FileText size={15} /> Markdown document</span><button type="button" className="width-toggle" onClick={() => setAppearance({ width: appearance.width === 'full' ? 'page' : 'full' })} title="Toggle document width">{appearance.width === 'page' ? <Maximize2 size={14} /> : <Minimize2 size={14} />}{appearance.width === 'page' ? 'Page width' : 'Full width'}</button></div>
               <article className="paper" onPointerDownCapture={event => { if (split && !doc.activatePane('visual')) event.preventDefault() }}
@@ -430,12 +451,12 @@ export default function App() {
           <div className="source-pane-content" onPointerDownCapture={event => { if (split && !doc.activatePane('source')) event.preventDefault() }}
             onFocusCapture={() => { if (split) doc.activatePane('source') }}
             onBeforeInputCapture={event => { if (!doc.activatePane('source')) event.preventDefault() }}>
-            {ready && <SourceEditor key={doc.file.id + ':' + doc.editorEpoch} initial={doc.file.source} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} onChange={doc.setSource} onLocation={setLocation} onReady={view => { doc.sourceView.current = view }} />}
+            {started && <SourceEditor initial={doc.file.source} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} canEdit={doc.canEdit} onChange={doc.setSource} onLocation={location => { setLocation(location); doc.trackView() }} onReady={doc.registerSource} />}
           </div>
         </section>
         {dragging && <div className="drop-overlay" aria-hidden="true"><Upload size={29} /><strong>Drop a Markdown file or image</strong></div>}
       </main>
-      {sidebar && <Properties tab={tab} setTab={setTab} headings={doc.info.outline} active={doc.activeHeading || doc.info.outline[0]?.anchor || ''} statistics={doc.info.statistics} key={doc.file.id}
+      {ready && sidebar && <Properties tab={tab} setTab={setTab} headings={doc.info.outline} active={doc.activeHeading || doc.info.outline[0]?.anchor || ''} statistics={doc.info.statistics} key={doc.file.id}
         metadata={doc.metadata} onMetadata={doc.changeMetadata} close={() => setSidebar(false)} jump={jump} width={width} setWidth={value => setWidth(Math.min(430, Math.max(250, value)))} />}
     </div>
     <footer className="statusbar">
@@ -451,7 +472,8 @@ export default function App() {
     {request && editor && <InsertDialog request={request} editor={editor} anchors={doc.info.outline} close={() => setRequest(null)} chooseLocalImage={() => imageInput.current?.click()} />}
     {dialog === 'search' && editor && <SearchDialog editor={editor} close={() => { setDialog(null); editor.commands.focus() }} />}
     {dialog === 'shortcuts' && <Modal title="Keyboard shortcuts" close={() => setDialog(null)}><dl className="shortcuts">{shortcutRows.map(([label, keys]) => <div key={label}><dt>{label}</dt><dd><kbd>{keys}</kbd></dd></div>)}</dl></Modal>}
-    {dialog === 'recent' && <Modal title="Recent documents" close={() => setDialog(null)}><div className="recent-list">{doc.recent.map(file => <button key={file.id} type="button" onClick={() => { if (file.id !== doc.file.id) doc.openFile(file); setDialog(null) }}><FileText size={17} /><span>{file.title}</span>{file.id === doc.file.id && <small>Current</small>}</button>)}</div></Modal>}
+    {dialog === 'recent' && <Modal title="Recent documents" close={() => setDialog(null)}><div className="recent-list">{doc.recent.map(file => <button key={file.id} type="button" onClick={() => report(doc.openDocument(file.id).then(() => setDialog(null)))}><FileText size={17} /><span>{file.title}</span>{file.id === doc.layout.activeId && <small>Current</small>}</button>)}{!doc.recent.length && <p className="muted">Recently opened documents will appear here.</p>}</div></Modal>}
+    {dialog === 'library' && <DocumentLibrary items={doc.library} tabs={doc.tabs.map(item => item.id)} close={() => setDialog(null)} create={doc.createDocument} open={doc.openDocument} rename={doc.renameDocument} duplicate={doc.duplicateDocument} remove={doc.deleteDocument} restore={doc.restoreDocument} />}
     {dialog === 'history' && <VersionHistory key={doc.file.id} documentId={doc.file.id} title={doc.file.title} theme={appearance.theme} automaticError={doc.historyError} load={doc.loadVersions} create={doc.createVersion} restore={async version => { await doc.restoreHistoryVersion(version); notify('Version restored') }} close={() => setDialog(null)} />}
     {dialog === 'emoji' && <Modal title="Insert emoji" close={() => setDialog(null)}><div className="emoji-grid">
       {['😀', '👋', '✨', '💡', '✅', '📌', '🗂️', '📝', '📚', '🔎', '🌿', '🎯', '🚀', '⚠️', '❤️', '🙌', '🎉', '📎', '⭐', '🔗'].map(emoji => <button type="button" key={emoji} onClick={() => { editor?.chain().focus().insertContent(emoji).run(); setDialog(null) }}>{emoji}</button>)}

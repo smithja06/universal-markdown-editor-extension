@@ -284,7 +284,7 @@ export function rebaseMarkdown(session: MarkdownSession, previous: ProseMirrorNo
 
 function needsBlockHtml(node: ProseMirrorNode): boolean {
   const { textAlign, displayStyle, lineSpacing, paragraphSpacing, indent, caption, width, align, colspan, rowspan, colwidth } = node.attrs
-  return Boolean(textAlign || displayStyle || lineSpacing || paragraphSpacing || indent || caption || width || align || colspan > 1 || rowspan > 1 || colwidth)
+  return Boolean((textAlign && textAlign !== 'left') || displayStyle || lineSpacing || paragraphSpacing || indent || caption || width || align || colspan > 1 || rowspan > 1 || colwidth)
     || node.children.some(needsBlockHtml)
 }
 
@@ -400,12 +400,20 @@ function portableBlock(node: ProseMirrorNode, htmlMarks: boolean): MarkdownNode 
 
 function withoutIdentity(node: ProseMirrorNode): unknown {
   const { sourceId: _sourceId, ...attrs } = node.attrs
-  return { type: node.type.name, attrs, text: node.text, marks: node.marks.map(normalizeStyleMarks), children: node.children.map(withoutIdentity) }
+  const layoutAttrs = attrs.textAlign === 'left' ? { ...attrs, textAlign: null } : attrs
+  return { type: node.type.name, attrs: layoutAttrs, text: node.text, marks: node.marks.map(normalizeStyleMarks), children: node.children.map(withoutIdentity) }
+}
+
+function matchesSourceBlock(previous: ProseMirrorNode, node: ProseMirrorNode): boolean {
+  if (previous.eq(node)) return true
+  // Explicitly choosing the default must preserve existing Markdown spelling.
+  return previous.attrs.textAlign === null && node.attrs.textAlign === 'left'
+    && node.type.create({ ...node.attrs, textAlign: null }, node.content, node.marks).eq(previous)
 }
 
 function tryTextPatch(block: SourceBlock, node: ProseMirrorNode, references: string): string | undefined {
   if (node.type !== block.node.type || node.childCount !== block.node.childCount || (node.type.name !== 'paragraph' && node.type.name !== 'heading')) return undefined
-  if (isLegacyBlock(block.raw)) return undefined
+  if (isLegacyBlock(block.raw) || (block.node.attrs.textAlign === 'left' && !needsBlockHtml(node))) return undefined
   const differences = block.node.children.map((before, index) => ({ before, after: node.child(index) })).filter(({ before, after }) => !before.eq(after))
   if (differences.length !== 1) return undefined
   const [{ before, after }] = differences
@@ -457,7 +465,7 @@ export function writeMarkdown(session: MarkdownSession, document: ProseMirrorNod
   const lookup = (node: ProseMirrorNode) => originalNodes.get(node) ?? original.get(node.attrs.sourceId)
   for (const node of document.children) {
     const block = lookup(node)
-    if (block?.node.eq(node) && !owner.has(block)) owner.set(block, node)
+    if (block && matchesSourceBlock(block.node, node) && !owner.has(block)) owner.set(block, node)
   }
   const used = new Set<SourceBlock>()
   const first = session.blocks[0]
@@ -472,7 +480,7 @@ export function writeMarkdown(session: MarkdownSession, document: ProseMirrorNod
     const assigned = lookup(node)
     const block = assigned && !used.has(assigned) && (!owner.has(assigned) || owner.get(assigned) === node) ? assigned : undefined
     if (block) used.add(block)
-    const unchanged = block?.node.eq(node) ?? false
+    const unchanged = !!block && matchesSourceBlock(block.node, node)
     if (!unchanged && isEmptyParagraph(node)) return []
     const raw = block && unchanged ? block.raw : (block && tryTextPatch(block, node, references)) ?? writeBlock(node, references)
     return [{ raw, node, block, unchanged }]

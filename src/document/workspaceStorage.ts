@@ -1,14 +1,15 @@
-import type { WorkspaceSnapshot } from './workspace'
+import { draftSummary, emptyLayout, withoutTabs, type DocumentFile, type DocumentSummary, type WorkspaceLayout } from './workspace'
 
-export const recentLimit = 15
 export const sessionsStore = 'sessions'
+export const documentsStore = 'documents'
+export const draftsStore = 'document-drafts'
 export const versionsStore = 'document-versions'
 export const versionContentStore = 'version-content'
 export const versionOrderIndex = 'document-date'
 export const versionKindIndex = 'document-kind-date'
 
 export class WorkspaceRestoreConflict extends Error {
-  constructor() { super('A version was restored in another Folio tab. Download any edits from this tab before reloading.') }
+  constructor() { super('This document changed in another Folio tab. Download any edits from this tab before reloading.') }
 }
 
 let database: Promise<IDBDatabase> | undefined
@@ -17,7 +18,7 @@ function openDatabase() {
   if (blockedUpgrade) return Promise.reject(blockedUpgrade)
   if (database) return database
   const opening = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('folio-workspace', 2)
+    const request = indexedDB.open('folio-workspace', 3)
     request.onupgradeneeded = event => {
       const db = request.result
       if (event.oldVersion < 1) db.createObjectStore(sessionsStore)
@@ -26,6 +27,24 @@ function openDatabase() {
         versions.createIndex(versionOrderIndex, ['documentId', 'createdAt'], { unique: true })
         versions.createIndex(versionKindIndex, ['documentId', 'kind', 'createdAt'])
         db.createObjectStore(versionContentStore)
+      }
+      if (event.oldVersion < 3) {
+        const documents = db.createObjectStore(documentsStore, { keyPath: 'id' })
+        const drafts = db.createObjectStore(draftsStore, { keyPath: 'id' })
+        const sessions = request.transaction!.objectStore(sessionsStore)
+        const existing = sessions.get('current')
+        existing.onsuccess = () => {
+          const legacy = existing.result as { currentId: string; files: DocumentFile[] } | undefined
+          if (!legacy) return
+          for (const file of legacy.files) {
+            documents.put({ ...draftSummary(file), openedAt: file.updated })
+            drafts.put(file)
+          }
+          if (legacy.files.some(file => file.id === legacy.currentId)) {
+            sessions.put({ activeId: legacy.currentId, tabs: [{ id: legacy.currentId, mode: 'visual' }], closed: [] } satisfies WorkspaceLayout, 'layout')
+          }
+          sessions.delete('current')
+        }
       }
     }
     request.onblocked = () => {
@@ -85,32 +104,103 @@ export async function workspaceTransaction<T>(stores: string[], mode: IDBTransac
   }
 }
 
-export function readWorkspaceRecord(transaction: IDBTransaction): Promise<WorkspaceSnapshot | undefined> {
-  return requestResult(transaction.objectStore(sessionsStore).get('current'))
+export function getSummary(transaction: IDBTransaction, id: string): Promise<DocumentSummary | undefined> {
+  return requestResult(transaction.objectStore(documentsStore).get(id))
 }
 
-export function writeWorkspaceRecord(transaction: IDBTransaction, snapshot: WorkspaceSnapshot, saved?: WorkspaceSnapshot, restoredId?: string) {
-  const versions = new Map((saved?.files ?? []).map(file => [file.id, file]))
-  for (const file of snapshot.files) {
-    const previous = versions.get(file.id)
-    if (previous && previous.historyEpoch !== file.historyEpoch && file.id !== restoredId) {
-      if (file.id === snapshot.currentId) throw new WorkspaceRestoreConflict()
-      continue
-    }
-    if (!previous || file.updated >= previous.updated) versions.set(file.id, file)
-  }
-  const active = versions.get(snapshot.currentId)
-  const others = [...versions.values()].filter(file => file.id !== snapshot.currentId).sort((a, b) => b.updated - a.updated)
-  const files = active ? [active, ...others.slice(0, recentLimit - 1)] : others.slice(0, recentLimit)
-  return requestResult(transaction.objectStore(sessionsStore).put({ currentId: snapshot.currentId, files }, 'current'))
+export function getDraft(transaction: IDBTransaction, id: string): Promise<DocumentFile | undefined> {
+  return requestResult(transaction.objectStore(draftsStore).get(id))
 }
 
-export function loadWorkspace() {
-  return workspaceTransaction([sessionsStore], 'readonly', readWorkspaceRecord)
+export function requireLiveDocument(summary?: DocumentSummary): asserts summary is DocumentSummary {
+  if (!summary) throw new Error('This document could not be found.')
+  if (summary.deletedAt !== undefined) throw new Error('This document is in Trash. Restore it before editing.')
 }
 
-export function storeWorkspace(snapshot: WorkspaceSnapshot) {
-  return workspaceTransaction([sessionsStore], 'readwrite', async transaction => {
-    await writeWorkspaceRecord(transaction, snapshot, await readWorkspaceRecord(transaction))
+export async function putDraft(transaction: IDBTransaction, file: DocumentFile, summary: DocumentSummary, words?: number) {
+  const next = draftSummary(file, summary, words)
+  await requestResult(transaction.objectStore(draftsStore).put(file))
+  await requestResult(transaction.objectStore(documentsStore).put(next))
+  return next
+}
+
+export const draftStores = [documentsStore, draftsStore]
+
+export function loadLibrary(): Promise<DocumentSummary[]> {
+  return workspaceTransaction([documentsStore], 'readonly', transaction => requestResult(transaction.objectStore(documentsStore).getAll()))
+}
+
+export function loadLayout(): Promise<WorkspaceLayout | undefined> {
+  return workspaceTransaction([sessionsStore], 'readonly', transaction => requestResult(transaction.objectStore(sessionsStore).get('layout')))
+}
+
+export function storeLayout(layout: WorkspaceLayout) {
+  return workspaceTransaction([sessionsStore, documentsStore], 'readwrite', async transaction => {
+    const ids = Array.from(new Set([...layout.tabs, ...layout.closed].map(tab => tab.id)))
+    const summaries = await Promise.all(ids.map(id => getSummary(transaction, id)))
+    const invalid = new Set(ids.filter((_, index) => !summaries[index] || summaries[index].deletedAt !== undefined))
+    const next = withoutTabs(layout, invalid, false)
+    await requestResult(transaction.objectStore(sessionsStore).put(next, 'layout'))
+  })
+}
+
+export function readDraft(id: string) {
+  return workspaceTransaction(draftStores, 'readonly', async transaction => {
+    const summary = await getSummary(transaction, id)
+    if (!summary || summary.deletedAt !== undefined) return
+    return getDraft(transaction, id)
+  })
+}
+
+export function insertDraft(file: DocumentFile, words?: number) {
+  return workspaceTransaction(draftStores, 'readwrite', async transaction => {
+    const summary = draftSummary(file, undefined, words)
+    await requestResult(transaction.objectStore(documentsStore).add(summary))
+    await requestResult(transaction.objectStore(draftsStore).add(file))
+    return summary
+  })
+}
+
+export function writeDraft(file: DocumentFile, words?: number, expected?: DocumentFile) {
+  return workspaceTransaction(draftStores, 'readwrite', async transaction => {
+    const summary = await getSummary(transaction, file.id)
+    requireLiveDocument(summary)
+    const previous = await getDraft(transaction, file.id)
+    const changed = previous && expected && (previous.updated !== expected.updated || previous.source !== expected.source || previous.title !== expected.title ||
+      previous.savedSource !== expected.savedSource || previous.savedTitle !== expected.savedTitle)
+    if (!previous || previous.historyEpoch !== file.historyEpoch || previous.updated > file.updated || changed) throw new WorkspaceRestoreConflict()
+    return putDraft(transaction, file, summary, words)
+  })
+}
+
+export function touchDocument(id: string, openedAt: number) {
+  return workspaceTransaction([documentsStore], 'readwrite', async transaction => {
+    const summary = await getSummary(transaction, id)
+    requireLiveDocument(summary)
+    const next = { ...summary, openedAt: Math.max(summary.openedAt ?? 0, openedAt) }
+    await requestResult(transaction.objectStore(documentsStore).put(next))
+    return next
+  })
+}
+
+export function trashDocument(id: string) {
+  return workspaceTransaction([documentsStore, sessionsStore], 'readwrite', async transaction => {
+    const summary = await getSummary(transaction, id)
+    requireLiveDocument(summary)
+    const next = { ...summary, deletedAt: Date.now() }
+    await requestResult(transaction.objectStore(documentsStore).put(next))
+    const sessions = transaction.objectStore(sessionsStore)
+    const layout: WorkspaceLayout = await requestResult(sessions.get('layout')) ?? emptyLayout
+    await requestResult(sessions.put(withoutTabs(layout, new Set([id]), false), 'layout'))
+    return next
+  })
+}
+
+export function recoverDocument(id: string) {
+  return workspaceTransaction(draftStores, 'readwrite', async transaction => {
+    const summary = await getSummary(transaction, id)
+    const file = await getDraft(transaction, id)
+    if (!summary || !file || summary.deletedAt === undefined) throw new Error('This document could not be found in Trash.')
+    return putDraft(transaction, { ...file, historyEpoch: crypto.randomUUID() }, { ...summary, deletedAt: undefined })
   })
 }

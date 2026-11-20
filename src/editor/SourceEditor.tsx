@@ -35,9 +35,12 @@ interface Props {
   lineNumberDisplay: boolean
   wordWrap: boolean
   onChange(value: string): void
+  canEdit(): boolean
   onLocation(location: SourceLocation): void
-  onReady(view: EditorView | null): void
+  onReady(runtime: SourceRuntime | null): void
 }
+
+export interface SourceRuntime { view: EditorView; apply(value: string | EditorState): void }
 
 export function replaceSource(view: EditorView | null, source: string, origin: 'visual' | 'metadata', recordHistory = true) {
   if (!view) return
@@ -73,11 +76,15 @@ export function SourceEditor(props: Props) {
       ...(latest.current.lineNumberDisplay ? [lineNumbers(), highlightActiveLineGutter()] : []),
       ...(latest.current.wordWrap ? [EditorView.lineWrapping] : []),
     ]
-    const editor = new EditorView({
-      parent: container.current,
-      state: EditorState.create({
-        doc: latest.current.initial,
+    const reportLocation = (state: EditorState) => {
+      const head = state.selection.main.head
+      const line = state.doc.lineAt(head)
+      latest.current.onLocation({ line: line.number, column: head - line.from + 1 })
+    }
+    const createState = (doc: string) => EditorState.create({
+        doc,
         extensions: [
+          EditorState.transactionFilter.of(transaction => !transaction.docChanged || latest.current.canEdit() ? transaction : []),
           settings.current.of(configuration()), history(), highlightActiveLine(), highlightSelectionMatches(),
           markdown({ base: markdownLanguage, extensions: [GFM] }), syntaxHighlighting(syntax), bracketMatching(), closeBrackets(), indentOnInput(),
           autocompletion({ addToOptions: [], override: [context => {
@@ -92,17 +99,17 @@ export function SourceEditor(props: Props) {
             if (update.docChanged && update.transactions.some(transaction => !transaction.isUserEvent('folio.visual'))) {
               latest.current.onChange(update.state.doc.toString())
             }
-            if (update.selectionSet || update.docChanged) {
-              const head = update.state.selection.main.head
-              const line = update.state.doc.lineAt(head)
-              latest.current.onLocation({ line: line.number, column: head - line.from + 1 })
-            }
+            if (update.selectionSet || update.docChanged) reportLocation(update.state)
           }),
         ],
-      }),
     })
+    const editor = new EditorView({ parent: container.current, state: createState(latest.current.initial) })
     view.current = editor
-    latest.current.onReady(editor)
+    latest.current.onReady({ view: editor, apply(value) {
+      editor.setState(typeof value === 'string' ? createState(value) : value)
+      if (typeof value !== 'string') editor.dispatch({ effects: settings.current.reconfigure(configuration()) })
+      reportLocation(editor.state)
+    } })
     return () => { latest.current.onReady(null); view.current = null; editor.destroy() }
   }, [])
 

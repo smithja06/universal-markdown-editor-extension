@@ -58,7 +58,7 @@ test('automatic and manual versions deduplicate, preview read-only, and survive 
   await expect(history(page).getByRole('status').filter({ hasText: 'already saved' })).toBeVisible()
   await expect(versions(page)).toHaveCount(2)
   await page.reload()
-  await expect(visual(page).getByRole('heading', { name: 'Project notes' })).toBeVisible()
+  await expect(source(page)).toContainText('# Project notes')
   await menu(page, 'Version History')
   await expect(versions(page)).toHaveCount(2)
   await versions(page).first().click()
@@ -128,7 +128,7 @@ test('a failed history write is visible and a failed restore preserves the curre
     Reflect.set(window, 'failRestoreWrite', () => {
       IDBObjectStore.prototype.add = add
       IDBObjectStore.prototype.put = function (this: IDBObjectStore, value, key) {
-        if (this.name === 'sessions') throw new DOMException('Quota exceeded', 'QuotaExceededError')
+        if (this.name === 'document-drafts') throw new DOMException('Quota exceeded', 'QuotaExceededError')
         return put.call(this, value, key)
       }
     })
@@ -145,7 +145,7 @@ test('a failed history write is visible and a failed restore preserves the curre
   await history(page).getByRole('button', { name: 'Close dialog' }).click()
   await expect(source(page)).toContainText('Keep this current draft')
   await page.reload()
-  await expect(visual(page).getByRole('heading', { name: 'Keep this current draft' })).toBeVisible()
+  await expect(source(page)).toContainText('# Keep this current draft')
   await menu(page, 'Version History')
   await expect(versions(page).filter({ hasText: 'Recovery' })).toHaveCount(0)
 })
@@ -164,7 +164,7 @@ test('upgrades a version-one workspace and checkpoints the outgoing document und
   await history(page).getByRole('button', { name: 'Close dialog' }).click()
   await menu(page, 'Recent documents')
   await page.getByRole('dialog', { name: 'Recent documents' }).getByRole('button', { name: 'Legacy file' }).click()
-  await expect(visual(page)).toContainText('Kept when opening another document.')
+  await expect(source(page)).toContainText('Kept when opening another document.')
   await page.setViewportSize({ width: 430, height: 780 })
   await menu(page, 'Version History')
   await expect(versions(page)).toHaveCount(2)
