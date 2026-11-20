@@ -1,15 +1,15 @@
 import { useEffect, useRef } from 'react'
 import { Compartment, EditorState, Transaction } from '@codemirror/state'
 import { EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from '@codemirror/view'
-import { defaultKeymap, history, historyKeymap, indentWithTab, isolateHistory } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap, indentWithTab, isolateHistory, redo } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { GFM } from '@lezer/markdown'
 import { bracketMatching, HighlightStyle, indentOnInput, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
-import { linter, lintGutter, lintKeymap, type Diagnostic } from '@codemirror/lint'
-import { readMetadata } from '../document/metadata'
+import { linter, lintGutter, lintKeymap } from '@codemirror/lint'
+import { validateSource } from './sourceDiagnostics'
 
 export interface SourceLocation { line: number; column: number }
 
@@ -30,28 +30,6 @@ const quickSnippets = [
   { label: 'Table', apply: '| Column 1 | Column 2 |\n| --- | --- |\n| Value | Value |' },
 ]
 
-function validateSource(text: string): Diagnostic[] {
-  const issues: Diagnostic[] = []
-  const yaml = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/.exec(text)
-  if (yaml) {
-    const error = readMetadata(yaml[1]).error
-    if (error) issues.push({ from: 0, to: Math.max(yaml[0].length - 1, 0), severity: 'error', message: error })
-  }
-  let opening: { char: string; length: number; from: number } | undefined
-  let offset = 0
-  for (const line of text.split('\n')) {
-    const fence = /^ {0,3}([`]{3,}|~{3,})(.*)$/.exec(line)
-    if (fence) {
-      const token = fence[1]
-      if (opening && opening.char === token[0] && token.length >= opening.length && !fence[2].trim()) opening = undefined
-      else if (!opening && (token[0] !== '`' || !fence[2].includes('`'))) opening = { char: token[0], length: token.length, from: offset }
-    }
-    offset += line.length + 1
-  }
-  if (opening) issues.push({ from: opening.from, to: opening.from + 3, severity: 'warning', message: 'This opening fence continues to the end of the document.' })
-  return issues
-}
-
 interface Props {
   initial: string
   lineNumberDisplay: boolean
@@ -61,7 +39,7 @@ interface Props {
   onReady(view: EditorView | null): void
 }
 
-export function replaceSource(view: EditorView | null, source: string, origin: 'visual' | 'metadata') {
+export function replaceSource(view: EditorView | null, source: string, origin: 'visual' | 'metadata', recordHistory = true) {
   if (!view) return
   const previous = view.state.doc.toString()
   if (previous === source) return
@@ -75,7 +53,10 @@ export function replaceSource(view: EditorView | null, source: string, origin: '
   }
   view.dispatch({
     changes: { from: start, to: beforeEnd, insert: source.slice(start, afterEnd) },
-    annotations: [isolateHistory.of('full'), Transaction.userEvent.of(origin === 'visual' ? 'folio.visual' : 'folio.metadata')],
+    annotations: [
+      ...(recordHistory ? [isolateHistory.of('full')] : [Transaction.addToHistory.of(false)]),
+      Transaction.userEvent.of(origin === 'visual' ? 'folio.visual' : 'folio.metadata'),
+    ],
   })
 }
 
@@ -104,7 +85,7 @@ export function SourceEditor(props: Props) {
             if (!word && !context.explicit) return null
             return { from: word?.from ?? context.pos, options: quickSnippets }
           }] }),
-          keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap, ...completionKeymap, ...lintKeymap, indentWithTab]),
+          keymap.of([{ key: 'Mod-Shift-z', run: redo, preventDefault: true }, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap, ...completionKeymap, ...lintKeymap, indentWithTab]),
           linter(current => validateSource(current.state.doc.toString()), { delay: 400 }), lintGutter(),
           EditorView.contentAttributes.of({ 'aria-label': 'Markdown source editor', 'aria-multiline': 'true' }),
           EditorView.updateListener.of(update => {

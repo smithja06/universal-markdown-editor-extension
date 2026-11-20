@@ -8,10 +8,13 @@ import { createExtensions } from './schema'
 import { nodeViewExtensions } from './nodeViews'
 import { replaceSource } from './SourceEditor'
 import { sourceToVisual, visualToSource } from './markdownSelection'
+import { validateSource } from './sourceDiagnostics'
+import { visualProjection } from './visualProjection'
+import { splitAnchors, type BlockAnchor } from './splitScroll'
 import { openMarkdown, rebaseMarkdown, setFrontMatter, writeMarkdown, type MarkdownSession } from '../document/markdown'
 import { decodeMarkdown, saveMarkdown, type WritableMarkdownHandle } from '../document/files'
 import { documentInfo, type Heading } from '../document/metadata'
-import { loadWorkspace, newDocument, recentLimit, storeWorkspace, useWorkspace, welcomeSource, type DocumentFile } from '../document/workspace'
+import { loadWorkspace, newDocument, recentLimit, storeWorkspace, useWorkspace, welcomeSource, type DocumentFile, type EditorMode, type EditorPane } from '../document/workspace'
 
 type LocalStatus = 'loading' | 'pending' | 'saved' | 'unavailable'
 const emptyInfo = { outline: [], statistics: { words: 0, characters: 0, compact: 0, minutes: 0, headings: 0, links: 0, images: 0 } }
@@ -27,10 +30,16 @@ export function useDocument(notify: (message: string) => void) {
   const [status, setStatus] = useState<LocalStatus>('loading')
   const [visualDirty, setVisualDirty] = useState(false)
   const [activeHeading, setActiveHeading] = useState('')
+  const [activePane, setActivePane] = useState<EditorPane>('visual')
+  const [previewIssue, setPreviewIssue] = useState<string | null>(null)
   const fileRef = useRef(file)
   const recentRef = useRef<DocumentFile[]>([])
   const sourceView = useRef<EditorView | null>(null)
-  const sourceBase = useRef(file.source)
+  const authority = useRef<EditorPane>('visual')
+  const active = useRef<EditorPane>('visual')
+  const issue = useRef<string | null>(null)
+  const paired = useRef<{ source: string; document: ProseMirrorNode; version: number } | null>(null)
+  const anchors = useRef<{ pair: NonNullable<typeof paired.current>; blocks: BlockAnchor[] } | null>(null)
   const session = useRef<MarkdownSession | null>(null)
   const parsed = useRef<MarkdownSession | null>(null)
   const cache = useRef<{ document: ProseMirrorNode; source: string; session: MarkdownSession } | null>(null)
@@ -40,6 +49,8 @@ export function useDocument(notify: (message: string) => void) {
   const selectionUpdate = useRef<() => void>(() => {})
   const writing = useRef(Promise.resolve())
   const timer = useRef<number | undefined>(undefined)
+  const mirrorTimer = useRef<number | undefined>(undefined)
+  const editVersion = useRef(0)
   const revision = useRef(0)
   const transition = useRef(0)
 
@@ -54,7 +65,7 @@ export function useDocument(notify: (message: string) => void) {
   const project = useCallback(() => {
     const baseline = session.current
     const file = fileRef.current
-    if (useWorkspace.getState().mode === 'source') {
+    if (authority.current === 'source') {
       const source = sourceView.current?.state.doc.toString() ?? file.source
       return source === file.source ? file : { ...file, source }
     }
@@ -109,8 +120,8 @@ export function useDocument(notify: (message: string) => void) {
       replaceFile(next)
       setVisualDirty(false)
       snapshot(next)
-      if (useWorkspace.getState().mode === 'source') summarize(parseSource(next.source))
-      else {
+      if (useWorkspace.getState().mode === 'source' && !issue.current) summarize(parseSource(next.source))
+      else if (!issue.current) {
         setInfo(documentInfo(editor.state.doc))
         let count = 0
         editor.state.doc.descendants(node => { if (node.type.name === 'rawBlock' || node.type.name === 'rawInline') count++ })
@@ -129,14 +140,8 @@ export function useDocument(notify: (message: string) => void) {
     timer.current = window.setTimeout(flush, 480)
   }, [flush])
 
-  visualUpdate.current = () => {
-    if (useWorkspace.getState().mode !== 'visual') return
-    if (editor) setMetadata(editor.state.doc.attrs.frontMatter ?? '')
-    setVisualDirty(true)
-    schedule()
-  }
   selectionUpdate.current = () => {
-    if (!editor || useWorkspace.getState().mode !== 'visual') return
+    if (!editor || useWorkspace.getState().mode === 'source') return
     const selection = editor.state.selection
     let position = selection.from
     for (let depth = selection.$from.depth; depth > 0; depth--) {
@@ -150,39 +155,107 @@ export function useDocument(notify: (message: string) => void) {
     setActiveHeading(anchor)
   }
 
-  const applySession = useCallback((baseline: MarkdownSession, keepHistory = false) => {
+  const applySession = useCallback((baseline: MarkdownSession, update: 'reset' | 'history' | 'mirror' = 'reset') => {
     if (!editor) return
     const oldState = editor.state
-    if (keepHistory) {
+    if (update !== 'reset') {
       baseline = rebaseMarkdown(baseline, oldState.doc)
-      const next = baseline.document
-      const overlap = Math.min(oldState.doc.childCount, next.childCount)
-      let prefix = 0
-      let from = 0
-      while (prefix < overlap && oldState.doc.child(prefix).eq(next.child(prefix))) from += next.child(prefix++).nodeSize
-      let suffixSize = 0
-      for (let suffix = 1; prefix + suffix <= overlap; suffix++) {
-        const node = next.child(next.childCount - suffix)
-        if (!node.eq(oldState.doc.child(oldState.doc.childCount - suffix))) break
-        suffixSize += node.nodeSize
-      }
-      const transaction = closeHistory(oldState.tr).setMeta('preventUpdate', true)
-      const oldEnd = oldState.doc.content.size - suffixSize
-      const newEnd = next.content.size - suffixSize
-      if (from !== oldEnd || from !== newEnd) transaction.replaceWith(from, oldEnd, next.content.cut(from, newEnd))
-      if (oldState.doc.attrs.frontMatter !== next.attrs.frontMatter) transaction.setDocAttribute('frontMatter', next.attrs.frontMatter)
+      const transaction = visualProjection(oldState, baseline.document, update === 'history')
       if (transaction.docChanged) {
         editor.view.dispatch(transaction)
-        editor.view.dispatch(closeHistory(editor.state.tr))
+        if (update === 'history') editor.view.dispatch(closeHistory(editor.state.tr))
       }
     } else {
       editor.view.updateState(EditorState.create({ schema: editor.schema, doc: baseline.document, plugins: oldState.plugins }))
     }
     session.current = baseline
+    paired.current = { source: baseline.source, document: editor.state.doc, version: editVersion.current }
     cache.current = null
     summarize(baseline)
-    setActiveHeading('')
+    if (update === 'reset') setActiveHeading('')
   }, [editor, summarize])
+
+  const setIssue = useCallback((message: string | null) => {
+    if (issue.current === message) return
+    const wasPaused = Boolean(issue.current)
+    issue.current = message
+    setPreviewIssue(message)
+    if (wasPaused !== Boolean(message)) editor?.setEditable(!message, false)
+  }, [editor])
+
+  const remember = useCallback((document: ProseMirrorNode, source: string) => {
+    const latest = history.current[0]
+    if (latest?.source === source && latest.document.eq(document)) return
+    history.current = [{ document, source }, ...history.current].slice(0, 24)
+  }, [])
+
+  const synchronize = useCallback((recordHistory: boolean, checkIncomplete: boolean) => {
+    if (!editor || !session.current) return false
+    const next = project()
+    const current = editor.state.doc
+    if (authority.current === 'visual') {
+      replaceSource(sourceView.current, next.source, 'visual', recordHistory)
+      paired.current = { source: next.source, document: current, version: editVersion.current }
+      remember(current, next.source)
+      return true
+    }
+    if (paired.current?.source === next.source && paired.current.document === current) {
+      paired.current.version = editVersion.current
+      setIssue(null)
+      return true
+    }
+    if (checkIncomplete) {
+      const diagnostic = validateSource(next.source)[0]
+      if (diagnostic) {
+        setIssue(diagnostic.message)
+        return false
+      }
+    }
+    if (paired.current?.document === current) remember(current, paired.current.source)
+    applySession(parseSource(next.source), recordHistory ? 'history' : 'mirror')
+    setIssue(null)
+    return true
+  }, [applySession, editor, parseSource, project, remember, setIssue])
+
+  const queueEdit = useCallback((origin: EditorPane) => {
+    authority.current = origin
+    const version = ++editVersion.current
+    setVisualDirty(true)
+    schedule()
+    window.clearTimeout(mirrorTimer.current)
+    if (useWorkspace.getState().mode !== 'split') return
+    mirrorTimer.current = window.setTimeout(() => {
+      if (version !== editVersion.current || useWorkspace.getState().mode !== 'split') return
+      try { synchronize(false, true) }
+      catch (error) {
+        if (origin === 'source') setIssue(errorMessage(error))
+        else notify(errorMessage(error))
+      }
+    }, 140)
+  }, [notify, schedule, setIssue, synchronize])
+
+  visualUpdate.current = () => {
+    if (useWorkspace.getState().mode === 'source' || issue.current) return
+    if (editor) setMetadata(editor.state.doc.attrs.frontMatter ?? '')
+    queueEdit('visual')
+  }
+
+  const activatePane = useCallback((pane: EditorPane) => {
+    const mode = useWorkspace.getState().mode
+    if (mode !== 'split') return mode === pane && !(pane === 'visual' && issue.current)
+    try {
+      if (pane !== authority.current && !synchronize(false, true)) return false
+      if (active.current !== pane) {
+        transition.current++
+        active.current = pane
+        setActivePane(pane)
+      }
+      return true
+    } catch (error) {
+      notify(errorMessage(error))
+      return false
+    }
+  }, [notify, synchronize])
 
   useEffect(() => {
     if (!editor) return
@@ -197,7 +270,7 @@ export function useDocument(notify: (message: string) => void) {
       recentRef.current = stored?.files ?? [loaded]
       setRecent(recentRef.current)
       useWorkspace.getState().setMode('visual')
-      sourceBase.current = loaded.source
+      authority.current = 'visual'
       applySession(openMarkdown(loaded.source, editor.schema))
       setStatus(storageError ? 'unavailable' : stored ? 'saved' : 'pending')
       if (!stored && !storageError) snapshot(loaded)
@@ -212,51 +285,56 @@ export function useDocument(notify: (message: string) => void) {
     }
     document.addEventListener('visibilitychange', onHidden)
     window.addEventListener('pagehide', onHidden)
-    return () => { document.removeEventListener('visibilitychange', onHidden); window.removeEventListener('pagehide', onHidden); window.clearTimeout(timer.current) }
+    return () => {
+      document.removeEventListener('visibilitychange', onHidden)
+      window.removeEventListener('pagehide', onHidden)
+      window.clearTimeout(timer.current)
+      window.clearTimeout(mirrorTimer.current)
+    }
   }, [flush])
 
   const setSource = useCallback((source: string) => {
-    if (useWorkspace.getState().mode !== 'source' || fileRef.current.source === source) return
+    if (useWorkspace.getState().mode === 'visual') return
     fileRef.current = { ...fileRef.current, source }
-    schedule()
-  }, [schedule])
+    queueEdit('source')
+  }, [queueEdit])
 
-  function switchMode(mode: 'visual' | 'source', focus = true) {
-    if (!editor || !session.current || mode === useWorkspace.getState().mode) return
+  function switchMode(mode: EditorMode, focus = true) {
+    const previous = useWorkspace.getState().mode
+    if (!editor || !session.current || mode === previous) return
     try {
       const next = project()
-      const projection = parseSource(next.source)
       const view = sourceView.current
-      let caret: number
-      if (mode === 'source') {
-        caret = visualToSource(editor.state.doc, editor.state.selection.head, projection)
-        replaceFile(next)
-        replaceSource(view, next.source, 'visual')
-        sourceBase.current = next.source
-        const doc = editor.state.doc
-        if (history.current[0]?.source !== next.source || !history.current[0]?.document.eq(doc)) {
-          history.current = [{ document: doc, source: next.source }, ...history.current].slice(0, 24)
-        }
-      } else {
-        if (next.source !== sourceBase.current) {
-          applySession(projection, true)
-          replaceFile(next)
-        }
-        caret = sourceToVisual(projection, view?.state.selection.main.head ?? 0, editor.state.doc)
+      const direct = previous !== 'split' && mode !== 'split'
+      const matched = synchronize(direct, !direct || !!issue.current)
+      let pane = mode === 'split' ? active.current : mode
+      if (!matched && mode === 'split') pane = 'source'
+      let caret: number | undefined
+      if (direct && matched) {
+        const projection = parseSource(next.source)
+        caret = pane === 'source'
+          ? visualToSource(editor.state.doc, editor.state.selection.head, projection)
+          : sourceToVisual(projection, view?.state.selection.main.head ?? 0, editor.state.doc)
       }
+      window.clearTimeout(mirrorTimer.current)
+      replaceFile(next)
+      active.current = pane
+      setActivePane(pane)
       useWorkspace.getState().setMode(mode)
       setVisualDirty(false)
       if (timer.current !== undefined) flush()
       const token = ++transition.current
       if (focus) requestAnimationFrame(() => {
         if (token !== transition.current || next.id !== fileRef.current.id || useWorkspace.getState().mode !== mode) return
-        if (mode === 'source' && view) {
-          view.dispatch({ selection: { anchor: Math.min(caret, view.state.doc.length) }, scrollIntoView: true })
+        if (pane === 'source' && view) {
+          if (caret !== undefined) view.dispatch({ selection: { anchor: Math.min(caret, view.state.doc.length) }, scrollIntoView: true })
           view.focus()
-        } else if (mode === 'visual') {
+        } else if (!issue.current) {
           const { state } = editor
-          const selection = Selection.near(state.doc.resolve(Math.min(caret, state.doc.content.size)))
-          if (!state.selection.eq(selection)) editor.view.dispatch(state.tr.setSelection(selection).setMeta('addToHistory', false).scrollIntoView())
+          if (caret !== undefined) {
+            const selection = Selection.near(state.doc.resolve(Math.min(caret, state.doc.content.size)))
+            if (!state.selection.eq(selection)) editor.view.dispatch(state.tr.setSelection(selection).setMeta('addToHistory', false).scrollIntoView())
+          }
           editor.view.focus()
         }
       })
@@ -270,12 +348,17 @@ export function useDocument(notify: (message: string) => void) {
       const pending = timer.current !== undefined
       const baseline = openMarkdown(next.source, editor.schema)
       window.clearTimeout(timer.current)
+      window.clearTimeout(mirrorTimer.current)
+      editVersion.current++
       timer.current = undefined
       history.current = []
       transition.current++
+      authority.current = 'visual'
+      active.current = 'visual'
+      setActivePane('visual')
+      setIssue(null)
       applySession(baseline)
       useWorkspace.getState().setMode('visual')
-      sourceBase.current = next.source
       replaceFile(next)
       setVisualDirty(false)
       const last = pending ? { ...previous, updated: Date.now() } : previous
@@ -318,7 +401,8 @@ export function useDocument(notify: (message: string) => void) {
   function changeMetadata(value: string) {
     if (!editor) return
     try {
-      if (useWorkspace.getState().mode === 'source') {
+      if (active.current === 'source') {
+        if (!activatePane('source')) return
         const current = project()
         const updated = setFrontMatter(openMarkdown(current.source, editor.schema), value)
         if (updated === current.source) return
@@ -326,6 +410,7 @@ export function useDocument(notify: (message: string) => void) {
         if (fileRef.current.source !== updated) setSource(updated)
         setMetadata(value)
       } else {
+        if (!activatePane('visual')) return
         if (editor.state.doc.attrs.frontMatter === value) return
         editor.view.dispatch(closeHistory(editor.state.tr).setDocAttribute('frontMatter', value))
         editor.view.dispatch(closeHistory(editor.state.tr))
@@ -333,9 +418,28 @@ export function useDocument(notify: (message: string) => void) {
     } catch (error) { notify(errorMessage(error)) }
   }
 
-  function jumpToHeading(heading: Heading) {
+  const scrollAnchors = useCallback(() => {
+    const pair = paired.current
+    if (!pair || pair.version !== editVersion.current || editor?.state.doc !== pair.document) return []
+    if (anchors.current?.pair !== pair) anchors.current = { pair, blocks: splitAnchors(pair.document, parseSource(pair.source)) }
+    return anchors.current.blocks
+  }, [editor, parseSource])
+
+  function jumpToHeading(heading: Heading): BlockAnchor | undefined {
     if (!editor) return
     setActiveHeading(heading.anchor)
+    if (useWorkspace.getState().mode === 'split') {
+      try {
+        synchronize(false, true)
+        const pair = paired.current
+        const current = documentInfo(editor.state.doc).outline.find(item => item.anchor === heading.anchor)
+        if (pair && current) {
+          const source = visualToSource(editor.state.doc, current.position + 1, parseSource(pair.source))
+          return { visual: current.position, source: Math.min(source, sourceView.current?.state.doc.length ?? source) }
+        }
+      } catch (error) { notify(errorMessage(error)) }
+      return
+    }
     if (useWorkspace.getState().mode === 'source') {
       const view = sourceView.current
       if (!view) return
@@ -358,6 +462,7 @@ export function useDocument(notify: (message: string) => void) {
 
   return {
     editor, file, recent, status, sourceView, setSource, info, metadata, warnings, activeHeading,
+    activePane, activatePane, previewIssue, scrollAnchors,
     dirty: visualDirty || file.source !== file.savedSource || file.title !== file.savedTitle,
     project, switchMode, openFile, importFile, save, changeTitle, changeMetadata, jumpToHeading,
   }

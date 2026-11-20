@@ -266,8 +266,18 @@ export function rebaseMarkdown(session: MarkdownSession, previous: ProseMirrorNo
   let prefix = 0
   const overlap = Math.min(blocks.length, previous.childCount)
   while (prefix < overlap && reuse(prefix, prefix)) prefix++
-  for (let suffix = 1; prefix + suffix <= overlap; suffix++) {
-    if (!reuse(blocks.length - suffix, previous.childCount - suffix)) break
+  let suffix = 0
+  while (prefix + suffix < overlap && reuse(blocks.length - suffix - 1, previous.childCount - suffix - 1)) suffix++
+  // Match edited blocks between unchanged neighbors when their positions still line up.
+  if (blocks.length === previous.childCount) {
+    for (let index = prefix; index < blocks.length - suffix; index++) {
+      const block = blocks[index]
+      const old = previous.child(index)
+      if (old.type !== block.node.type) continue
+      const id = old.attrs.sourceId as string | null
+      const node = block.node.type.create({ ...block.node.attrs, sourceId: id }, block.node.content, block.node.marks)
+      blocks[index] = { ...block, id: id ?? block.id, node }
+    }
   }
   return { ...session, blocks, document: session.document.type.create(session.document.attrs, blocks.map(block => block.node)) }
 }

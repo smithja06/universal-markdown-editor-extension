@@ -17,9 +17,11 @@ export interface Appearance {
   width: 'page' | 'full'
   lineNumbers: boolean
   wordWrap: boolean
+  splitRatio: number
+  syncScroll: boolean
 }
 
-const defaultAppearance: Appearance = { theme: 'system', font: 'Default', fontSize: 16, lineHeight: 1.7, width: 'page', lineNumbers: true, wordWrap: true }
+const defaultAppearance: Appearance = { theme: 'system', font: 'Default', fontSize: 16, lineHeight: 1.7, width: 'page', lineNumbers: true, wordWrap: true, splitRatio: 0.5, syncScroll: false }
 
 export function newDocument(title = 'Untitled document', file: MarkdownFile = { source: '', lineEnding: '\n', bom: false }): DocumentFile {
   return { ...file, title, id: crypto.randomUUID(), savedSource: file.source, savedTitle: title, updated: Date.now() }
@@ -43,8 +45,11 @@ function initialAppearance(): Appearance {
   catch { return defaultAppearance }
 }
 
+export type EditorPane = 'visual' | 'source'
+export type EditorMode = EditorPane | 'split'
+
 interface Workspace {
-  mode: 'visual' | 'source'
+  mode: EditorMode
   sidebar: boolean
   appearance: Appearance
   setMode(mode: Workspace['mode']): void

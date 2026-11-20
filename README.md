@@ -23,7 +23,10 @@ The browser tests can use an existing Chromium installation via `PLAYWRIGHT_CHRO
 
 ## Editing and files
 
-- Switch with **Markdown Source** or **Visual Editor**. In visual mode, type `/` on an empty line for insertion commands. Drag top-level blocks with their handles or use **Edit → Move block up/down**.
+- Choose **Visual**, **Markdown**, or **Split** in the top-right selector. Split keeps both editors open with independent cursors, selections, and undo histories. Edit either pane and Folio updates the other after a short pause. On narrow screens the panes stack.
+- Drag the split divider to resize the panes, or focus it and use the arrow keys. Double-click it to reset to equal widths. **Sync Scroll** follows the same document block in both panes. Outline links always navigate both panes in Split.
+- If the source has an incomplete fence, block equation, directive, or YAML front matter, Folio keeps the last complete visual document visible and saves the Markdown draft as typed. Finish the source construct to resume visual editing.
+- In visual mode, type `/` on an empty line for insertion commands. Drag top-level blocks with their handles or use **Edit → Move block up/down**.
 - The **Insert** menu includes callouts, checklists, images, tables, Mermaid, equations, links, footnotes, and a live table of contents. Click an equation or double-click an image to edit it. Select a table cell to show table controls.
 - The properties sidebar includes a heading outline, a YAML form and raw editor, appearance settings, and document statistics.
 - **File → Open Markdown** and file drop accept `.md` and `.markdown`. Local images are embedded as data URLs so the Markdown file can travel with its images. Saving uses the browser file picker where available and downloads a copy otherwise.
@@ -55,7 +58,7 @@ The visual editor renders Mermaid and KaTeX. The HTML adapter emits MathML for e
 
 - `src/editor/schema.ts` defines the canonical ProseMirror schema and supported rich content. `src/editor/nodeViews.tsx` provides interactive previews, and `src/editor/SourceEditor.tsx` implements the CodeMirror surface.
 - `src/document/markdown.ts` maps the Unified and Remark syntax tree to ProseMirror and records exact spans against top-level block identities. Serialization tries native Markdown first, then inline HTML and standalone block HTML as needed. `src/document/markdownHtml.ts` limits which HTML becomes editable and reads legacy Folio markup.
-- `src/editor/useDocument.ts` reads the active editor when switching modes, exporting, or saving a draft. It reuses unchanged ProseMirror blocks and records incoming changes in the applicable history. Source edits that only change delimiters stay in source history. `src/editor/markdownSelection.ts` maps the caret to nearby text in the corresponding block.
+- `src/editor/useDocument.ts` tracks which editor contains the latest edit. Split updates are revision-checked, and moving to the other pane flushes any pending edit before that pane accepts input. Split projections update only the affected range and preserve each pane’s history. Solo mode transitions retain their existing cross-editor undo behavior. `src/editor/markdownSelection.ts` maps the caret between solo modes, and `src/editor/splitScroll.ts` pairs corresponding blocks for scrolling.
 - `src/document/files.ts` handles Markdown byte encoding, browser disk I/O, and the attachment interface. `src/document/workspace.ts` handles IndexedDB drafts and Zustand preferences. `src/document/export.ts` handles the rendered HTML and text exporters.
 
 For a future file format, add a format-specific codec and exporter at the document boundary. A compatible rich-text format can project into the existing schema with its own fidelity rules. A spreadsheet or fixed-layout PDF can use a separate model and editor while sharing file identity, recent documents, and the workspace shell.

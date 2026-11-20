@@ -6,14 +6,17 @@ import { openSearchPanel } from '@codemirror/search'
 import {
   ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpRight, Braces, Check, ChevronDown, CircleAlert, CloudOff, Code2, Copy, Download, FileCode2,
   FilePlus2, FileText, FolderOpen, GitFork, Hash, ImagePlus, Info, Link2, List, ListOrdered, ListTodo, ListTree, LoaderCircle,
-  Maximize2, Minimize2, Minus, PanelRight, Pilcrow, Quote, Redo2, Search, Sigma, Smile, Table2, Undo2, Upload, X,
+  Columns2, Link, Maximize2, Minimize2, Minus, PanelRight, Pilcrow, Quote, Redo2, Search, Sigma, Smile, Table2, Undo2, Upload, X,
 } from 'lucide-react'
 import { SourceEditor, type SourceLocation } from './editor/SourceEditor'
 import { BlockHandle, blockDragType, dropPosition, hoveredBlock, moveBlock, moveSelectedBlock, type Grip } from './editor/BlockHandle'
 import { useDocument, errorMessage } from './editor/useDocument'
+import { dividerWidth, useSplitLayout } from './editor/useSplitLayout'
+import { scrollToSplitHeading, useSplitScroll } from './editor/splitScroll'
 import { calloutKinds } from './editor/schema'
 import { embeddedAttachments } from './document/files'
-import { newDocument, useWorkspace } from './document/workspace'
+import { newDocument, useWorkspace, type EditorMode, type EditorPane } from './document/workspace'
+import type { Heading } from './document/metadata'
 import { IconButton, Menu, Modal, type Item } from './ui/controls'
 import { Toolbar, formatItems, fullFormatItems, indent, paragraphStyle } from './ui/Toolbar'
 import { Properties, type PropertyTab } from './ui/Properties'
@@ -35,6 +38,12 @@ const fonts = {
 
 interface SlashState { from: number; to: number; word: string; left: number; top: number }
 
+const editorModes = [
+  { mode: 'visual', label: 'Visual Editor', short: 'Visual', icon: Pilcrow },
+  { mode: 'source', label: 'Markdown Source', short: 'Markdown', icon: Code2 },
+  { mode: 'split', label: 'Split Editor', short: 'Split', icon: Columns2 },
+] satisfies { mode: EditorMode; label: string; short: string; icon: typeof Code2 }[]
+
 export default function App() {
   const [toast, setToast] = useState('')
   const toastTimer = useRef<number | undefined>(undefined)
@@ -46,8 +55,13 @@ export default function App() {
   const doc = useDocument(notify)
   const { editor } = doc
   const { mode, sidebar, setSidebar, appearance, setAppearance } = useWorkspace()
-  const source = mode === 'source'
+  const split = mode === 'split'
+  const source = mode === 'source' || (split && doc.activePane === 'source')
   const ready = !!editor && doc.status !== 'loading'
+  const editable = ready && (source || !doc.previewIssue)
+  const splitLayout = useSplitLayout(appearance.splitRatio, ratio => setAppearance({ splitRatio: ratio }))
+  const visualScroll = useRef<HTMLDivElement>(null)
+  useSplitScroll(split && ready && appearance.syncScroll && !doc.previewIssue, editor, visualScroll, doc.sourceView, doc.scrollAnchors, doc.file.id)
   const [tab, setTab] = useState<PropertyTab>('Outline')
   const [width, setWidth] = useState(304)
   const [location, setLocation] = useState<SourceLocation>({ line: 1, column: 1 })
@@ -70,14 +84,27 @@ export default function App() {
     requestAnimationFrame(() => editor?.commands.focus())
   }
 
-  function openLink(preset?: string) { if (!source) setRequest({ name: 'link', preset }) }
+  function openLink(preset?: string) { if (!source && doc.activatePane('visual')) setRequest({ name: 'link', preset }) }
   function showSearch() {
     if (source && doc.sourceView.current) openSearchPanel(doc.sourceView.current)
-    else if (ready) setDialog('search')
+    else if (editable) setDialog('search')
   }
-  function undo() { if (source && doc.sourceView.current) undoSource(doc.sourceView.current); else editor?.chain().focus().undo().run() }
-  function redo() { if (source && doc.sourceView.current) redoSource(doc.sourceView.current); else editor?.chain().focus().redo().run() }
+  function undo() {
+    if (!doc.activatePane(source ? 'source' : 'visual')) return
+    if (source && doc.sourceView.current) { undoSource(doc.sourceView.current); doc.sourceView.current.focus() }
+    else editor?.chain().focus().undo().run()
+  }
+  function redo() {
+    if (!doc.activatePane(source ? 'source' : 'visual')) return
+    if (source && doc.sourceView.current) { redoSource(doc.sourceView.current); doc.sourceView.current.focus() }
+    else editor?.chain().focus().redo().run()
+  }
   function openProperties(next: PropertyTab) { setTab(next); setSidebar(true) }
+  function jump(heading: Heading) {
+    const position = doc.jumpToHeading(heading)
+    const view = doc.sourceView.current
+    if (position && editor && view && visualScroll.current) scrollToSplitHeading(editor, visualScroll.current, view, position)
+  }
   function addNode(type: string, attrs?: Record<string, unknown>) { editor?.chain().focus().insertContent({ type, attrs }).run() }
   const insert = (name: InsertRequest['name'], preset?: string) => () => setRequest({ name, preset })
   const actions: Item[] = [
@@ -150,7 +177,7 @@ export default function App() {
     editor.on('transaction', update)
     editor.view.dom.addEventListener('keydown', dismiss, true)
     return () => { editor.off('transaction', update); editor.view.dom.removeEventListener('keydown', dismiss, true); setSlash(null) }
-  }, [editor, source])
+  }, [editor, source, editable])
 
   useEffect(() => {
     if (!editor || !slash || !slashItems.length) return
@@ -185,16 +212,19 @@ export default function App() {
   useEffect(() => {
     if (!editor) return
     const element = editor.view.dom
-    const edit = (event: Event) => setRequest((event as CustomEvent<InsertRequest>).detail)
-    const openSource = () => doc.switchMode('source')
+    const edit = (event: Event) => { if (doc.activatePane('visual')) setRequest((event as CustomEvent<InsertRequest>).detail) }
+    const openSource = () => {
+      if (split && doc.activatePane('source')) doc.sourceView.current?.focus()
+      else doc.switchMode('source')
+    }
     const anchor = (event: MouseEvent) => {
       const link = (event.target as HTMLElement).closest<HTMLAnchorElement>('a[href^="#"]')
       const destination = link?.getAttribute('href')?.slice(1)
       const heading = doc.info.outline.find(item => item.anchor === destination)
-      if (heading) { event.preventDefault(); doc.jumpToHeading(heading) }
+      if (heading) { event.preventDefault(); jump(heading) }
     }
     const editImage = (event: MouseEvent) => {
-      if (!(event.target instanceof HTMLImageElement)) return
+      if (!(event.target instanceof HTMLImageElement) || !doc.activatePane('visual')) return
       const image = event.target.closest('[data-folio-image]') ?? event.target
       const position = editor.view.posAtDOM(image, 0)
       if (editor.state.doc.nodeAt(position)?.type.name === 'image') {
@@ -209,12 +239,12 @@ export default function App() {
     return () => { element.removeEventListener('folio-edit-atom', edit); element.removeEventListener('folio-open-source', openSource); element.removeEventListener('click', anchor); element.removeEventListener('dblclick', editImage) }
   })
 
-  async function addImage(file: File, position?: number) {
+  async function addImage(file: File, position?: number, target: EditorPane = doc.activePane) {
     const activeFile = fileId.current
     try {
       const asset = await embeddedAttachments.add(file)
-      if (!editor || activeFile !== fileId.current) return
-      if (useWorkspace.getState().mode === 'source') {
+      if (!editor || activeFile !== fileId.current || !doc.activatePane(target)) return
+      if (target === 'source') {
         const view = doc.sourceView.current
         if (!view) return
         const { from, to } = view.state.selection.main
@@ -240,20 +270,21 @@ export default function App() {
     const markdown = files.find(file => /\.(md|markdown)$/i.test(file.name))
     if (markdown) { void doc.importFile(markdown); return }
     const image = files.find(file => /^image\//i.test(file.type))
-    const point = editor?.view.posAtCoords({ left: event.clientX, top: event.clientY })
-    if (image) void addImage(image, point?.pos)
+    const target = mode === 'source' || (split && (event.target as Element).closest('.source-shell')) ? 'source' : 'visual'
+    const point = target === 'visual' ? editor?.view.posAtCoords({ left: event.clientX, top: event.clientY }) : undefined
+    if (image) void addImage(image, point?.pos, target)
     else notify('Drop a Markdown document or an image file.')
   }
 
   function dropBlock(event: DragEvent) {
-    if (!editor || source || draggedBlock.current === undefined || !event.dataTransfer.types.includes(blockDragType)) return
+    if (!editor || draggedBlock.current === undefined || !event.dataTransfer.types.includes(blockDragType)) return
     event.preventDefault()
     event.stopPropagation()
     const from = draggedBlock.current
     draggedBlock.current = undefined
     setGrip(null)
     const destination = dropPosition(editor, event.clientX, event.clientY)
-    if (destination !== undefined) moveBlock(editor, from, destination)
+    if (destination !== undefined && doc.activatePane('visual')) moveBlock(editor, from, destination)
   }
 
   async function copy(kind: 'markdown' | 'text') {
@@ -284,12 +315,13 @@ export default function App() {
     { label: 'Redo', icon: <Redo2 size={16} />, shortcut: 'Ctrl+Shift+Z', run: redo, disabled: source ? !redoAvailable : !editor?.can().redo() },
     { label: '', divider: true },
     { label: 'Find and replace', icon: <Search size={16} />, shortcut: 'Ctrl+F', run: showSearch },
-    { label: 'Move block up', icon: <ArrowUp size={16} />, disabled: source, run: () => editor && moveSelectedBlock(editor, -1) },
-    { label: 'Move block down', icon: <ArrowDown size={16} />, disabled: source, run: () => editor && moveSelectedBlock(editor, 1) },
+    { label: 'Move block up', icon: <ArrowUp size={16} />, disabled: source || !editable, run: () => editor && moveSelectedBlock(editor, -1) },
+    { label: 'Move block down', icon: <ArrowDown size={16} />, disabled: source || !editable, run: () => editor && moveSelectedBlock(editor, 1) },
     { label: 'Keyboard shortcuts', run: () => setDialog('shortcuts') },
   ]
   const viewItems: Item[] = [
-    { label: source ? 'Visual Editor' : 'Markdown Source', icon: source ? <Pilcrow size={16} /> : <Code2 size={16} />, run: () => doc.switchMode(source ? 'visual' : 'source') },
+    ...editorModes.map(({ mode: choice, label, icon: Icon }) => ({ label, icon: <Icon size={16} />, active: mode === choice, run: () => doc.switchMode(choice) })),
+    ...(split ? [{ label: 'Sync Scroll', active: appearance.syncScroll, run: () => setAppearance({ syncScroll: !appearance.syncScroll }) }] : []),
     { label: sidebar ? 'Hide document properties' : 'Show document properties', icon: <PanelRight size={16} />, run: () => setSidebar(!sidebar) },
     { label: 'Document outline', icon: <ListTree size={16} />, run: () => openProperties('Outline') },
     { label: appearance.width === 'full' ? 'Page width' : 'Full width', icon: appearance.width === 'full' ? <Minimize2 size={16} /> : <Maximize2 size={16} />, run: () => setAppearance({ width: appearance.width === 'full' ? 'page' : 'full' }) },
@@ -326,57 +358,76 @@ export default function App() {
           <Menu label="File" items={fileItems} disabled={!ready} />
           <Menu label="Edit" items={editItems} disabled={!ready} />
           <Menu label="View" items={viewItems} disabled={!ready} />
-          <Menu label="Insert" items={actions} disabled={!ready || source} />
-          <Menu label="Format" items={editor ? fullFormatItems(editor, () => openLink()) : []} disabled={!ready || source} />
+          <Menu label="Insert" items={actions} disabled={!editable || source} />
+          <Menu label="Format" items={editor ? fullFormatItems(editor, () => openLink()) : []} disabled={!editable || source} />
         </nav>
       </div>
       <div className="topbar-actions">
         <span className={'save-status status-' + doc.status} role="status" title={statusLabel}><StatusIcon size={14} /><span>{statusLabel}</span></span>
         <div className="topbar-action-divider" />
-        <button type="button" className="mode-toggle" disabled={!ready} aria-label={source ? 'Visual Editor' : 'Markdown Source'} onClick={() => doc.switchMode(source ? 'visual' : 'source')}>
-          {source ? <Pilcrow size={16} /> : <Code2 size={17} />}<span>{source ? 'Visual Editor' : 'Markdown Source'}</span>
-        </button>
+        <div className="mode-selector" role="group" aria-label="Editing mode">
+          {editorModes.map(({ mode: choice, label, short, icon: Icon }) => <button type="button" key={choice} disabled={!ready}
+            aria-label={label} title={label} aria-pressed={mode === choice} onClick={() => doc.switchMode(choice)}><Icon size={15} /><span>{short}</span></button>)}
+        </div>
         <IconButton label="Toggle document properties" active={sidebar} onClick={() => setSidebar(!sidebar)} className="sidebar-toggle"><PanelRight size={18} /></IconButton>
         <Menu label="Export" items={exportItems} align="right" disabled={!ready} className="export-menu"><Download size={16} /><span>Export</span><ChevronDown size={12} /></Menu>
       </div>
     </header>
-    <Toolbar editor={editor} source={source} ready={ready} undo={undo} redo={redo} insertItems={actions} openLink={() => openLink()} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} />
+    <Toolbar editor={editor} source={source} ready={editable} undo={undo} redo={redo} insertItems={actions} openLink={() => openLink()} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} />
     <div className="workspace">
-      <main className={'canvas ' + (source ? 'source-mode ' : '') + (appearance.width === 'full' ? 'full-width' : '')}
+      <main ref={splitLayout.container} className={['canvas', split && 'split-mode', split && splitLayout.stacked && 'split-stacked', splitLayout.dragging && 'split-dragging', appearance.width === 'full' && 'full-width'].filter(Boolean).join(' ')}
+        style={split ? { '--visual-share': splitLayout.ratio + 'fr', '--source-share': (1 - splitLayout.ratio) + 'fr', '--divider-width': dividerWidth + 'px' } as CSSProperties : undefined}
         onDragOverCapture={event => { if (draggedBlock.current !== undefined && event.dataTransfer.types.includes(blockDragType)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move' } }}
         onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDragging(true) } }}
-        onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false) }} onDropCapture={dropBlock} onDrop={acceptDrop} onScroll={() => { if (grip) setGrip(null) }}>
+        onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false) }} onDropCapture={dropBlock} onDrop={acceptDrop}>
         {!ready && <div className="opening-state"><LoaderCircle size={20} className="spinner" /> Opening workspace</div>}
-        <div className="visual-shell" hidden={!ready || source}>
-          <div className="canvas-strip"><span><FileText size={15} /> Markdown document</span><button type="button" className="width-toggle" onClick={() => setAppearance({ width: appearance.width === 'full' ? 'page' : 'full' })} title="Toggle document width">{appearance.width === 'page' ? <Maximize2 size={14} /> : <Minimize2 size={14} />}{appearance.width === 'page' ? 'Page width' : 'Full width'}</button></div>
-          <article className="paper" onPointerLeave={() => { if (draggedBlock.current === undefined) setGrip(null) }} onPointerMove={event => {
-            if (!editor || event.pointerType !== 'mouse' || (event.target as Element).closest('.block-grip')) return
-            const next = hoveredBlock(editor, event)
-            setGrip(previous => {
-              if (next?.from === previous?.from && next?.top === previous?.top && next?.left === previous?.left) return previous
-              if (!next && previous && event.clientY >= previous.top - 8 && event.clientY <= previous.top + 32) return previous
-              return next
-            })
-          }}>
-            <EditorContent editor={editor} />
-            {grip && !source && <BlockHandle grip={grip} start={event => {
-              draggedBlock.current = grip.from
-              event.dataTransfer.setData(blockDragType, 'move')
-              event.dataTransfer.effectAllowed = 'move'
-            }} end={() => { draggedBlock.current = undefined; setGrip(null) }} />}
-          </article>
-        </div>
-        <div className="source-shell" hidden={!ready || !source}>
-          <div className="source-banner"><FileCode2 size={16} /><span>{/\.(md|markdown)$/i.test(doc.file.title) ? doc.file.title : doc.file.title + '.md'}</span></div>
-          {ready && <SourceEditor key={doc.file.id} initial={doc.file.source} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} onChange={doc.setSource} onLocation={setLocation} onReady={view => { doc.sourceView.current = view }} />}
-        </div>
+        <section className="visual-pane" aria-label="Visual pane" hidden={!ready || mode === 'source'}>
+          {split && <div className="split-pane-header"><Pilcrow size={15} /><span>Visual Editor</span></div>}
+          {doc.previewIssue && <div className="preview-notice" role="status"><CircleAlert size={15} /><span><strong>Preview paused.</strong> {doc.previewIssue}</span></div>}
+          <div className="visual-scroll" ref={visualScroll} onScroll={() => { if (grip) setGrip(null) }}>
+            <div className="visual-shell">
+              <div className="canvas-strip"><span><FileText size={15} /> Markdown document</span><button type="button" className="width-toggle" onClick={() => setAppearance({ width: appearance.width === 'full' ? 'page' : 'full' })} title="Toggle document width">{appearance.width === 'page' ? <Maximize2 size={14} /> : <Minimize2 size={14} />}{appearance.width === 'page' ? 'Page width' : 'Full width'}</button></div>
+              <article className="paper" onPointerDownCapture={event => { if (split && !doc.activatePane('visual')) event.preventDefault() }}
+                onFocusCapture={() => { if (split) doc.activatePane('visual') }}
+                onBeforeInputCapture={event => { if (!doc.activatePane('visual')) event.preventDefault() }}
+                onPointerLeave={() => { if (draggedBlock.current === undefined) setGrip(null) }}
+                onPointerMove={event => {
+                  if (!editor || doc.previewIssue || event.pointerType !== 'mouse' || (event.target as Element).closest('.block-grip')) return
+                  const next = hoveredBlock(editor, event)
+                  setGrip(previous => {
+                    if (next?.from === previous?.from && next?.top === previous?.top && next?.left === previous?.left) return previous
+                    if (!next && previous && event.clientY >= previous.top - 8 && event.clientY <= previous.top + 32) return previous
+                    return next
+                  })
+                }}>
+                <EditorContent editor={editor} />
+                {grip && !doc.previewIssue && <BlockHandle grip={grip} start={event => {
+                  draggedBlock.current = grip.from
+                  event.dataTransfer.setData(blockDragType, 'move')
+                  event.dataTransfer.effectAllowed = 'move'
+                }} end={() => { draggedBlock.current = undefined; setGrip(null) }} />}
+              </article>
+            </div>
+          </div>
+        </section>
+        {split && <div className="split-divider" role="separator" tabIndex={0} aria-label="Resize editor panes" aria-orientation="vertical" hidden={splitLayout.stacked} {...splitLayout.separator}><i /></div>}
+        <section className="source-shell" aria-label="Markdown pane" hidden={!ready || mode === 'visual'}>
+          <div className="source-banner"><FileCode2 size={16} /><span>{split ? 'Markdown Source' : /\.(md|markdown)$/i.test(doc.file.title) ? doc.file.title : doc.file.title + '.md'}</span>
+            {split && <button type="button" className="sync-scroll" aria-pressed={appearance.syncScroll} onClick={() => setAppearance({ syncScroll: !appearance.syncScroll })}><Link size={14} /> Sync Scroll</button>}
+          </div>
+          <div className="source-pane-content" onPointerDownCapture={event => { if (split && !doc.activatePane('source')) event.preventDefault() }}
+            onFocusCapture={() => { if (split) doc.activatePane('source') }}
+            onBeforeInputCapture={event => { if (!doc.activatePane('source')) event.preventDefault() }}>
+            {ready && <SourceEditor key={doc.file.id} initial={doc.file.source} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} onChange={doc.setSource} onLocation={setLocation} onReady={view => { doc.sourceView.current = view }} />}
+          </div>
+        </section>
         {dragging && <div className="drop-overlay" aria-hidden="true"><Upload size={29} /><strong>Drop a Markdown file or image</strong></div>}
       </main>
       {sidebar && <Properties tab={tab} setTab={setTab} headings={doc.info.outline} active={doc.activeHeading || doc.info.outline[0]?.anchor || ''} statistics={doc.info.statistics} key={doc.file.id}
-        metadata={doc.metadata} onMetadata={doc.changeMetadata} close={() => setSidebar(false)} jump={doc.jumpToHeading} width={width} setWidth={value => setWidth(Math.min(430, Math.max(250, value)))} />}
+        metadata={doc.metadata} onMetadata={doc.changeMetadata} close={() => setSidebar(false)} jump={jump} width={width} setWidth={value => setWidth(Math.min(430, Math.max(250, value)))} />}
     </div>
     <footer className="statusbar">
-      <div><span className="mode-indicator"><i />{source ? 'Source mode' : 'Visual mode'}</span><span className="status-separator" /><button type="button" onClick={() => openProperties('Statistics')}>{doc.info.statistics.words.toLocaleString()} words</button><span className="reading-time">{doc.info.statistics.minutes} min read</span></div>
+      <div><span className="mode-indicator"><i />{split ? 'Split mode' : source ? 'Source mode' : 'Visual mode'}</span><span className="status-separator" /><button type="button" onClick={() => openProperties('Statistics')}>{doc.info.statistics.words.toLocaleString()} words</button><span className="reading-time">{doc.info.statistics.minutes} min read</span></div>
       <div>
         {doc.warnings > 0 && !source && <button type="button" className="warning-link" onClick={() => doc.switchMode('source')} title="Open preserved syntax in Markdown source"><CircleAlert size={13} /> {doc.warnings} preserved {doc.warnings === 1 ? 'item' : 'items'}</button>}
         {source && <span>Ln {location.line}, Col {location.column}</span>}
