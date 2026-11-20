@@ -72,7 +72,7 @@ export function Menu({ label, items, children, className = '', align = 'left', c
   </div>
 }
 
-export function Modal({ title, close, children, wide = false }: { title: string; close(): void; children: ReactNode; wide?: boolean }) {
+export function Modal({ title, close, children, wide = false, closeDisabled = false }: { title: string; close(): void; children: ReactNode; wide?: boolean; closeDisabled?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null)
   const id = useId()
   useEffect(() => {
@@ -86,7 +86,7 @@ export function Modal({ title, close, children, wide = false }: { title: string;
       if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close()
     }
   }}>
-    <div className="modal-heading"><h2 id={id}>{title}</h2><IconButton label="Close dialog" onClick={close}><X size={18} /></IconButton></div>
+    <div className="modal-heading"><h2 id={id}>{title}</h2><IconButton label="Close dialog" disabled={closeDisabled} onClick={close}><X size={18} /></IconButton></div>
     {children}
   </dialog>
 }

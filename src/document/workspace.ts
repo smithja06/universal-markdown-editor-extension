@@ -2,12 +2,15 @@ import { create } from 'zustand'
 import type { MarkdownFile } from './files'
 import { forestAccent, normalizeAccent, type AccentColor, type Theme } from '../appearance'
 
+export { loadWorkspace, recentLimit, storeWorkspace } from './workspaceStorage'
+
 export interface DocumentFile extends MarkdownFile {
   id: string
   title: string
   savedSource: string
   savedTitle: string
   updated: number
+  historyEpoch?: string
 }
 
 export interface Appearance {
@@ -41,7 +44,6 @@ export const welcomeSource = [
 ].join('\n\n') + '\n'
 
 const appearanceKey = 'folio.appearance.v1'
-export const recentLimit = 15
 function persistAppearance(appearance: Appearance) {
   try { localStorage.setItem(appearanceKey, JSON.stringify(appearance)) } catch { /* Preferences still work for this tab. */ }
 }
@@ -85,48 +87,3 @@ export const useWorkspace = create<Workspace>(set => ({
 }))
 
 export interface WorkspaceSnapshot { currentId: string; files: DocumentFile[] }
-
-let database: Promise<IDBDatabase> | undefined
-function openDatabase() {
-  if (!database) database = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('folio-workspace', 1)
-    request.onupgradeneeded = () => request.result.createObjectStore('sessions')
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
-    request.onblocked = () => reject(new Error('Close another Folio tab to enable local storage.'))
-  }).catch(error => { database = undefined; throw error })
-  return database
-}
-
-export async function loadWorkspace(): Promise<WorkspaceSnapshot | undefined> {
-  const db = await openDatabase()
-  return new Promise((resolve, reject) => {
-    const request = db.transaction('sessions').objectStore('sessions').get('current')
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
-  })
-}
-
-export async function storeWorkspace(snapshot: WorkspaceSnapshot): Promise<void> {
-  const db = await openDatabase()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction('sessions', 'readwrite')
-    const store = transaction.objectStore('sessions')
-    const request = store.get('current')
-    request.onsuccess = () => {
-      const saved = request.result as WorkspaceSnapshot | undefined
-      const versions = new Map((saved?.files ?? []).map(file => [file.id, file]))
-      for (const file of snapshot.files) {
-        const previous = versions.get(file.id)
-        if (!previous || file.updated >= previous.updated) versions.set(file.id, file)
-      }
-      const active = versions.get(snapshot.currentId)
-      const others = [...versions.values()].filter(file => file.id !== snapshot.currentId).sort((a, b) => b.updated - a.updated)
-      const files = active ? [active, ...others.slice(0, recentLimit - 1)] : others.slice(0, recentLimit)
-      store.put({ currentId: snapshot.currentId, files }, 'current')
-    }
-    transaction.oncomplete = () => resolve()
-    transaction.onerror = () => reject(transaction.error)
-    transaction.onabort = () => reject(transaction.error)
-  })
-}
