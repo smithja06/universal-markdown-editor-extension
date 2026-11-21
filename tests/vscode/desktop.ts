@@ -18,6 +18,7 @@ interface Desktop {
   workspace: string
   command<T = undefined>(method: string, args?: Arguments): Promise<T>
   read(file: string): Promise<NativeDocument>
+  restart(target: 'host' | 'window'): Promise<void>
 }
 
 function executable() {
@@ -54,8 +55,8 @@ async function stopProcess(child: ChildProcess) {
   await new Promise<void>(done => { stop.once('exit', () => done()); stop.once('error', () => { child.kill(); done() }) })
 }
 
-async function stageExtension(directory: string) {
-  const staged = join(directory, 'extension')
+async function stageExtension(extensions: string, delayEdits: boolean) {
+  const staged = join(extensions, 'smithja06.folio-markdown-editor-0.1.0')
   const dist = join(staged, 'dist')
   const webview = join(dist, 'webview')
   await mkdir(dist, { recursive: true })
@@ -64,6 +65,7 @@ async function stageExtension(directory: string) {
     copyFile('extension/dist/extension.cjs', join(dist, 'extension.cjs')),
     cp('extension/dist/webview', webview, { recursive: true }),
   ])
+  if (!delayEdits) return
   const index = join(webview, 'index.html')
   const html = await readFile(index, 'utf8')
   const entry = '<script type="module"'
@@ -72,7 +74,6 @@ async function stageExtension(directory: string) {
     copyFile('tests/vscode/delay-edits.js', join(webview, 'assets', 'folio-test-delay-edits.js')),
     writeFile(index, html.replace(entry, `<script src="./assets/folio-test-delay-edits.js"></script>\n    ${entry}`)),
   ])
-  return staged
 }
 
 export const test = base.extend<{ desktop: Desktop; delayEdits: boolean }>({
@@ -83,6 +84,8 @@ export const test = base.extend<{ desktop: Desktop; delayEdits: boolean }>({
     const workspace = join(directory, 'workspace')
     const profile = join(directory, 'profile')
     const bridge = join(directory, 'bridge')
+    const extensions = join(directory, 'extensions')
+    const harness = join(extensions, 'folio-test.desktop-bridge-0.0.1')
     const messages: ConsoleEntry[] = []
     let child: ChildProcess | undefined
     let browser: Browser | undefined
@@ -100,19 +103,21 @@ export const test = base.extend<{ desktop: Desktop; delayEdits: boolean }>({
       return result.value
     }
     try {
-      await Promise.all([mkdir(workspace), mkdir(bridge), mkdir(join(profile, 'User'), { recursive: true })])
-      await writeFile(join(profile, 'User', 'settings.json'), JSON.stringify({
+      await Promise.all([mkdir(workspace), mkdir(bridge), mkdir(join(profile, 'User'), { recursive: true }), mkdir(harness, { recursive: true })])
+      await Promise.all([stageExtension(extensions, delayEdits), copyFile('tests/vscode/host.cjs', join(harness, 'host.cjs')),
+        writeFile(join(harness, 'package.json'), JSON.stringify({
+          name: 'desktop-bridge', publisher: 'folio-test', version: '0.0.1', engines: { vscode: '^1.100.0' },
+          activationEvents: ['*'], main: './host.cjs',
+        })), writeFile(join(profile, 'User', 'settings.json'), JSON.stringify({
         'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': false,
         'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': false,
         'extensions.autoCheckUpdates': false, 'chat.disableAIFeatures': true,
         'files.autoSave': 'off', 'files.hotExit': 'off',
-      }))
-      const env: NodeJS.ProcessEnv = { ...process.env, FOLIO_VSCODE_TEST_BRIDGE: bridge }
+      }))])
+      const env: NodeJS.ProcessEnv = { ...process.env }
       delete env.ELECTRON_RUN_AS_NODE
-      const extension = delayEdits ? await stageExtension(directory) : resolve('extension')
       child = spawn(executable(), [
-        '--user-data-dir=' + profile, '--extensions-dir=' + join(directory, 'extensions'),
-        '--extensionDevelopmentPath=' + extension, '--extensionTestsPath=' + resolve('tests/vscode/host.cjs'),
+        '--user-data-dir=' + profile, '--extensions-dir=' + extensions,
         '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', '--skip-welcome', '--new-window', workspace,
       ], { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
       child.once('error', error => messages.push({ kind: 'spawn error', text: error.message }))
@@ -130,7 +135,32 @@ export const test = base.extend<{ desktop: Desktop; delayEdits: boolean }>({
       page.on('console', message => { if (message.type() === 'error') messages.push({ kind: 'console error', text: message.text() }) })
       await page.locator('.monaco-workbench').waitFor()
       await waitForFile(join(bridge, 'ready'), child)
-      await use({ page, workspace, command, read: file => command<NativeDocument>('read', { file }) })
+      await use({
+        page, workspace, command,
+        read: file => command<NativeDocument>('read', { file }),
+        async restart(target) {
+          const ready = join(bridge, 'ready')
+          const previous = await readFile(ready, 'utf8')
+          if (target === 'host') {
+            // The private bridge marker identifies only this fixture's extension-host process.
+            const pid = Number(previous)
+            if (!Number.isSafeInteger(pid) || pid <= 0 || pid === child?.pid || pid === process.pid) throw new Error('Invalid test extension host PID.')
+            process.kill(pid, 'SIGKILL')
+          } else await command('reloadWindow')
+          const end = Date.now() + timeout
+          while (Date.now() < end) {
+            const current = await waitForFile(ready, child)
+            if (current && current !== previous) return
+            await delay(50)
+          }
+          const outcome = await readFile(join(bridge, 'activation-error'), 'utf8').catch(() =>
+            readFile(join(bridge, 'restart-outcome'), 'utf8').catch(() => 'command did not return'))
+          let previousHostAlive = false
+          try { process.kill(Number(previous), 0); previousHostAlive = true } catch { /* The previous host exited. */ }
+          const window = await page?.locator('body').innerText({ timeout: 1000 }).catch(() => '') ?? ''
+          throw new Error(`VS Code did not restart the ${target} (${outcome}, previous host still running: ${previousHostAlive}). ${window.slice(-800)}`)
+        },
+      })
     } finally {
       if (testInfo.status !== testInfo.expectedStatus) {
         for (const frame of page?.frames() ?? []) {

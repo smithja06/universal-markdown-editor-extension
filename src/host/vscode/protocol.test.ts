@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { isClientMessage, isHostMessage, rebaseSource, sourceChange, spliceSource } from './protocol'
+import { connectionMessage, isClientMessage, isHostMessage, rebaseSource, sourceChange, spliceSource } from './protocol'
 
 it('validates message directions and requires safe revisions and normalized LF source', () => {
   const state = { uri: 'file:///notes.md', title: 'notes.md', source: 'one\ntwo', revision: 2, dirty: true, available: true, eol: '\r\n' }
@@ -9,8 +9,8 @@ it('validates message directions and requires safe revisions and normalized LF s
   expect(isHostMessage({ type: 'state', state: { ...state, revision: 1.4 } })).toBe(false)
   expect(isHostMessage({ type: 'ready' })).toBe(false)
   expect(isClientMessage({ type: 'ready' })).toBe(true)
-  expect(isClientMessage({ type: 'command', command: 'copy', text: 'note' })).toBe(true)
-  expect(isClientMessage({ type: 'command', command: 'copy' })).toBe(false)
+  expect(isClientMessage({ type: 'copy', id: 1, text: 'note' })).toBe(true)
+  expect(isClientMessage({ type: 'copy', id: 1 })).toBe(false)
   expect(isClientMessage({ type: 'command', command: 'open' })).toBe(false)
   expect(isClientMessage({ type: 'edit', id: 1, revision: 2, change: { from: 4, to: 3, text: 'text' } })).toBe(false)
   expect(isClientMessage({ type: 'edit', id: 1, revision: 2, change: { from: 2, to: Infinity, text: 'text' } })).toBe(false)
@@ -31,4 +31,19 @@ it('merges disjoint edits in either order and refuses concurrent edits to the sa
   expect(rebaseSource('alpha middle omega', 'alpha middle Ω', 'ALPHABET middle omega')).toBe('ALPHABET middle Ω')
   expect(rebaseSource('middle', 'Left middle', 'Right middle')).toBeUndefined()
   expect(rebaseSource('middle', 'New middle', 'New middle')).toBe('New middle')
+})
+
+it('validates the connection and recovery journal payloads in both directions', () => {
+  const id = '15b2df20-4d71-4cfa-a87d-f69dc49dd751'
+  const scope = 'a'.repeat(64)
+  const draft = { id, uri: 'file:///note.md', generation: 2, reason: 'conflict', source: 'draft', eol: '\r\n', bom: true,
+    native: { source: 'native\n', eol: '\n', bom: false } }
+  const message = { type: 'checkpoint', draft }
+  expect(connectionMessage({ connection: id, message }, isClientMessage)).toEqual({ connection: id, message })
+  expect(connectionMessage({ connection: '../note.md', message }, isClientMessage)).toBeUndefined()
+  expect(isClientMessage({ ...message, draft: { ...draft, generation: 0 } })).toBe(false)
+  expect(isClientMessage({ ...message, draft: { ...draft, native: { ...draft.native, source: 'bad\r' } } })).toBe(false)
+  expect(isClientMessage({ type: 'dismiss', id, generation: Infinity })).toBe(false)
+  expect(isHostMessage({ type: 'recovery', id, scope, active: [id], drafts: [draft] })).toBe(true)
+  expect(isHostMessage({ type: 'recovery', id, scope: '', active: [id], drafts: [draft] })).toBe(false)
 })

@@ -72,6 +72,28 @@ test('opens optionally, keeps exact BOM and CRLF, and saves through native undo 
   expect((await read(file)).text).toBe(final)
 })
 
+test('uses the Folio theme for scrollbars in both editor panes and properties', async ({ desktop }) => {
+  const { page, workspace, command } = desktop
+  const file = 'scrollbars.md'
+  await writeFile(join(workspace, file), '# Scrollbars\n\n' + 'Scrollable Markdown paragraph.\n\n'.repeat(80))
+  await command('open', { file, editor: 'folio' })
+  const frame = folio(page)
+  await expect(visual(frame).getByRole('heading', { name: 'Scrollbars' })).toBeVisible()
+  await frame.getByRole('button', { name: 'Split Editor', exact: true }).click()
+  await frame.getByRole('button', { name: 'Toggle document properties' }).click()
+  await frame.getByRole('tab', { name: 'Appearance' }).click()
+
+  const theme = frame.getByRole('combobox', { name: 'Theme', exact: true })
+  const scrollers = ['.visual-scroll', '.source-editor .cm-scroller', '.property-panel']
+  for (const [appearance, colors] of [
+    ['light', 'rgb(139, 139, 139) rgb(255, 255, 255)'],
+    ['dark', 'rgb(113, 131, 120) rgb(28, 36, 32)'],
+  ]) {
+    await theme.selectOption(appearance)
+    for (const scroller of scrollers) await expect(frame.locator(scroller)).toHaveCSS('scrollbar-color', colors)
+  }
+})
+
 test('shares one buffer between Folio panels and reloads clean external changes', async ({ desktop }) => {
   const { page, workspace, command, read } = desktop
   const file = 'shared.markdown'
