@@ -20,7 +20,7 @@ import { openMarkdown, rebaseMarkdown, setFrontMatter, writeMarkdown, type Markd
 import type { WritableMarkdownHandle } from '../document/files'
 import { WorkspaceRestoreConflict, type FileInput, type FolioHost } from '../host/contracts'
 import { documentInfo, type Heading } from '../document/metadata'
-import { availableTitle, draftSummary, emptyLayout, newDocument, useWorkspace, welcomeSource, withoutTabs, type DocumentFile, type EditorMode, type EditorPane, type TabView, type WorkspaceLayout } from '../document/workspace'
+import { availableTitle, draftSummary, emptyLayout, newDocument, welcomeSource, withoutTabs, type DocumentFile, type EditorMode, type EditorPane, type TabView, type WorkspaceLayout, type WorkspaceView } from '../document/workspace'
 import { versionInterval, versionStorageError, type DocumentVersion, type VersionTrigger } from '../document/versions'
 
 type LocalStatus = 'loading' | 'pending' | 'saved' | 'unavailable'
@@ -38,7 +38,7 @@ interface TabSession {
 
 export function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error) }
 
-export function useDocument(notify: (message: string) => void, visualScroll: RefObject<HTMLDivElement | null>, { storage, files }: FolioHost) {
+export function useDocument(notify: (message: string) => void, visualScroll: RefObject<HTMLDivElement | null>, { storage, files }: FolioHost, viewSettings: WorkspaceView) {
   const collection = useDocumentCollection(storage)
   const { workspace, documents, drafts, persisted, writing, enqueue, changeLayout, loadCollection, loadFile, persist, cache: cacheFile, opened, updateSummary, forget } = collection
   const [file, setFile] = useState<DocumentFile>(() => newDocument('Getting started', { source: welcomeSource, lineEnding: '\n', bom: false }))
@@ -153,7 +153,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const { selection } = editor.state
     const source = sourceView.current
     const visual = visualScroll.current
-    const mode = useWorkspace.getState().mode
+    const mode = viewSettings.getState().mode
     const restoringView = pendingScroll.current?.id === previous?.id ? pendingScroll.current : undefined
     return {
       id: workspace.current.activeId, mode, pane: active.current,
@@ -161,7 +161,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       source: source ? { anchor: source.state.selection.main.anchor, head: source.state.selection.main.head,
         top: restoringView?.source?.top ?? (source.scrollDOM.clientHeight ? source.scrollDOM.scrollTop : previous?.source?.top ?? 0), left: restoringView?.source?.left ?? (source.scrollDOM.clientWidth ? source.scrollDOM.scrollLeft : previous?.source?.left ?? 0) } : previous?.source,
     }
-  }, [editor, visualScroll, workspace])
+  }, [editor, visualScroll, workspace, viewSettings])
 
   const saveView = useCallback(() => {
     const view = captureView()
@@ -223,7 +223,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       const words = documentInfo(authority.current === 'source' ? parseSource(next.source).document : editor.state.doc).statistics.words
       void persistDraft(next, checkpoint ? 'checkpoint' : 'interval', words)
       saveView()
-      if (useWorkspace.getState().mode === 'source' && !issue.current) summarize(parseSource(next.source))
+      if (viewSettings.getState().mode === 'source' && !issue.current) summarize(parseSource(next.source))
       else if (!issue.current) {
         setInfo(documentInfo(editor.state.doc))
         let count = 0
@@ -234,7 +234,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       setStatus('unavailable')
       notify(errorMessage(error))
     }
-  }, [editor, notify, parseSource, persistDraft, project, replaceFile, saveView, summarize])
+  }, [editor, notify, parseSource, persistDraft, project, replaceFile, saveView, summarize, viewSettings])
 
   const scheduleVersionCheck = useCallback(function checkLater(delay: number) {
     const id = fileRef.current.id
@@ -260,7 +260,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   }, [flush, markStatus, scheduleVersionCheck])
 
   selectionUpdate.current = () => {
-    if (!editor || useWorkspace.getState().mode === 'source') return
+    if (!editor || viewSettings.getState().mode === 'source') return
     trackView()
     const selection = editor.state.selection
     let position = selection.from
@@ -348,26 +348,26 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     schedule()
     refreshSearch()
     window.clearTimeout(mirrorTimer.current)
-    if (useWorkspace.getState().mode !== 'split') return
+    if (viewSettings.getState().mode !== 'split') return
     mirrorTimer.current = window.setTimeout(() => {
-      if (restoring.current || version !== editVersion.current || useWorkspace.getState().mode !== 'split') return
+      if (restoring.current || version !== editVersion.current || viewSettings.getState().mode !== 'split') return
       try { synchronize(false, true) }
       catch (error) {
         if (origin === 'source') setIssue(errorMessage(error))
         else notify(errorMessage(error))
       }
     }, 140)
-  }, [notify, refreshSearch, schedule, setIssue, synchronize])
+  }, [notify, refreshSearch, schedule, setIssue, synchronize, viewSettings])
 
   visualUpdate.current = () => {
-    if (!canEdit() || useWorkspace.getState().mode === 'source' || issue.current) return
+    if (!canEdit() || viewSettings.getState().mode === 'source' || issue.current) return
     if (editor) setMetadata(editor.state.doc.attrs.frontMatter ?? '')
     queueEdit('visual')
   }
 
   const activatePane = useCallback((pane: EditorPane) => {
     if (restoring.current || !workspace.current.activeId) return false
-    const mode = useWorkspace.getState().mode
+    const mode = viewSettings.getState().mode
     if (mode !== 'split') return mode === pane && !(pane === 'visual' && issue.current)
     try {
       if (pane !== authority.current && !synchronize(false, true)) return false
@@ -381,7 +381,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       notify(errorMessage(error))
       return false
     }
-  }, [notify, synchronize, workspace])
+  }, [notify, synchronize, workspace, viewSettings])
 
   const restoreScroll = useCallback((view: TabView) => {
     pendingScroll.current = view
@@ -428,7 +428,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     history.current = resumed?.history ?? []
     authority.current = resumed?.authority ?? (view.mode === 'source' ? 'source' : 'visual')
     active.current = view.mode === 'split' ? view.pane ?? 'visual' : view.mode
-    useWorkspace.getState().setMode(view.mode)
+    viewSettings.getState().setMode(view.mode)
     setActivePane(active.current)
     setIssue(resumed?.issue ?? null)
     if (resumed) {
@@ -463,7 +463,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     setEditorEpoch(value => value + 1)
     setStatus(saveStatusRef.current.get(next.id) ?? 'saved')
     refreshSearch()
-  }, [applySession, applySourceSelection, editor, refreshSearch, replaceFile, restoreScroll, setIssue, summarize])
+  }, [applySession, applySourceSelection, editor, refreshSearch, replaceFile, restoreScroll, setIssue, summarize, viewSettings])
 
   const clearSearch = useCallback(() => {
     searchCache.current = {}
@@ -478,16 +478,16 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     if (cached?.id === id && cached.revision === editVersion.current) return cached
     const source = project().source
     const incomplete = scope === 'rendered' && validateSource(source).length > 0
-    const visible = incomplete && useWorkspace.getState().mode === 'split' ? paired.current?.source ?? session.current.source : source
+    const visible = incomplete && viewSettings.getState().mode === 'split' ? paired.current?.source ?? session.current.source : source
     const snapshot = searchDocument(id, editVersion.current, parseSource(visible), !incomplete)
     searchCache.current[scope] = snapshot
     return snapshot
-  }, [editor, parseSource, project, workspace])
+  }, [editor, parseSource, project, workspace, viewSettings])
 
   const presentSearch = useCallback((model: SearchDocument, hits: SearchHit[], current: number, scroll: boolean) => {
     if (!editor || editor.isDestroyed || model.id !== workspace.current.activeId || model.revision !== editVersion.current) return
     const selected = hits[current]
-    const mode = useWorkspace.getState().mode
+    const mode = viewSettings.getState().mode
     const view = sourceView.current
     const sourceCurrent = !!view && mode !== 'visual' && view.state.doc.toString() === model.session.source
     const visualCurrent = mode !== 'source' && (authority.current === 'visual' || paired.current?.source === model.session.source)
@@ -509,13 +509,13 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       const bounds = scroller.getBoundingClientRect()
       if (position.top < bounds.top || position.bottom > bounds.bottom) scroller.scrollTop += position.top - bounds.top - bounds.height / 3
     }
-  }, [editor, visualScroll, workspace])
+  }, [editor, visualScroll, workspace, viewSettings])
 
   const stashTab = useCallback(() => {
     const id = workspace.current.activeId
     if (!id || !editor || !session.current) return
     const pending = timer.current !== undefined
-    if (useWorkspace.getState().mode === 'split') synchronize(false, true)
+    if (viewSettings.getState().mode === 'split') synchronize(false, true)
     const current = project()
     clearSearch()
     window.clearTimeout(timer.current)
@@ -535,7 +535,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       replaceFile(next)
     } else void queueVersion(current, 'checkpoint')
     return captureView()
-  }, [captureView, clearSearch, drafts, editor, parseSource, persistDraft, project, queueVersion, replaceFile, synchronize, workspace])
+  }, [captureView, clearSearch, drafts, editor, parseSource, persistDraft, project, queueVersion, replaceFile, synchronize, workspace, viewSettings])
 
   useEffect(() => {
     if (!editor) return
@@ -599,13 +599,13 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   }, [flush, project, queueVersion, saveView])
 
   const setSource = useCallback((source: string) => {
-    if (useWorkspace.getState().mode === 'visual' || !workspace.current.activeId || restoring.current) return
+    if (viewSettings.getState().mode === 'visual' || !workspace.current.activeId || restoring.current) return
     fileRef.current = { ...fileRef.current, source }
     queueEdit('source')
-  }, [queueEdit, workspace])
+  }, [queueEdit, workspace, viewSettings])
 
   function switchMode(mode: EditorMode, focus = true) {
-    const previous = useWorkspace.getState().mode
+    const previous = viewSettings.getState().mode
     if (!editor || !session.current || mode === previous || restoring.current) return
     try {
       const next = project()
@@ -625,7 +625,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       replaceFile(next)
       active.current = pane
       setActivePane(pane)
-      useWorkspace.getState().setMode(mode)
+      viewSettings.getState().setMode(mode)
       searchCache.current = {}
       refreshSearch()
       setVisualDirty(false)
@@ -633,7 +633,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       else saveView()
       const token = ++transition.current
       if (focus) requestAnimationFrame(() => {
-        if (token !== transition.current || next.id !== fileRef.current.id || useWorkspace.getState().mode !== mode) return
+        if (token !== transition.current || next.id !== fileRef.current.id || viewSettings.getState().mode !== mode) return
         if (pane === 'source' && view) {
           if (caret !== undefined) view.dispatch({ selection: { anchor: Math.min(caret, view.state.doc.length) }, scrollIntoView: true })
           view.focus()
@@ -656,7 +656,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     }
     const result = replaceSearchHits(model, scope, hits, value, regex)
     if (result.source === model.session.source) return result
-    const mode = useWorkspace.getState().mode
+    const mode = viewSettings.getState().mode
     const useSource = scope === 'source' || mode === 'source' || (mode === 'split' && (active.current === 'source' || issue.current))
     if (useSource) {
       if (mode === 'visual') switchMode('source', false)
@@ -763,12 +763,20 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       } else if (wasActive) {
         transition.current++
         session.current = null
+        parsed.current = null
         paired.current = null
+        anchors.current = null
         cache.current = null
+        history.current = []
+        pendingScroll.current = undefined
+        initialView.current = undefined
+        if (editor) editor.view.updateState(EditorState.create({ schema: editor.schema, plugins: editor.state.plugins }))
+        sourceRuntime.current?.apply('')
+        replaceFile(newDocument())
         setInfo(emptyInfo)
         setMetadata('')
         setIssue(null)
-        useWorkspace.getState().setMode('visual')
+        viewSettings.getState().setMode('visual')
         setStatus('saved')
         setVisualDirty(false)
         setEditorEpoch(value => value + 1)
@@ -914,7 +922,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   function jumpToHeading(heading: Heading): BlockAnchor | undefined {
     if (!editor) return
     setActiveHeading(heading.anchor)
-    if (useWorkspace.getState().mode === 'split') {
+    if (viewSettings.getState().mode === 'split') {
       try {
         synchronize(false, true)
         const pair = paired.current
@@ -926,7 +934,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       } catch (error) { notify(errorMessage(error)) }
       return
     }
-    if (useWorkspace.getState().mode === 'source') {
+    if (viewSettings.getState().mode === 'source') {
       const view = sourceView.current
       if (!view) return
       const source = view.state.doc.toString()

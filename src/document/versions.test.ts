@@ -13,7 +13,7 @@ beforeAll(async () => {
     const request = indexedDB.open('folio-workspace', 1)
     request.onupgradeneeded = () => request.result.createObjectStore('sessions').put(workspace(), 'current')
     request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
+    request.onerror = () => reject(request.error ?? new Error('Could not open the legacy versions fixture.'))
   })
   db.close()
 })

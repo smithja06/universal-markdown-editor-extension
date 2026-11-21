@@ -1,5 +1,5 @@
-import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
-import { ChevronDown, ChevronUp, Replace, Search, X } from 'lucide-react'
+import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
+import { ChevronDown, ChevronUp, Replace, Search, WholeWord, X } from 'lucide-react'
 import { searchTexts, locateSearchHits, type SearchDocument, type SearchHit, type SearchScope } from '../editor/documentSearch'
 import type { SearchOptions } from '../core/search'
 import type { EditorMode } from '../document/workspace'
@@ -24,6 +24,7 @@ interface Props {
 }
 
 export function FindPanel({ panelRef, documentId, title, mode, startReplace, find, capture, subscribe, present, replace, clear, openSource, close }: Props) {
+  const replaceId = useId()
   const [term, setTerm] = useState('')
   const [value, setValue] = useState('')
   const [scope, setScope] = useState<SearchScope>('rendered')
@@ -44,10 +45,13 @@ export function FindPanel({ panelRef, documentId, title, mode, startReplace, fin
   const hasQuery = !!term
   const snapshot = useMemo(() => {
     if (!hasQuery) return
-    try { return { document: capture(scope) } }
-    catch (reason) { return { error: reason instanceof Error ? reason.message : 'The document could not be read.' } }
+    try {
+      const document = capture(scope)
+      return { document: document?.id === documentId ? document : undefined, revision }
+    } catch (reason) { return { error: reason instanceof Error ? reason.message : 'The document could not be read.' } }
   }, [capture, documentId, hasQuery, revision, scope])
-  const model = snapshot?.document?.id === documentId ? snapshot.document : undefined
+  const model = snapshot?.document
+  const capturedRevision = snapshot?.revision
   const request = useMemo(() => ({ model, scope, term, options }), [model, scope, term, options])
   const completed = results?.key === request ? results : undefined
   const hits = completed?.hits
@@ -76,7 +80,7 @@ export function FindPanel({ panelRef, documentId, title, mode, startReplace, fin
     const scroll = presented.current?.key !== request || presented.current?.index !== active
     presented.current = { key: request, index: active }
     present(model, hits, active, scroll)
-  }, [active, clear, hits, mode, model, present, request, revision])
+  }, [active, capturedRevision, clear, hits, mode, model, present, request])
 
   function move(step: number) {
     if (!hits?.length) return
@@ -89,8 +93,12 @@ export function FindPanel({ panelRef, documentId, title, mode, startReplace, fin
     move,
     focus(replaceVisible) {
       if (replaceVisible) setExpanded(true)
-      input.current?.focus()
-      input.current?.select()
+      const target = input.current
+      if (!target) return
+      const focusInput = () => { target.focus(); target.select() }
+      focusInput()
+      // A command can run just before the modal palette releases focus.
+      if (target.ownerDocument.activeElement !== target) requestAnimationFrame(() => { if (target.isConnected) focusInput() })
     },
   }))
 
@@ -114,19 +122,20 @@ export function FindPanel({ panelRef, documentId, title, mode, startReplace, fin
   const unmapped = scope === 'rendered' && mode === 'source' && selected && !selected.source.length
 
   return <section className="find-panel" aria-label="Find and replace" onKeyDown={event => {
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() }
+    if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); close() }
   }}>
     <div className="find-row">
-      <IconButton label={expanded ? 'Hide replacement' : 'Show replacement'} active={expanded} onClick={() => setExpanded(previous => !previous)}><Replace size={15} /></IconButton>
+      <IconButton label={expanded ? 'Hide replacement' : 'Show replacement'} expanded={expanded} controls={replaceId} onClick={() => setExpanded(previous => !previous)}><Replace size={15} /></IconButton>
       <label className="find-input"><Search size={15} /><input ref={input} aria-label="Find text" placeholder={'Find in ' + title} value={term} onChange={event => { resetResult(); setTerm(event.target.value) }} onKeyDown={event => {
-        if (event.key === 'Enter') { event.preventDefault(); move(event.shiftKey ? -1 : 1) }
+        if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); move(event.shiftKey ? -1 : 1) }
       }} /></label>
       <select aria-label="Search scope" value={scope} onChange={event => { resetResult(); setScope(event.target.value as SearchScope) }}>
         <option value="rendered">Rendered content</option><option value="source">Raw Markdown</option>
       </select>
       <div className="find-options" role="group" aria-label="Search options">
-        {([['caseSensitive', 'Match case', 'Aa'], ['wholeWord', 'Whole word', '\\b'], ['regex', 'Regular expression', '.*']] as const).map(([key, label, symbol]) => (
-          <IconButton key={key} label={label} active={options[key]} onClick={() => { resetResult(); setOptions(previous => ({ ...previous, [key]: !previous[key] })) }}><span>{symbol}</span></IconButton>
+        {([['caseSensitive', 'Match case', 'Aa'], ['wholeWord', 'Whole word', <WholeWord size={15} />], ['regex', 'Regular expression', '.*']] as const).map(([key, label, symbol]) => (
+          <IconButton key={key} label={label} active={options[key]}
+            onClick={() => { resetResult(); setOptions(previous => ({ ...previous, [key]: !previous[key] })) }}><span aria-hidden="true">{symbol}</span></IconButton>
         ))}
       </div>
       <span className="find-count" role="status">{error ? 'Search unavailable' : !hasQuery ? 'Enter text' : !completed ? 'Searching…' : hits?.length ? `${active + 1} of ${hits.length} ${hits.length === 1 ? 'match' : 'matches'}` : 'No matches'}</span>
@@ -136,11 +145,11 @@ export function FindPanel({ panelRef, documentId, title, mode, startReplace, fin
         <IconButton label="Close find" onClick={close}><X size={17} /></IconButton>
       </div>
     </div>
-    {expanded && <form className="find-replace-row" onSubmit={event => { event.preventDefault(); performReplace(false) }}>
+    <form id={replaceId} className="find-replace-row" hidden={!expanded} onSubmit={event => { event.preventDefault(); performReplace(false) }}>
       <input className="find-input" aria-label="Replace with" placeholder="Replace with" value={value} onChange={event => { setValue(event.target.value); setActionError('') }} />
       <button type="submit" className="secondary-button" disabled={!hits?.length || !model?.canReplace}>Replace</button>
       <button type="button" className="secondary-button" disabled={!hits?.length || !model?.canReplace} onClick={() => performReplace(true)}>Replace all</button>
-    </form>}
+    </form>
     {sourceOnly && <div className="find-feedback">This match is visible in Markdown Source. <button type="button" onClick={openSource}>Show source</button></div>}
     {unmapped && <div className="find-feedback">This match is shown near its Markdown block. An exact source span is unavailable.</div>}
     {model && !model.canReplace && <p className="find-feedback">Finish the Markdown structure or use Raw Markdown to replace text in this draft.</p>}

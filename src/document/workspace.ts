@@ -1,6 +1,7 @@
-import { create } from 'zustand'
+import { createStore } from 'zustand/vanilla'
 import type { MarkdownFile } from './files'
 import { forestAccent, normalizeAccent, type AccentColor, type Theme } from '../appearance'
+import type { AppearancePreferences } from '../host/contracts'
 
 export interface DocumentFile extends MarkdownFile {
   id: string
@@ -41,22 +42,11 @@ export const welcomeSource = [
   'Open a Markdown file or start with a blank page. Use the outline to move between sections, and export your work whenever you’re ready.',
 ].join('\n\n') + '\n'
 
-const appearanceKey = 'folio.appearance.v1'
-function persistAppearance(appearance: Appearance) {
-  try { localStorage.setItem(appearanceKey, JSON.stringify(appearance)) } catch { /* Preferences still work for this tab. */ }
-}
+type StoredAppearance = Partial<Omit<Appearance, 'theme' | 'accentColor'>> & { theme?: unknown; accentColor?: unknown }
 
-function initialAppearance(): Appearance {
-  try {
-    const stored: Partial<Omit<Appearance, 'theme' | 'accentColor'>> & { theme?: unknown; accentColor?: unknown } =
-      JSON.parse(localStorage.getItem(appearanceKey) ?? '{}') ?? {}
-    const systemDark = stored.theme === 'system' && globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches
-    const theme = stored.theme === 'dark' || systemDark ? 'dark' : 'light'
-    const appearance = { ...defaultAppearance, ...stored, theme, accentColor: normalizeAccent(stored.accentColor) } satisfies Appearance
-    if (stored.theme === 'system') persistAppearance(appearance)
-    return appearance
-  }
-  catch { return defaultAppearance }
+export function normalizeAppearance(stored: StoredAppearance, prefersDark = false): Appearance {
+  const theme = stored.theme === 'dark' || (stored.theme === 'system' && prefersDark) ? 'dark' : 'light'
+  return { ...defaultAppearance, ...stored, theme, accentColor: normalizeAccent(stored.accentColor) }
 }
 
 export type EditorPane = 'visual' | 'source'
@@ -71,18 +61,22 @@ interface Workspace {
   setAppearance(update: Partial<Appearance>): void
 }
 
-export const useWorkspace = create<Workspace>(set => ({
-  mode: 'visual',
-  sidebar: typeof window === 'undefined' || window.innerWidth >= 1000,
-  appearance: initialAppearance(),
-  setMode: mode => set({ mode }),
-  setSidebar: sidebar => set({ sidebar }),
-  setAppearance: update => set(state => {
-    const appearance = { ...state.appearance, ...update }
-    persistAppearance(appearance)
-    return { appearance }
-  }),
-}))
+export function createWorkspace(preferences: AppearancePreferences, sidebar: boolean) {
+  return createStore<Workspace>(set => ({
+    mode: 'visual',
+    sidebar,
+    appearance: preferences.read(),
+    setMode: mode => set({ mode }),
+    setSidebar: sidebar => set({ sidebar }),
+    setAppearance: update => set(state => {
+      const appearance = { ...state.appearance, ...update }
+      preferences.write(appearance)
+      return { appearance }
+    }),
+  }))
+}
+
+export type WorkspaceView = ReturnType<typeof createWorkspace>
 
 export interface DocumentSummary {
   id: string

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react'
+import { useStore } from 'zustand'
 import { EditorContent } from '@tiptap/react'
 import { NodeSelection } from '@tiptap/pm/state'
 import { redo as redoSource, redoDepth, undo as undoSource, undoDepth } from '@codemirror/commands'
@@ -13,7 +14,7 @@ import { useDocument, errorMessage } from './editor/useDocument'
 import { dividerWidth, useSplitLayout } from './editor/useSplitLayout'
 import { scrollToSplitHeading, useSplitScroll } from './editor/splitScroll'
 import { calloutKinds } from './editor/schema'
-import { useWorkspace, type EditorMode, type EditorPane } from './document/workspace'
+import { createWorkspace, type EditorMode, type EditorPane } from './document/workspace'
 import type { Heading } from './document/metadata'
 import { IconButton, Menu, Modal, type Item } from './ui/controls'
 import { Toolbar, fullFormatItems, paragraphStyle, paragraphStyles, useFormatting } from './ui/Toolbar'
@@ -27,7 +28,6 @@ import { CommandPalette, type PaletteEntry } from './ui/CommandPalette'
 import { FindPanel, type FindPanelHandle } from './ui/FindPanel'
 import { registerItems } from './ui/commandItems'
 import { CommandRegistry, matchesShortcut, shortcutLabel } from './core/commands'
-import { browserHost } from './host/browser'
 import type { FolioHost } from './host/contracts'
 
 const windowCommands = ['workspace.palette', 'document.save', 'document.save-as', 'document.open-markdown', 'search.find', 'search.replace',
@@ -51,19 +51,23 @@ const editorModes = [
   { mode: 'split', label: 'Split Editor', short: 'Split', icon: Columns2 },
 ] satisfies { mode: EditorMode; label: string; short: string; icon: typeof Code2 }[]
 
-export default function App({ host = browserHost }: { host?: FolioHost } = {}) {
+export default function App({ host }: { host: FolioHost }) {
   const [toast, setToast] = useState('')
   const toastTimer = useRef<number | undefined>(undefined)
+  const notificationHost = host.notifications
   const notify = useCallback((message: string) => {
+    if (notificationHost) { notificationHost.show(message); return }
     setToast(message)
     window.clearTimeout(toastTimer.current)
     toastTimer.current = window.setTimeout(() => setToast(''), 4300)
-  }, [])
+  }, [notificationHost])
+  useEffect(() => () => window.clearTimeout(toastTimer.current), [])
+  const [workspaceView] = useState(() => createWorkspace(host.appearance, window.innerWidth >= 1000))
   const visualScroll = useRef<HTMLDivElement>(null)
-  const doc = useDocument(notify, visualScroll, host)
+  const doc = useDocument(notify, visualScroll, host, workspaceView)
   const { editor } = doc
   const formatting = useFormatting(editor)
-  const { mode, sidebar, setSidebar, appearance, setAppearance } = useWorkspace()
+  const { mode, sidebar, setSidebar, appearance, setAppearance } = useStore(workspaceView)
   const accents = useMemo(() => accentTheme(appearance.accentColor, appearance.theme), [appearance.accentColor, appearance.theme])
   const split = mode === 'split'
   const source = mode === 'source' || (split && doc.activePane === 'source')
@@ -77,6 +81,8 @@ export default function App({ host = browserHost }: { host?: FolioHost } = {}) {
   const [location, setLocation] = useState<SourceLocation>({ line: 1, column: 1 })
   const [request, setRequest] = useState<InsertRequest | null>(null)
   const [dialog, setDialog] = useState<'shortcuts' | 'recent' | 'history' | 'library' | 'emoji' | null>(null)
+  const root = useRef<HTMLDivElement>(null)
+  const propertiesOrigin = useRef<HTMLElement | null>(null)
   const [palette, setPalette] = useState<'all' | 'documents' | 'headings' | null>(null)
   const [recentCommands, setRecentCommands] = useState(() => host.recentCommands.read())
   const [findPanel, setFindPanel] = useState<{ replace: boolean } | null>(null)
@@ -139,7 +145,22 @@ export default function App({ host = browserHost }: { host?: FolioHost } = {}) {
     if (source && doc.sourceView.current) { redoSource(doc.sourceView.current); doc.sourceView.current.focus() }
     else editor?.chain().focus().redo().run()
   }
-  function openProperties(next: PropertyTab) { setTab(next); setSidebar(true) }
+  function openProperties(next: PropertyTab) {
+    const focused = document.activeElement
+    if (focused instanceof HTMLElement && root.current?.contains(focused) && !focused.closest('.properties, [role="menu"], dialog')) propertiesOrigin.current = focused
+    setTab(next)
+    setSidebar(true)
+    requestAnimationFrame(() => {
+      if (workspaceView.getState().sidebar) root.current?.querySelector<HTMLElement>('.property-tabs [aria-selected="true"]')?.focus({ preventScroll: true })
+    })
+  }
+  function closeProperties() {
+    setSidebar(false)
+    const origin = propertiesOrigin.current
+    propertiesOrigin.current = null
+    const target = origin?.isConnected ? origin : root.current?.querySelector<HTMLElement>('.sidebar-toggle')
+    target?.focus({ preventScroll: true })
+  }
   function jump(heading: Heading) {
     const position = doc.jumpToHeading(heading)
     const view = doc.sourceView.current
@@ -271,7 +292,7 @@ export default function App({ host = browserHost }: { host?: FolioHost } = {}) {
         const view = doc.sourceView.current
         if (!view) return
         const { from, to } = view.state.selection.main
-        const alt = asset.alt.replace(/[\[\]\\]/g, ' ')
+        const alt = asset.alt.replace(/[[\]\\]/g, ' ')
         const text = '![' + alt + '](' + asset.url + ')'
         view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } })
         view.focus()
@@ -314,14 +335,11 @@ export default function App({ host = browserHost }: { host?: FolioHost } = {}) {
   async function copy(kind: 'markdown' | 'text') {
     try {
       const current = doc.project()
-      if (kind === 'markdown') await navigator.clipboard.writeText(current.source)
-      else if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
-        const text = import('./document/export').then(({ renderedText }) => new Blob([renderedText(current.source)], { type: 'text/plain' }))
-        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text })])
-      } else {
+      if (kind === 'markdown') await host.clipboard.writeText(current.source)
+      else await host.clipboard.writeText(async () => {
         const { renderedText } = await import('./document/export')
-        await navigator.clipboard.writeText(renderedText(current.source))
-      }
+        return renderedText(current.source)
+      })
       notify(kind === 'markdown' ? 'Markdown copied' : 'Rendered text copied')
     } catch (error) { notify('Could not copy to the clipboard. ' + errorMessage(error)) }
   }
@@ -354,7 +372,7 @@ export default function App({ host = browserHost }: { host?: FolioHost } = {}) {
   const viewItems = registerItems(registry, platform, 'View', 'view', [
     ...editorModes.map(({ mode: choice, label, icon: Icon }) => ({ id: 'view.mode.' + choice, label, keywords: 'switch editor mode ' + choice, icon: <Icon size={16} />, active: mode === choice, run: () => doc.switchMode(choice) })),
     ...(split ? [{ label: 'Sync Scroll', active: appearance.syncScroll, run: () => setAppearance({ syncScroll: !appearance.syncScroll }) }] : []),
-    { id: 'view.properties', label: sidebar ? 'Hide document properties' : 'Show document properties', keywords: 'toggle sidebar', icon: <PanelRight size={16} />, run: () => setSidebar(!sidebar) },
+    { id: 'view.properties', label: sidebar ? 'Hide document properties' : 'Show document properties', keywords: 'toggle sidebar', icon: <PanelRight size={16} />, run: () => sidebar ? closeProperties() : openProperties(tab) },
     { label: 'Document outline', icon: <ListTree size={16} />, run: () => openProperties('Outline') },
     { id: 'view.width', label: appearance.width === 'full' ? 'Page width' : 'Full width', keywords: 'toggle document width', icon: appearance.width === 'full' ? <Minimize2 size={16} /> : <Maximize2 size={16} />, run: () => setAppearance({ width: appearance.width === 'full' ? 'page' : 'full' }) },
     { label: 'Appearance', run: () => openProperties('Appearance') },
@@ -462,11 +480,11 @@ export default function App({ host = browserHost }: { host?: FolioHost } = {}) {
   const statusLabel = doc.status === 'loading' ? 'Opening workspace…' : !ready ? 'No open documents' : doc.status === 'pending' ? 'Saving draft…' : doc.status === 'unavailable' ? 'Local storage unavailable' : 'Saved locally'
   const StatusIcon = doc.status === 'unavailable' ? CloudOff : doc.status === 'saved' ? Check : LoaderCircle
   const style = { ...accents, '--writing-font': fonts[appearance.font], '--writing-size': appearance.fontSize + 'px', '--writing-leading': appearance.lineHeight } as CSSProperties
-  return <div className="app" data-theme={appearance.theme} style={style} onClickCapture={event => {
+  return <div ref={root} className="app" data-theme={appearance.theme} style={style} onClickCapture={event => {
     if (document.activeElement === titleInput.current && event.target !== titleInput.current) titleInput.current?.blur()
   }}>
     <header className="topbar">
-      <div className="brand" aria-label="Folio"><span className="brand-icon"><FileText size={21} strokeWidth={1.9} /></span><span>folio<span className="brand-period">.</span></span></div>
+      <div className="brand" role="img" aria-label="Folio"><span className="brand-icon"><FileText size={21} strokeWidth={1.9} /></span><span>folio<span className="brand-period">.</span></span></div>
       <div className="topbar-divider" />
       <div className="document-identity">
         {ready ? <div className="title-line"><input ref={titleInput} aria-label="Document name" key={doc.file.id + doc.file.title} defaultValue={doc.file.title} maxLength={155} onBlur={event => doc.changeTitle(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { event.currentTarget.value = doc.file.title; event.currentTarget.blur() } }} style={{ width: Math.min(240, Math.max(120, doc.file.title.length * 8.6 + 17)) }} />
@@ -544,13 +562,14 @@ export default function App({ host = browserHost }: { host?: FolioHost } = {}) {
           <div className="source-pane-content" onPointerDownCapture={event => { if (split && !doc.activatePane('source')) event.preventDefault() }}
             onFocusCapture={() => { if (split) doc.activatePane('source') }}
             onBeforeInputCapture={event => { if (!doc.activatePane('source')) event.preventDefault() }}>
-            {started && <SourceEditor initial={doc.file.source} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} canEdit={doc.canEdit} onChange={doc.setSource} onLocation={location => { setLocation(location); doc.trackView() }} onReady={doc.registerSource} />}
+            {started && <SourceEditor initial={doc.file.source} active={ready && mode !== 'visual'} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} canEdit={doc.canEdit} onChange={doc.setSource}
+              onLocation={location => { setLocation(location); doc.trackView() }} onReady={doc.registerSource} onLanguageError={() => notify('Markdown aids could not be loaded. Source editing is still available.')} />}
           </div>
         </section>
         {dragging && <div className="drop-overlay" aria-hidden="true"><Upload size={29} /><strong>Drop a Markdown file or image</strong></div>}
       </main>
-      {ready && sidebar && <Properties tab={tab} setTab={setTab} headings={doc.info.outline} active={doc.activeHeading || doc.info.outline[0]?.anchor || ''} statistics={doc.info.statistics} key={doc.file.id}
-        metadata={doc.metadata} onMetadata={doc.changeMetadata} close={() => setSidebar(false)} jump={jump} width={width} setWidth={value => setWidth(Math.min(430, Math.max(250, value)))} />}
+      {ready && sidebar && <Properties appearance={appearance} setAppearance={setAppearance} tab={tab} setTab={setTab} headings={doc.info.outline} active={doc.activeHeading || doc.info.outline[0]?.anchor || ''} statistics={doc.info.statistics} key={doc.file.id}
+        metadata={doc.metadata} onMetadata={doc.changeMetadata} close={closeProperties} jump={jump} width={width} setWidth={value => setWidth(Math.min(430, Math.max(250, value)))} />}
     </div>
     <footer className="statusbar">
       <div><span className="mode-indicator"><i />{split ? 'Split mode' : source ? 'Source mode' : 'Visual mode'}</span><span className="status-separator" /><button type="button" onClick={() => openProperties('Statistics')}>{doc.info.statistics.words.toLocaleString()} words</button><span className="reading-time">{doc.info.statistics.minutes} min read</span></div>

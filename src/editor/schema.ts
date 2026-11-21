@@ -13,6 +13,7 @@ export const calloutKinds = ['note', 'tip', 'important', 'warning', 'caution', '
 export type CalloutKind = typeof calloutKinds[number]
 
 export function safeUrl(value: string, image = false): boolean {
+  // eslint-disable-next-line no-control-regex -- Ignore controls when checking for an obfuscated protocol.
   const compact = value.replace(/[\u0000-\u0020\u007f-\u009f]/g, '')
   if (!compact) return false
   if (image && /^data:image\/(?:png|jpeg|gif|webp|avif|bmp|x-icon);base64,[a-z\d+/=]+$/i.test(compact)) return true
@@ -112,8 +113,11 @@ export const Toc = Node.create({
 export const DocumentImage = Node.create({
   name: 'image', group: 'inline', inline: true, atom: true, draggable: true,
   addAttributes: () => ({
-    src: { default: '', rendered: false }, alt: { default: '', rendered: false }, title: { default: null, rendered: false },
-    caption: { default: null, rendered: false }, width: { default: null, rendered: false }, align: { default: null, rendered: false },
+    src: { default: '', rendered: false, parseHTML: element => element.getAttribute('src') },
+    alt: { default: '', rendered: false, parseHTML: element => element.getAttribute('alt') },
+    title: { default: null, rendered: false, parseHTML: element => element.getAttribute('title') },
+    width: { default: null, rendered: false, parseHTML: element => element.getAttribute('width') },
+    caption: { default: null, rendered: false }, align: { default: null, rendered: false },
   }),
   parseHTML() {
     function attributes(element: HTMLElement) {
@@ -127,8 +131,8 @@ export const DocumentImage = Node.create({
   },
   renderHTML({ node }) {
     const { src, alt, title, width, caption, align } = node.attrs
-    const image: [string, Record<string, string>] = ['img', { src: safeUrl(src, true) ? src : '', alt, ...(title ? { title } : {}), ...(/^\d+$/.test(width ?? '') ? { width } : {}) }]
-    if (!caption && !width && !align) return image
+    const image: [string, Record<string, string>] = ['img', { src: safeUrl(src, true) ? src : '', alt, ...(typeof title === 'string' ? { title } : {}), ...(/^\d+$/.test(width ?? '') ? { width } : {}) }]
+    if (!caption && !align) return image
     return ['span', { 'data-folio-image': '', class: 'document-image', ...(caption ? { 'data-folio-caption': caption } : {}), ...(align ? { 'data-folio-align': align } : {}) },
       image, ...(caption ? [['span', { class: 'image-caption' }, caption] as [string, Record<string, string>, string]] : [])]
   },

@@ -3,8 +3,8 @@ import type { Element, Root as HtmlRoot, RootContent } from 'hast'
 import remarkRehype, { type Options } from 'remark-rehype'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
-import rehypeKatex from 'rehype-katex'
 import rehypeStringify from 'rehype-stringify'
+import { unified } from 'unified'
 import { markdownProcessor } from './markdown'
 import DOMPurify from 'dompurify'
 import { headingSlug, readMetadata } from './metadata'
@@ -192,29 +192,31 @@ const sanitizer = {
   },
 }
 
-function htmlProcessor(output: 'mathml' | 'htmlAndMathml') {
-  return markdownProcessor().use(captureDirectives).use(remarkRehype, { allowDangerousHtml: true, clobberPrefix: '', handlers: {
-    containerDirective: directive, leafDirective: directive, textDirective: directive,
-  } }).use(rehypeRaw).use(rehypeSanitize, sanitizer).use(prepareHtml)
-    .use(rehypeKatex, { output, trust: false, maxExpand: 1000, maxSize: 20 }).use(rehypeStringify)
+const htmlProcessor = markdownProcessor().use(captureDirectives).use(remarkRehype, { allowDangerousHtml: true, clobberPrefix: '', handlers: {
+  containerDirective: directive, leafDirective: directive, textDirective: directive,
+} }).use(rehypeRaw).use(rehypeSanitize, sanitizer).use(prepareHtml).use(rehypeStringify)
+
+function containsMath(children: RootContent[]): boolean {
+  return children.some(node => node.type === 'element' && (
+    (Array.isArray(node.properties.className) && node.properties.className.some(name => name === 'math-inline' || name === 'math-display' || name === 'language-math')) ||
+    containsMath(node.children)
+  ))
 }
 
-const nativeHtml = htmlProcessor('mathml')
-const portableHtml = htmlProcessor('htmlAndMathml')
-
-function renderBody(source: string, selfContained = false) {
-  const processor = selfContained ? portableHtml : nativeHtml
-  const tree: Root = processor.parse(source)
-  return { html: processor.stringify(processor.runSync(tree, source)), metadata: tree.children.find(node => node.type === 'yaml')?.value ?? '' }
+async function renderBody(source: string, selfContained = false) {
+  const tree: Root = htmlProcessor.parse(source)
+  const body = htmlProcessor.runSync(tree, source)
+  if (containsMath(body.children)) {
+    const { default: rehypeKatex } = await import('rehype-katex')
+    await unified().use(rehypeKatex, { output: selfContained ? 'htmlAndMathml' : 'mathml',
+      trust: false, maxExpand: 1000, maxSize: 20 }).run(body)
+  }
+  return { html: htmlProcessor.stringify(body), metadata: tree.children.find(node => node.type === 'yaml')?.value ?? '' }
 }
 
-export function renderMarkdownHtml(source: string) {
-  return renderBody(source).html
-}
-
-export function renderedText(source: string) {
+export async function renderedText(source: string) {
   const template = document.createElement('template')
-  template.innerHTML = renderMarkdownHtml(source)
+  template.innerHTML = (await renderBody(source)).html
   template.content.querySelectorAll('math').forEach(element => element.replaceWith(document.createTextNode(element.querySelector('annotation')?.textContent ?? element.textContent ?? '')))
   template.content.querySelectorAll('script,style,annotation,.katex-html').forEach(element => element.remove())
   template.content.querySelectorAll('br, p, h1, h2, h3, h4, h5, h6, li, pre, blockquote, tr').forEach(element => element.append(document.createTextNode('\n')))
@@ -334,7 +336,7 @@ async function highlightCode(body: DocumentFragment) {
 
 export async function renderVersionPreview(source: string) {
   const template = document.createElement('template')
-  template.innerHTML = renderMarkdownHtml(source)
+  template.innerHTML = (await renderBody(source)).html
   trimFolioMarkup(template.content)
   prepareImages(template.content, true)
   template.content.querySelectorAll('a[href]').forEach(link => {
@@ -352,7 +354,7 @@ export async function renderVersionPreview(source: string) {
 interface ExportAppearance { fontFamily: string; fontSize: number; lineHeight: number }
 
 export async function exportHtml(title: string, source: string, selfContained: boolean, appearance: ExportAppearance, download: FileOperations['download']) {
-  const { html, metadata } = renderBody(source, selfContained)
+  const { html, metadata } = await renderBody(source, selfContained)
   const template = document.createElement('template')
   template.innerHTML = html
   trimFolioMarkup(template.content)
@@ -386,10 +388,11 @@ export async function exportHtml(title: string, source: string, selfContained: b
   if (selfContained) {
     const math = !!template.content.querySelector('.katex-html')
     const inter = appearance.fontFamily.includes('Inter Variable') || html.includes('Inter Variable')
-    if (math || inter) {
-      const { fontStyles } = await import('./exportFonts')
-      css.textContent += fontStyles({ math, inter })
-    }
+    const fonts = await Promise.all([
+      math ? import('./exportMathFonts').then(module => module.mathFontStyles()) : '',
+      inter ? import('./exportTextFonts').then(module => module.textFontStyles()) : '',
+    ])
+    css.textContent += '\n' + fonts.join('\n')
   }
   output.head.append(css)
   const main = output.createElement('main')

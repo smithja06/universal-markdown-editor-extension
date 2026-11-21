@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { History, Plus } from 'lucide-react'
 import { Modal } from './controls'
 import { automaticVersionLimit, versionStorageError, type DocumentVersion, type VersionSummary } from '../document/versions'
@@ -40,6 +40,15 @@ export function VersionHistory({ documentId, title, theme, automaticError, load,
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const [reload, setReload] = useState(0)
+  const restoreButton = useRef<HTMLButtonElement>(null)
+  const restoreFocus = useRef(false)
+
+  useLayoutEffect(() => {
+    if (!confirm && restoreFocus.current) {
+      restoreFocus.current = false
+      restoreButton.current?.focus({ preventScroll: true })
+    }
+  }, [confirm])
 
   useEffect(() => {
     let active = true
@@ -123,7 +132,8 @@ export function VersionHistory({ documentId, title, theme, automaticError, load,
           {Array.from(groups, ([label, entries]) => <section key={label}>
             <h4>{label}</h4>
             <ol>{entries.map(item => <li key={item.id}>
-              <button type="button" className="version-row" aria-label={`Preview version ${timestamp.format(item.createdAt)} ${labels[item.kind]} ${item.id.slice(0, 8)}`} aria-pressed={selection?.id === item.id} disabled={!!busy} onClick={() => select(item.id)}>
+              <button type="button" className="version-row" aria-pressed={selection?.id === item.id} disabled={!!busy} onClick={() => select(item.id)}>
+                <span className="sr-only">Preview version</span>
                 <span className="version-row-time"><time dateTime={new Date(item.createdAt).toISOString()}>{timestamp.format(item.createdAt)}</time><span className={`version-kind version-${item.kind}`}>{labels[item.kind]}</span></span>
                 <span className="version-row-title">{item.title}</span>
                 <span className="muted version-row-time"><span>{relativeTime(item.createdAt)}</span><span className="version-id" title={item.id}>{item.id.slice(0, 8)}</span></span>
@@ -141,12 +151,12 @@ export function VersionHistory({ documentId, title, theme, automaticError, load,
                 <button type="button" aria-pressed={mode === 'rendered'} onClick={() => setMode('rendered')}>Rendered</button>
                 <button type="button" aria-pressed={mode === 'markdown'} onClick={() => setMode('markdown')}>Markdown</button>
               </div>
-              {!confirm && <button type="button" className="secondary-button" disabled={!!busy} onClick={() => { setConfirm(true); setError(''); setStatus('') }}>Restore version</button>}
+              {!confirm && <button type="button" ref={restoreButton} className="secondary-button" disabled={!!busy} onClick={() => { setConfirm(true); setError(''); setStatus('') }}>Restore version</button>}
             </div>
             {confirm && <div className="version-confirm" role="group" aria-label="Confirm version restore">
               <p>Replace the active document with the version from {timestamp.format(preview.createdAt)}? Folio will keep your current draft in history so you can recover it.</p>
               <div className="dialog-actions">
-                <button type="button" className="secondary-button" autoFocus disabled={!!busy} onClick={() => { setConfirm(false); setError('') }}>Cancel restore</button>
+                <button type="button" className="secondary-button" autoFocus disabled={!!busy} onClick={() => { restoreFocus.current = true; setConfirm(false); setError('') }}>Cancel restore</button>
                 <button type="button" className="primary-button" disabled={!!busy} onClick={() => void restoreSelected()}>{busy === 'restore' ? 'Restoring…' : 'Confirm restore'}</button>
               </div>
             </div>}

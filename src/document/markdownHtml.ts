@@ -100,6 +100,18 @@ export function readBlockHtml(raw: string, schema: Schema): ProseMirrorNode | un
   return result.childCount === 1 ? result.firstChild ?? undefined : undefined
 }
 
+export function readInlineImage(raw: string, schema: Schema): ProseMirrorNode | undefined {
+  if (!/^<img(?:\s|\/?>)/i.test(raw)) return undefined
+  const fragment = templateFor(raw)
+  const element = onlyElement(fragment)
+  // Missing alternative text is distinct from an explicitly decorative image.
+  if (element?.localName !== 'img' || !element.hasAttribute('alt') || !supportedElement(element)) return undefined
+  const width = element.getAttribute('width')
+  if (width !== null && !/^\d+$/.test(width)) return undefined
+  const image = DOMParser.fromSchema(schema).parse(fragment).firstChild?.firstChild
+  return image?.type.name === 'image' ? image : undefined
+}
+
 export function readInlineOpening(raw: string, schema: Schema): { tag: string; marks?: readonly Mark[] } | undefined {
   const probe = 'folio-inline-content'
   const container = templateFor(raw + probe)

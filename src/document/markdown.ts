@@ -9,7 +9,7 @@ import remarkFrontmatter from 'remark-frontmatter'
 import remarkMath from 'remark-math'
 import remarkDirective from 'remark-directive'
 import { calloutKinds, safeUrl, type CalloutKind } from '../editor/schema'
-import { htmlMarkTags, isLegacyBlock, normalizeStyleMarks, readBlockHtml, readInlineOpening, writeHtml } from './markdownHtml'
+import { htmlMarkTags, isLegacyBlock, normalizeStyleMarks, readBlockHtml, readInlineImage, readInlineOpening, writeHtml } from './markdownHtml'
 
 export const markdownProcessor = unified().use(remarkParse).use(remarkGfm).use(remarkFrontmatter).use(remarkMath).use(remarkDirective).use(remarkStringify, {
   bullet: '-', rule: '-', emphasis: '*', strong: '*', fences: true, listItemIndent: 'one',
@@ -131,6 +131,10 @@ function inlineNodes(nodes: MarkdownNode[], source: string, schema: Schema, mark
         return safeUrl(node.url ?? '', true)
           ? [{ type: 'image', attrs: { src: node.url, alt: node.alt ?? '', title: node.title }, marks }]
           : [{ ...rawNode(node, source, true), marks }]
+      case 'html': {
+        const image = readInlineImage(value, schema)
+        return [{ ...(image?.toJSON() ?? rawNode(node, source, true)), marks }]
+      }
       default: return [{ ...rawNode(node, source, true), marks }]
     }
   }
@@ -283,8 +287,8 @@ export function rebaseMarkdown(session: MarkdownSession, previous: ProseMirrorNo
 }
 
 function needsBlockHtml(node: ProseMirrorNode): boolean {
-  const { textAlign, displayStyle, lineSpacing, paragraphSpacing, indent, caption, width, align, colspan, rowspan, colwidth } = node.attrs
-  return Boolean((textAlign && textAlign !== 'left') || displayStyle || lineSpacing || paragraphSpacing || indent || caption || width || align || colspan > 1 || rowspan > 1 || colwidth)
+  const { textAlign, displayStyle, lineSpacing, paragraphSpacing, indent, caption, align, colspan, rowspan, colwidth } = node.attrs
+  return Boolean((textAlign && textAlign !== 'left') || displayStyle || lineSpacing || paragraphSpacing || indent || caption || align || colspan > 1 || rowspan > 1 || colwidth)
     || node.children.some(needsBlockHtml)
 }
 
@@ -319,7 +323,8 @@ function inlineMarkdown(nodes: readonly ProseMirrorNode[], htmlMarks: boolean): 
     }
     let token: MarkdownNode
     switch (node.type.name) {
-      case 'image': token = { type: 'image', url: node.attrs.src, alt: node.attrs.alt, title: node.attrs.title }; break
+      case 'image': token = node.attrs.width || node.attrs.title === '' ? { type: 'html', value: writeHtml(node) }
+        : { type: 'image', url: node.attrs.src, alt: node.attrs.alt, title: node.attrs.title }; break
       case 'inlineMath': token = { type: 'inlineMath', value: node.attrs.value }; break
       case 'wikiLink': token = { type: 'html', value: '[[' + node.attrs.value + ']]' }; break
       case 'rawInline': token = { type: 'html', value: node.attrs.value }; break
@@ -333,7 +338,7 @@ function inlineMarkdown(nodes: readonly ProseMirrorNode[], htmlMarks: boolean): 
 }
 
 function portableTable(node: ProseMirrorNode, htmlMarks: boolean): MarkdownNode | undefined {
-  if (!node.firstChild?.children.every(cell => cell.type.name === 'tableHeader')) return undefined
+  if (needsBlockHtml(node) || !node.firstChild?.children.every(cell => cell.type.name === 'tableHeader')) return undefined
   const align = node.firstChild.children.map(cell => cell.attrs.cellAlign ?? null)
   const rows: MarkdownNode[] = []
   for (const [rowIndex, row] of node.children.entries()) {
@@ -352,6 +357,9 @@ function portableTable(node: ProseMirrorNode, htmlMarks: boolean): MarkdownNode 
 }
 
 function portableBlock(node: ProseMirrorNode, htmlMarks: boolean): MarkdownNode | undefined {
+  if ((node.type.name === 'paragraph' || node.type.name === 'heading') && needsBlockHtml(node)) {
+    return { type: 'html', value: writeHtml(node) }
+  }
   const inline = () => inlineMarkdown(node.children, htmlMarks)
   const blocks = (): MarkdownNode[] | undefined => {
     const children = node.children.map(child => portableBlock(child, htmlMarks))
@@ -383,7 +391,7 @@ function portableBlock(node: ProseMirrorNode, htmlMarks: boolean): MarkdownNode 
     }
     case 'listItem':
     case 'taskItem': {
-      const children = node.children.map((child, index) => index === 0 && child.type.name === 'paragraph' && !child.childCount
+      const children = node.children.map((child, index) => index === 0 && isEmptyParagraph(child)
         ? { type: 'paragraph', children: [] } : portableBlock(child, htmlMarks))
       return children.every(child => child !== undefined) ? { type: 'listItem', checked: node.attrs.checked ?? null, children } : undefined
     }
@@ -435,13 +443,11 @@ function equivalent(source: string, node: ProseMirrorNode, references: string): 
 
 function writeBlock(node: ProseMirrorNode, references: string): string {
   if (node.type.name === 'rawBlock') return node.attrs.value
-  if (!needsBlockHtml(node)) {
-    for (const htmlMarks of [false, true]) {
-      const ast = portableBlock(node, htmlMarks)
-      if (!ast) break
-      const value = markdownProcessor.stringify({ type: 'root', children: [ast] } as Root).replace(/\n$/, '')
-      if (equivalent(value, node, references)) return value
-    }
+  for (const htmlMarks of [false, true]) {
+    const ast = portableBlock(node, htmlMarks)
+    if (!ast) break
+    const value = markdownProcessor.stringify({ type: 'root', children: [ast] } as Root).replace(/\n$/, '')
+    if (equivalent(value, node, references)) return value
   }
   for (const legacyWrapper of [false, true]) {
     const value = writeHtml(node, legacyWrapper)

@@ -1,45 +1,24 @@
 import { useEffect, useRef } from 'react'
-import { Compartment, EditorState, Transaction } from '@codemirror/state'
+import { Compartment, EditorState, Transaction, type Extension } from '@codemirror/state'
 import { EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab, isolateHistory, redo } from '@codemirror/commands'
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
-import { GFM } from '@lezer/markdown'
-import { bracketMatching, HighlightStyle, indentOnInput, syntaxHighlighting } from '@codemirror/language'
-import { tags } from '@lezer/highlight'
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
-import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
-import { linter, lintGutter, lintKeymap } from '@codemirror/lint'
-import { validateSource } from './sourceDiagnostics'
 import { sourceSearchDecorations } from './searchDecorations'
 
 export interface SourceLocation { line: number; column: number }
 
-const syntax = HighlightStyle.define([
-  { tag: [tags.heading, tags.heading1, tags.heading2, tags.heading3], class: 'md-heading' },
-  { tag: [tags.strong], class: 'md-strong' },
-  { tag: [tags.emphasis], class: 'md-emphasis' },
-  { tag: [tags.url, tags.link], class: 'md-link' },
-  { tag: [tags.monospace, tags.processingInstruction, tags.meta], class: 'md-code' },
-  { tag: [tags.quote, tags.list, tags.contentSeparator], class: 'md-punctuation' },
-])
-
-const quickSnippets = [
-  { label: 'Heading', apply: '## Heading' },
-  { label: 'Checklist', apply: '- [ ] To do' },
-  { label: 'Callout', apply: '> [!NOTE]\n> Write a note.' },
-  { label: 'Table of contents', apply: '[[TOC]]' },
-  { label: 'Table', apply: '| Column 1 | Column 2 |\n| --- | --- |\n| Value | Value |' },
-]
 const selectionKeymap = searchKeymap.filter(binding => ['Mod-Alt-g', 'Mod-d', 'Mod-Shift-l'].includes(binding.key ?? ''))
 
 interface Props {
   initial: string
+  active: boolean
   lineNumberDisplay: boolean
   wordWrap: boolean
   onChange(value: string): void
   canEdit(): boolean
   onLocation(location: SourceLocation): void
   onReady(runtime: SourceRuntime | null): void
+  onLanguageError(): void
 }
 
 export interface SourceRuntime { view: EditorView; apply(value: string | EditorState): void }
@@ -69,6 +48,8 @@ export function SourceEditor(props: Props) {
   const container = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView>(null)
   const settings = useRef(new Compartment())
+  const language = useRef(new Compartment())
+  const languageSupport = useRef<Extension>(undefined)
   const latest = useRef(props)
   latest.current = props
 
@@ -88,15 +69,9 @@ export function SourceEditor(props: Props) {
         extensions: [
           EditorState.transactionFilter.of(transaction => !transaction.docChanged || latest.current.canEdit() ? transaction : []),
           settings.current.of(configuration()), history(), highlightActiveLine(), highlightSelectionMatches(), sourceSearchDecorations,
-          markdown({ base: markdownLanguage, extensions: [GFM] }), syntaxHighlighting(syntax), bracketMatching(), closeBrackets(), indentOnInput(),
-          autocompletion({ addToOptions: [], override: [context => {
-            const word = context.matchBefore(/\/[a-zA-Z -]*/)
-            if (!word && !context.explicit) return null
-            return { from: word?.from ?? context.pos, options: quickSnippets }
-          }] }),
-          keymap.of([{ key: 'Mod-Shift-z', run: redo, preventDefault: true }, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...selectionKeymap, ...completionKeymap, ...lintKeymap, indentWithTab]),
-          linter(current => validateSource(current.state.doc.toString()), { delay: 400 }), lintGutter(),
-          EditorView.contentAttributes.of({ 'aria-label': 'Markdown source editor', 'aria-multiline': 'true' }),
+          language.current.of(languageSupport.current ?? []),
+          keymap.of([{ key: 'Mod-Shift-z', run: redo, preventDefault: true }, ...defaultKeymap, ...historyKeymap, ...selectionKeymap, indentWithTab]),
+          EditorView.contentAttributes.of({ 'aria-label': 'Markdown source editor', 'aria-multiline': 'true', tabindex: '0' }),
           EditorView.updateListener.of(update => {
             if (update.docChanged && update.transactions.some(transaction => !transaction.isUserEvent('folio.visual'))) {
               latest.current.onChange(update.state.doc.toString())
@@ -109,11 +84,22 @@ export function SourceEditor(props: Props) {
     view.current = editor
     latest.current.onReady({ view: editor, apply(value) {
       editor.setState(typeof value === 'string' ? createState(value) : value)
-      if (typeof value !== 'string') editor.dispatch({ effects: settings.current.reconfigure(configuration()) })
+      if (typeof value !== 'string') editor.dispatch({ effects: [settings.current.reconfigure(configuration()), language.current.reconfigure(languageSupport.current ?? [])] })
       reportLocation(editor.state)
     } })
     return () => { latest.current.onReady(null); view.current = null; editor.destroy() }
   }, [])
+
+  useEffect(() => {
+    if (!props.active || languageSupport.current) return
+    let current = true
+    void import('./SourceLanguage').then(({ sourceLanguage }) => {
+      if (!current) return
+      languageSupport.current = sourceLanguage
+      view.current?.dispatch({ effects: language.current.reconfigure(sourceLanguage) })
+    }, () => { if (current) latest.current.onLanguageError() })
+    return () => { current = false }
+  }, [props.active])
 
   useEffect(() => {
     view.current?.dispatch({ effects: settings.current.reconfigure([

@@ -26,6 +26,7 @@ export function encodeMarkdown(file: MarkdownFile): Uint8Array<ArrayBuffer> {
 }
 
 export function markdownFilename(title: string): string {
+  // eslint-disable-next-line no-control-regex -- Windows filenames cannot contain ASCII control characters.
   const cleaned = title.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/[. ]+$/, '') || 'Untitled'
   return /\.(?:md|markdown)$/i.test(cleaned) ? cleaned : `${cleaned}.md`
 }

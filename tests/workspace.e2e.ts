@@ -243,7 +243,7 @@ test('many open tabs stay usable on mobile and expose contextual actions and key
   await name.fill('Renamed before opening a tab')
   const newTab = page.getByRole('button', { name: 'New document tab' })
   for (let index = 0; index < 16; index++) await newTab.click()
-  const strip = page.getByRole('tablist', { name: 'Open documents' })
+  const strip = page.locator('.document-tab-strip')
   await expect(strip.getByRole('tab')).toHaveCount(17)
   await expect(tab(page, 'Renamed before opening a tab')).toHaveCount(1)
   await page.setViewportSize({ width: 390, height: 844 })

@@ -53,7 +53,7 @@ function openDatabase() {
         blockedUpgrade = undefined
         database = undefined
       }
-      reject(request.error)
+      reject(request.error ?? new Error('Could not open local workspace storage.'))
     }
     request.onsuccess = () => {
       const db = request.result
@@ -78,7 +78,7 @@ function openDatabase() {
 export function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
+    request.onerror = () => reject(request.error ?? new Error('A local storage request failed.'))
   })
 }
 

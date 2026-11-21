@@ -31,7 +31,7 @@ async function seedLegacyWorkspace(page: Page, keepOpen = false) {
         else request.result.close()
         resolve()
       }
-      request.onerror = () => reject(request.error)
+      request.onerror = () => reject(request.error ?? new Error('Could not open the legacy workspace fixture.'))
     })
   }, keepOpen)
 }

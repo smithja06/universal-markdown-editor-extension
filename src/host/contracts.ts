@@ -1,6 +1,6 @@
 import type { Command, ShortcutPlatform } from '../core/commands'
 import type { MarkdownFile, WritableMarkdownHandle } from '../document/files'
-import type { DocumentFile, DocumentSummary, WorkspaceLayout } from '../document/workspace'
+import type { Appearance, DocumentFile, DocumentSummary, WorkspaceLayout } from '../document/workspace'
 import type { DocumentVersion, VersionResult, VersionSummary, VersionTrigger } from '../document/versions'
 import type { SearchOptions, TextMatch } from '../core/search'
 
@@ -32,9 +32,17 @@ export interface FileOperations {
   addAttachment(input: FileInput & { type: string }): Promise<{ url: string; alt: string }>
 }
 
+export interface AppearancePreferences {
+  read(): Appearance
+  write(appearance: Appearance): void
+}
+
 export interface FolioHost {
   storage: DocumentStorage
   files: FileOperations
+  appearance: AppearancePreferences
+  clipboard: { writeText(text: string | (() => Promise<string>)): Promise<void> }
+  notifications?: { show(message: string): void }
   keyboard: { platform: ShortcutPlatform; handledByHost?: ReadonlySet<string> }
   commands?: { attach(api: { commands(): Command[]; execute(id: string, argument?: string): boolean }): () => void }
   search(texts: string[], term: string, options: SearchOptions, signal: AbortSignal): Promise<TextMatch[]>
