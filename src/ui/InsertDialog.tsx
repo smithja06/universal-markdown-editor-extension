@@ -21,7 +21,7 @@ export const diagramPresets = {
 }
 
 export function InsertDialog({ request, editor, anchors, close, chooseLocalImage }: {
-  request: InsertRequest; editor: Editor; anchors: { anchor: string; title: string }[]; close(): void; chooseLocalImage(): void
+  request: InsertRequest; editor: Editor; anchors: { anchor: string; title: string }[]; close(): void; chooseLocalImage?(): void
 }) {
   const name = request.name
   const selection = editor.state.selection
@@ -99,7 +99,7 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
       </>}
       {name === 'image' && <>
         <label className="field">Image URL<input data-dialog-focus value={value} onChange={event => setValue(event.target.value)} placeholder="https://example.com/image.png" /></label>
-        <button className="secondary-button upload-button" type="button" onClick={() => { close(); chooseLocalImage() }}>Choose a local image</button>
+        {chooseLocalImage && <button className="secondary-button upload-button" type="button" onClick={() => { close(); chooseLocalImage() }}>Choose a local image</button>}
         <label className="field">Alternative text<input value={label} onChange={event => setLabel(event.target.value)} placeholder="Describe the image" /></label>
         <label className="field">Caption<input value={caption} onChange={event => setCaption(event.target.value)} placeholder="Optional caption" /></label>
         <div className="field-row"><label className="field">Width in pixels<input type="number" min={24} max={2400} value={width} onChange={event => setWidth(event.target.value)} placeholder="Automatic" /></label><label className="field">Alignment<select value={align} onChange={event => setAlign(event.target.value)}><option value="">Inline</option><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div>

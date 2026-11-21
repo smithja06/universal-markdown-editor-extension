@@ -37,9 +37,30 @@ export interface AppearancePreferences {
   write(appearance: Appearance): void
 }
 
+export interface LiveDocumentSnapshot {
+  id: string
+  title: string
+  source: string
+  lineEnding: '\n' | '\r\n'
+  dirty: boolean
+  pending: boolean
+  available: boolean
+  conflict?: string
+  message?: string
+}
+
+export interface LiveDocument {
+  read(): LiveDocumentSnapshot
+  subscribe(listener: (state: LiveDocumentSnapshot) => void): () => void
+  edit(source: string): void
+  run(command: 'save' | 'undo' | 'redo'): void
+  discardConflict(): void
+}
+
 export interface FolioHost {
   storage: DocumentStorage
   files: FileOperations
+  liveDocument?: LiveDocument
   appearance: AppearancePreferences
   clipboard: { writeText(text: string | (() => Promise<string>)): Promise<void> }
   notifications?: { show(message: string): void }

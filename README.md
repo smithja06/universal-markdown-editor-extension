@@ -4,7 +4,7 @@ Folio is a browser-based Markdown document editor. Write in the visual editor, s
 
 ## Run locally
 
-Use Node.js 22.13 or newer in the 22.x line, or Node.js 24 or newer, with npm.
+Use Node.js 22.13 or newer in the 22.x line, or Node.js 24 or newer, with npm.&#x20;
 
 ~~~sh
 npm ci
@@ -21,6 +21,12 @@ npm run test:e2e
 ~~~
 
 The browser tests can use an existing Chromium installation via `PLAYWRIGHT_CHROMIUM_EXECUTABLE`.
+
+## Try Folio in VS Code
+
+Build the extension from the repository root with `npm run build:extension`. Launch an Extension Development Host with `code --extensionDevelopmentPath="$(pwd)/extension"`, or run `npm run package:extension` and install `extension/dist/folio.vsix` with **Extensions: Install from VSIX**.
+
+Open a `.md` or `.markdown` file, run **Reopen Editor With**, and select **Folio Markdown Editor**. The native Text Editor remains the default. Folio uses the open VS Code document for edits, save, and undo history. The integration tests run with `npm run test:extension` and use a separate VS Code profile. [Extension architecture and test setup](docs/extension-readiness.md)
 
 ## Editing and files
 
