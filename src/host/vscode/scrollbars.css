@@ -1,0 +1,6 @@
+/* Override the scrollbar colors inherited from the VS Code webview. */
+@media (forced-colors: none) {
+  .app {
+    scrollbar-color: light-dark(#8b8b8b, #718378) var(--ui);
+  }
+}
