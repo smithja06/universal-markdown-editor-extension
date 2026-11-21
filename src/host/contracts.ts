@@ -3,6 +3,7 @@ import type { MarkdownFile, WritableMarkdownHandle } from '../document/files'
 import type { Appearance, DocumentFile, DocumentSummary, WorkspaceLayout } from '../document/workspace'
 import type { DocumentVersion, VersionResult, VersionSummary, VersionTrigger } from '../document/versions'
 import type { SearchOptions, TextMatch } from '../core/search'
+import type { RecoveryDraft } from './vscode/recovery'
 
 export class WorkspaceRestoreConflict extends Error {
   constructor() { super('This document changed in another Folio tab. Download any edits from this tab before reloading.') }
@@ -47,6 +48,8 @@ export interface LiveDocumentSnapshot {
   available: boolean
   conflict?: string
   message?: string
+  recovery?: readonly RecoveryDraft[]
+  recoveryWarning?: string
 }
 
 export interface LiveDocument {
@@ -54,7 +57,7 @@ export interface LiveDocument {
   subscribe(listener: (state: LiveDocumentSnapshot) => void): () => void
   edit(source: string): void
   run(command: 'save' | 'undo' | 'redo'): void
-  discardConflict(): void
+  discardRecovery(id: string): void
 }
 
 export interface FolioHost {

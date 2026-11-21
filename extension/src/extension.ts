@@ -1,5 +1,7 @@
+import { createHash, randomUUID } from 'node:crypto'
 import * as vscode from 'vscode'
-import { isClientMessage, spliceSource, type ClientMessage, type DocumentState, type HostMessage } from '../../src/host/vscode/protocol'
+import { connectionMessage, isClientMessage, spliceSource, type ClientMessage, type DocumentState, type HostMessage } from '../../src/host/vscode/protocol'
+import { isId, isRecoveryDraft, recoveryPrefix, type RecoveryDraft } from '../../src/host/vscode/recovery'
 import { webviewHtml } from './webview'
 
 const viewType = 'folio.markdown'
@@ -12,11 +14,18 @@ type CommandMessage = Extract<ClientMessage, { type: 'command' }>
 
 interface View {
   panel: vscode.WebviewPanel
-  ready: boolean
   disposed: boolean
-  lastEdit: number
-  undelivered?: StateMessage
+  client?: Client
   subscriptions: vscode.Disposable[]
+}
+
+interface Client {
+  connection: string
+  journalId: string
+  lastEdit: number
+  abandoned: number
+  generation: number
+  acknowledgement?: StateMessage
 }
 
 interface Session {
@@ -37,6 +46,7 @@ function documentState(document: vscode.TextDocument, available: boolean): Docum
     source: document.getText().replace(/\r\n?/g, '\n'),
     dirty: document.isDirty,
     eol: document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n',
+    bom: document.encoding === 'utf8bom' || document.encoding === 'utf16le' || document.encoding === 'utf16be',
     available,
   }
 }
@@ -61,9 +71,10 @@ function within(resource: vscode.Uri, root: vscode.Uri): boolean {
 
 export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vscode.Disposable {
   private readonly sessions = new Map<vscode.TextDocument, Session>()
+  private readonly activeJournals = new Set<string>()
   private readonly subscriptions: vscode.Disposable[]
 
-  constructor(private readonly assetsRoot: vscode.Uri) {
+  constructor(private readonly assetsRoot: vscode.Uri, private readonly recovery: vscode.Memento, private readonly scope: string) {
     this.subscriptions = [
       vscode.workspace.onDidChangeTextDocument(({ document }) => {
         const session = this.sessions.get(document)
@@ -87,22 +98,54 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
     const html = await webviewHtml(panel.webview, this.assetsRoot)
     if (token.isCancellationRequested) return
     const session = this.sessions.get(document) ?? this.createSession(document)
-    const view: View = { panel, ready: false, disposed: false, lastEdit: -1, subscriptions: [] }
+    const view: View = { panel, disposed: false, subscriptions: [] }
     session.views.add(view)
     view.subscriptions = [
       panel.onDidDispose(() => this.removeView(session, view)),
       panel.onDidChangeViewState(() => {
-        if (panel.visible && view.ready && session.pending?.view !== view) {
-          if (view.undelivered) this.post(view, view.undelivered)
-          this.sendState(view, session.state)
-        }
+        if (panel.visible) this.sendStatus(session, view)
       }),
-      panel.webview.onDidReceiveMessage((message: unknown) => {
-        if (view.disposed || !isClientMessage(message) || (!view.ready && message.type !== 'ready')) return
+      panel.webview.onDidReceiveMessage((incoming: unknown) => {
+        const envelope = connectionMessage(incoming, isClientMessage)
+        if (view.disposed || !envelope) return
+        const { connection, message } = envelope
+        if (message.type === 'ready') {
+          if (view.client?.connection !== connection) {
+            if (view.client) this.activeJournals.delete(view.client.journalId)
+            view.client = { connection, journalId: randomUUID(), lastEdit: 0, abandoned: 0, generation: 0 }
+            this.activeJournals.add(view.client.journalId)
+          }
+          this.sendStatus(session, view)
+          void this.verifyFile(session).catch(() => undefined)
+          return
+        }
+        const client = view.client
+        if (!client || client.connection !== connection) return
+        if (message.type === 'status') return this.sendStatus(session, view)
+        if (message.type === 'abandon') {
+          client.abandoned = Math.max(client.abandoned, message.id)
+          this.sendStatus(session, view)
+          return
+        }
+        if (message.type === 'checkpoint') return void this.checkpoint(session, view, client, message.draft)
+        if (message.type === 'dismiss') return void this.dismiss(view, client, message)
+        if (message.type === 'copy') {
+          const { id, text } = message
+          void vscode.env.clipboard.writeText(text).then(
+            () => this.post(view, { type: 'copied', id, copied: true }, client),
+            () => this.post(view, { type: 'copied', id, copied: false }, client),
+          )
+          return
+        }
         session.queued++
-        session.operations = session.operations.then(() => this.receive(session, view, message)).catch(() => {
-          if (message.type === 'edit') this.acknowledge(view, session.state, message.id, false, 'VS Code could not apply this edit.')
-          else this.post(view, { type: 'error', message: 'VS Code could not complete this operation.' })
+        session.operations = session.operations.then(() => {
+          if (view.client !== client) return
+          // Received edits may finish even if the panel closes while the document stays open.
+          if (message.type === 'edit') return this.apply(session, view, client, message)
+          if (!view.disposed) return this.command(session, view, client, message)
+        }).catch(() => {
+          if (message.type === 'edit') this.acknowledge(view, client, session.state, message.id, false, 'VS Code could not apply this edit.')
+          else this.post(view, { type: 'error', message: 'VS Code could not complete this operation.' }, client)
         }).finally(() => {
           session.queued--
           this.releaseIdleSession(session)
@@ -133,6 +176,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
   private removeView(session: Session, view: View) {
     if (view.disposed) return
     view.disposed = true
+    if (view.client) this.activeJournals.delete(view.client.journalId)
     for (const subscription of view.subscriptions) subscription.dispose()
     session.views.delete(view)
     this.releaseIdleSession(session)
@@ -178,7 +222,8 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
     if (!session.state.available) return
     const next = documentState(session.document, !session.document.isClosed)
     const previous = session.state
-    if (previous.revision === next.revision && previous.dirty === next.dirty && previous.available === next.available && previous.eol === next.eol) return
+    if (previous.revision === next.revision && previous.dirty === next.dirty && previous.available === next.available &&
+      previous.eol === next.eol && previous.bom === next.bom) return
     session.state = next
     if (session.pending?.expected === next.source && next.available) session.pending.committed ??= next
     this.broadcast(session)
@@ -188,38 +233,74 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
     for (const view of session.views) if (session.pending?.view !== view) this.sendState(view, session.state)
   }
 
-  private post(view: View, message: HostMessage) {
-    if (!view.ready || view.disposed) return
-    if (message.type === 'state' && message.edit) view.undelivered = message
-    void Promise.resolve(view.panel.webview.postMessage(message)).then(delivered => {
-      if (delivered && view.undelivered === message) view.undelivered = undefined
-    }, () => undefined)
+  private post(view: View, message: HostMessage, client = view.client) {
+    if (!client || view.client !== client || view.disposed) return
+    void Promise.resolve(view.panel.webview.postMessage({ connection: client.connection, message })).catch(() => undefined)
   }
 
   private sendState(view: View, state: DocumentState) { this.post(view, { type: 'state', state }) }
 
-  private acknowledge(view: View, state: DocumentState, id: number, accepted: boolean, message?: string) {
-    this.post(view, { type: 'state', state, edit: { id, accepted, message } })
+  private acknowledge(view: View, client: Client, state: DocumentState, id: number, accepted: boolean, message?: string) {
+    const reply: StateMessage = { type: 'state', state, edit: { id, accepted, message } }
+    client.acknowledgement = reply
+    this.post(view, reply, client)
   }
 
-  private async receive(session: Session, view: View, message: ClientMessage) {
-    // A received edit belongs to the live document even if its panel is closed before the queue drains.
-    if (message.type === 'edit') return this.apply(session, view, message)
-    if (view.disposed) return
-    if (message.type === 'ready') {
-      view.ready = true
-      view.lastEdit = -1
-      view.undelivered = undefined
-      try { await this.verifyFile(session) } catch { /* A transient file check must not prevent opening the document. */ }
-      this.sendState(view, session.state)
-    } else await this.command(session, view, message)
+  private sendStatus(session: Session, view: View) {
+    const client = view.client
+    if (!client || view.disposed) return
+    const drafts: RecoveryDraft[] = []
+    for (const key of this.recovery.keys()) {
+      if (!key.startsWith(recoveryPrefix) || this.activeJournals.has(key.slice(recoveryPrefix.length))) continue
+      const draft = this.recovery.get(key)
+      if (isRecoveryDraft(draft) && key === recoveryPrefix + draft.id) drafts.push(draft)
+    }
+    this.post(view, { type: 'recovery', scope: this.scope, id: client.journalId, active: [...this.activeJournals], drafts })
+    if (client.acknowledgement) this.post(view, client.acknowledgement)
+    if (session.pending?.view !== view) this.sendState(view, session.state)
   }
 
-  private async apply(session: Session, view: View, { id, revision, change }: EditMessage) {
-    const reject = (message: string) => this.acknowledge(view, session.state, id, false, message)
-    if (id <= view.lastEdit) return reject(stale)
-    view.lastEdit = id
+  private async checkpoint(session: Session, view: View, client: Client, draft: RecoveryDraft) {
+    const { id, uri, generation } = draft
+    if (id !== client.journalId || uri !== session.state.uri || generation <= client.generation) return
+    client.generation = generation
+    let stored = false
+    try {
+      await this.recovery.update(recoveryPrefix + id, draft)
+      stored = true
+    } catch { /* This generation may still be recoverable from webview storage. */
+    } finally {
+      this.post(view, { type: 'stored', id, generation, stored }, client)
+    }
+  }
+
+  private async dismiss(view: View, client: Client, { id, generation }: Extract<ClientMessage, { type: 'dismiss' }>) {
+    if (id !== client.journalId && this.activeJournals.has(id)) {
+      this.post(view, { type: 'dismissed', id, generation, dismissed: false }, client)
+      return
+    }
+    const key = recoveryPrefix + id
+    const current = this.recovery.get(key)
+    let dismissed = false
+    try {
+      if (isRecoveryDraft(current) && current.generation > generation) return
+      if (id === client.journalId) client.generation = Math.max(client.generation, generation)
+      if (current !== undefined) await this.recovery.update(key, undefined)
+      dismissed = true
+    } catch { /* The webview retains its recovery copy on failure. */ }
+    finally { this.post(view, { type: 'dismissed', id, generation, dismissed }, client) }
+  }
+
+  private async apply(session: Session, view: View, client: Client, { id, revision, change }: EditMessage) {
+    const reject = (message: string) => this.acknowledge(view, client, session.state, id, false, message)
+    if (id <= client.lastEdit) {
+      if (client.acknowledgement?.edit?.id === id) this.post(view, client.acknowledgement, client)
+      return
+    }
+    client.lastEdit = id
+    if (id <= client.abandoned) return reject('This Folio edit expired before it reached VS Code.')
     if (!await this.verifyFile(session)) return reject(unavailable)
+    if (id <= client.abandoned || view.client !== client) return reject('This Folio edit expired before it reached VS Code.')
     const { document } = session
     if (!session.state.available || document.isClosed) return reject(unavailable)
     const base = documentState(document, true)
@@ -246,31 +327,39 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
       if (!session.state.available) return reject(unavailable)
       return reject(session.state.revision === revision ? 'VS Code could not apply this edit.' : stale)
     }
-    this.acknowledge(view, pending.committed, id, true)
-    if (session.state !== pending.committed) this.sendState(view, session.state)
+    this.acknowledge(view, client, pending.committed, id, true)
+    if (session.state !== pending.committed || id <= client.abandoned) this.sendState(view, session.state)
   }
 
-  private async command(session: Session, view: View, { command, text }: CommandMessage) {
-    if (command === 'copy') {
-      if (typeof text === 'string') await vscode.env.clipboard.writeText(text)
-      return
-    }
-    if (!await this.verifyFile(session) || !session.state.available || session.document.isClosed) this.post(view, { type: 'error', message: unavailable })
-    else if (view.disposed) return
+  private async command(session: Session, view: View, client: Client, { command }: CommandMessage) {
+    const available = await this.verifyFile(session)
+    if (view.disposed || view.client !== client) return
+    if (!available || !session.state.available || session.document.isClosed) this.post(view, { type: 'error', message: unavailable }, client)
     else if (command === 'save') {
-      if (!await session.document.save()) this.post(view, { type: 'error', message: 'VS Code could not save this document.' })
+      if (!await session.document.save()) this.post(view, { type: 'error', message: 'VS Code could not save this document.' }, client)
       this.refresh(session)
     } else {
       const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input
       if (view.panel.active && input instanceof vscode.TabInputCustom && input.viewType === viewType && input.uri.toString() === session.state.uri) {
         await vscode.commands.executeCommand(command)
-      } else this.post(view, { type: 'error', message: 'Focus this editor to use its undo or redo history.' })
+      } else this.post(view, { type: 'error', message: 'Focus this editor to use its undo or redo history.' }, client)
     }
   }
 }
 
-export function activate(context: vscode.ExtensionContext) {
-  const provider = new FolioEditorProvider(vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview'))
+export async function activate(context: vscode.ExtensionContext) {
+  let workspace = context.storageUri?.toString()
+  if (!workspace) {
+    // Empty windows have workspace state but no extension storage directory.
+    const key = 'folio.emptyWindowScope'
+    const existing = context.workspaceState.get(key)
+    workspace = isId(existing) ? existing : randomUUID()
+    if (workspace !== existing) {
+      try { await context.workspaceState.update(key, workspace) } catch { /* Use a session-local scope if persistence fails. */ }
+    }
+  }
+  const scope = createHash('sha256').update(workspace).digest('hex')
+  const provider = new FolioEditorProvider(vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview'), context.workspaceState, scope)
   context.subscriptions.push(provider, vscode.window.registerCustomEditorProvider(viewType, provider, {
     webviewOptions: { retainContextWhenHidden: true },
     supportsMultipleEditorsPerDocument: true,

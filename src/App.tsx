@@ -29,6 +29,7 @@ import { FindPanel, type FindPanelHandle } from './ui/FindPanel'
 import { registerItems } from './ui/commandItems'
 import { CommandRegistry, matchesShortcut, shortcutLabel } from './core/commands'
 import type { FolioHost } from './host/contracts'
+import { RecoveryNotice } from './host/vscode/RecoveryNotice'
 
 const windowCommands = ['workspace.palette', 'document.save', 'document.save-as', 'document.open-markdown', 'search.find', 'search.replace',
   'search.next', 'search.previous', 'format.edit-link', 'format.clear-formatting', 'format.increase-indentation', 'format.decrease-indentation',
@@ -495,7 +496,6 @@ export default function App({ host }: { host: FolioHost }) {
   const statusLabel = doc.liveState
     ? doc.liveState.conflict !== undefined ? 'Sync paused' : !doc.liveState.available ? 'File unavailable' : doc.liveState.pending ? 'Syncing to VS Code…' : doc.liveState.dirty ? 'Unsaved in VS Code' : 'Saved in VS Code'
     : doc.status === 'loading' ? 'Opening workspace…' : !ready ? 'No open documents' : doc.status === 'pending' ? 'Saving draft…' : doc.status === 'unavailable' ? 'Local storage unavailable' : 'Saved locally'
-  const conflict = doc.liveState?.conflict
   const StatusIcon = doc.status === 'unavailable' ? CloudOff : doc.status === 'saved' ? Check : LoaderCircle
   const style = { ...accents, '--writing-font': fonts[appearance.font], '--writing-size': appearance.fontSize + 'px', '--writing-leading': appearance.lineHeight } as CSSProperties
   return <div ref={root} className="app" data-theme={appearance.theme} style={style} onClickCapture={event => {
@@ -531,14 +531,7 @@ export default function App({ host }: { host: FolioHost }) {
     {!liveDocument && <DocumentTabs tabs={doc.tabs} activeId={doc.layout.activeId} canReopen={doc.layout.closed.length > 0} disabled={!started}
       select={id => execute('navigation.open-document', id)} close={id => report(doc.closeTab(id))} closeOthers={id => report(doc.closeOtherTabs(id))} reopen={() => report(doc.reopenTab())} create={() => execute('document.new-document')} />}
     <Toolbar editor={editor} state={formatting} source={source} ready={editable} execute={execute} shortcut={commandShortcut} insertItems={actions} extraFormats={formatMenu.slice(5)} styleItems={styleItems} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} hostHistory={liveDocument ? ready && liveWritable : undefined} />
-    {liveDocument && (doc.liveState?.message || conflict !== undefined) && <section className="host-notice" aria-label="VS Code synchronization">
-      <p role="alert">{doc.liveState?.message ?? 'Folio has a local draft to recover.'}</p>
-      {conflict !== undefined && <>
-        <div><button type="button" className="secondary-button" onClick={() => report(host.clipboard.writeText(conflict))}>Copy pending draft</button>
-          <button type="button" className="secondary-button" onClick={() => liveDocument.discardConflict()}>Discard pending draft</button></div>
-        <details><summary>View pending Markdown</summary><textarea aria-label="Pending Markdown" readOnly value={conflict} /></details>
-      </>}
-    </section>}
+    {liveDocument && doc.liveState && <RecoveryNotice state={doc.liveState} copy={host.clipboard.writeText} discard={liveDocument.discardRecovery} notify={notify} />}
     {findPanel && doc.layout.activeId && <FindPanel panelRef={findRef} documentId={doc.layout.activeId} title={doc.file.title} mode={mode} startReplace={findPanel.replace}
       readOnly={!!liveDocument && !liveWritable}
       find={host.search} capture={doc.captureSearch} subscribe={doc.subscribeSearch} present={doc.presentSearch} replace={doc.applySearch}

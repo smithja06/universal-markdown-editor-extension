@@ -1,3 +1,5 @@
+import { isGeneration, isId, isRecord, isRecoveryDraft, isUri, type RecoveryDraft } from './recovery'
+
 export interface DocumentState {
   uri: string
   title: string
@@ -5,6 +7,7 @@ export interface DocumentState {
   source: string
   dirty: boolean
   eol: '\n' | '\r\n'
+  bom?: boolean
   available: boolean
 }
 
@@ -14,13 +17,22 @@ export interface Splice { from: number; to: number; text: string }
 export type ClientMessage =
   | { type: 'ready' }
   | { type: 'edit'; id: number; revision: number; change: Splice }
-  | { type: 'command'; command: 'save' | 'undo' | 'redo' | 'copy'; text?: string }
+  | { type: 'checkpoint'; draft: RecoveryDraft }
+  | { type: 'dismiss'; id: string; generation: number }
+  | { type: 'status' }
+  | { type: 'abandon'; id: number }
+  | { type: 'command'; command: 'save' | 'undo' | 'redo' }
+  | { type: 'copy'; id: number; text: string }
 
 export type HostMessage =
   | { type: 'state'; state: DocumentState; edit?: { id: number; accepted: boolean; message?: string } }
   | { type: 'error'; message: string }
+  | { type: 'recovery'; scope: string; id: string; active: string[]; drafts: RecoveryDraft[] }
+  | { type: 'stored'; id: string; generation: number; stored: boolean }
+  | { type: 'dismissed'; id: string; generation: number; dismissed: boolean }
+  | { type: 'copied'; id: number; copied: boolean }
 
-const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+const record = isRecord
 const integer = (value: unknown, minimum = 0): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum
 const normalized = (value: unknown): value is string => typeof value === 'string' && !value.includes('\r')
 
@@ -30,27 +42,41 @@ function isSplice(value: unknown): value is Splice {
 
 export function isClientMessage(value: unknown): value is ClientMessage {
   if (!record(value)) return false
-  if (value.type === 'ready') return true
+  if (value.type === 'ready' || value.type === 'status') return true
   if (value.type === 'edit') return integer(value.id, 1) && integer(value.revision) && isSplice(value.change)
-  if (value.type !== 'command') return false
-  if (value.command === 'copy') return typeof value.text === 'string'
-  return (value.command === 'save' || value.command === 'undo' || value.command === 'redo') &&
-    (value.text === undefined || typeof value.text === 'string')
+  if (value.type === 'checkpoint') return isRecoveryDraft(value.draft)
+  if (value.type === 'dismiss') return isId(value.id) && isGeneration(value.generation)
+  if (value.type === 'abandon') return isGeneration(value.id)
+  if (value.type === 'copy') return isGeneration(value.id) && typeof value.text === 'string'
+  return value.type === 'command' && (value.command === 'save' || value.command === 'undo' || value.command === 'redo')
 }
 
 function isDocumentState(value: unknown): value is DocumentState {
-  return record(value) && typeof value.uri === 'string' && /^[a-z][\w+.-]*:[^\s]/i.test(value.uri) &&
+  return record(value) && isUri(value.uri) &&
     typeof value.title === 'string' && integer(value.revision) && normalized(value.source) &&
+    (value.bom === undefined || typeof value.bom === 'boolean') &&
     typeof value.dirty === 'boolean' && typeof value.available === 'boolean' && (value.eol === '\n' || value.eol === '\r\n')
 }
 
 export function isHostMessage(value: unknown): value is HostMessage {
   if (!record(value)) return false
   if (value.type === 'error') return typeof value.message === 'string'
+  if (value.type === 'recovery') return typeof value.scope === 'string' && /^[\da-f]{64}$/.test(value.scope) &&
+    isId(value.id) && Array.isArray(value.active) && value.active.every(isId) &&
+    Array.isArray(value.drafts) && value.drafts.every(isRecoveryDraft)
+  if (value.type === 'stored') return isId(value.id) && isGeneration(value.generation) && typeof value.stored === 'boolean'
+  if (value.type === 'dismissed') return isId(value.id) && isGeneration(value.generation) && typeof value.dismissed === 'boolean'
+  if (value.type === 'copied') return isGeneration(value.id) && typeof value.copied === 'boolean'
   if (value.type !== 'state' || !isDocumentState(value.state)) return false
   const edit = value.edit
   return edit === undefined || (record(edit) && integer(edit.id, 1) && typeof edit.accepted === 'boolean' &&
     (edit.message === undefined || typeof edit.message === 'string'))
+}
+
+export function connectionMessage<T>(value: unknown, validate: (message: unknown) => message is T) {
+  if (record(value) && isId(value.connection) && validate(value.message)) {
+    return { connection: value.connection, message: value.message }
+  }
 }
 
 function splitsSurrogate(source: string, offset: number) {

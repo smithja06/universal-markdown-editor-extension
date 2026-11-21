@@ -4,6 +4,7 @@ import { createSearch } from '../browserSearch'
 import type { DocumentStorage, FileOperations, FolioHost } from '../contracts'
 import SearchWorker from '../searchWorker.ts?worker&inline'
 import { createLiveDocumentClient, type LiveDocumentTransport } from './liveDocument'
+import type { RecoveryJournal } from './recovery'
 
 function unavailable() {
   return new Error('This operation is unavailable in the VS Code editor.')
@@ -36,8 +37,8 @@ const files: FileOperations = {
 
 const search = createSearch(() => new SearchWorker())
 
-export function createWebviewHost(transport: LiveDocumentTransport, platform: ShortcutPlatform, theme: Appearance['theme']) {
-  const liveDocument = createLiveDocumentClient(transport)
+export function createWebviewHost(transport: LiveDocumentTransport, platform: ShortcutPlatform, theme: Appearance['theme'], journal: RecoveryJournal) {
+  const liveDocument = createLiveDocumentClient(transport, journal)
   let settings = normalizeAppearance({ theme })
   let recent: string[] = []
   return {
@@ -51,7 +52,7 @@ export function createWebviewHost(transport: LiveDocumentTransport, platform: Sh
     },
     clipboard: {
       async writeText(text) {
-        transport.post({ type: 'command', command: 'copy', text: typeof text === 'string' ? text : await text() })
+        await liveDocument.copy(typeof text === 'string' ? text : await text())
       },
     },
     search,
