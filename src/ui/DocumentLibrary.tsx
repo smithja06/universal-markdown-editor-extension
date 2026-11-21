@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Copy, FilePlus2, FileText, Pencil, RotateCcw, Search, Trash2 } from 'lucide-react'
 import type { DocumentSummary } from '../document/workspace'
 import { IconButton, Modal } from './controls'
@@ -30,7 +30,16 @@ export function DocumentLibrary({ items, tabs, close, create, open, rename, dupl
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [feedback, setFeedback] = useState('')
+  const confirmationTrigger = useRef<HTMLButtonElement>(null)
+  const searchInput = useRef<HTMLInputElement>(null)
   const openIds = new Set(tabs)
+
+  useLayoutEffect(() => {
+    if (pending || busy || !confirmationTrigger.current) return
+    const trigger = confirmationTrigger.current
+    confirmationTrigger.current = null
+    ;(trigger.isConnected ? trigger : searchInput.current)?.focus({ preventScroll: true })
+  }, [busy, pending])
 
   const shown = useMemo(() => {
     const query = search.trim().normalize('NFKC').toLocaleLowerCase()
@@ -62,11 +71,11 @@ export function DocumentLibrary({ items, tabs, close, create, open, rename, dupl
   return <Modal title="Document library" wide closeDisabled={busy} close={() => { if (!busy) close() }}>
     <div className="document-library">
       <div className="library-navigation">
-        <div className="library-views" role="group" aria-label="Document collections">{views.map(option => <button key={option} type="button" aria-pressed={option === view} disabled={busy} onClick={() => { setPending(undefined); setView(option); setError(''); setFeedback('') }}>{option}</button>)}</div>
+        <div className="library-views" role="group" aria-label="Document collections">{views.map(option => <button key={option} type="button" aria-pressed={option === view} disabled={busy} onClick={() => { confirmationTrigger.current = null; setPending(undefined); setView(option); setError(''); setFeedback('') }}>{option}</button>)}</div>
         <button type="button" className="primary-button library-new" disabled={busy} onClick={() => void run(create, 'close')}><FilePlus2 size={15} /> New document</button>
       </div>
       <div className="library-controls">
-        <label className="library-search"><Search size={16} /><input type="search" aria-label="Search documents" placeholder="Search by name" value={search} onChange={event => setSearch(event.target.value)} /></label>
+        <label className="library-search"><Search size={16} /><input ref={searchInput} data-dialog-focus type="search" aria-label="Search documents" placeholder="Search by name" value={search} onChange={event => setSearch(event.target.value)} /></label>
         <select aria-label="Sort documents" value={sort} onChange={event => setSort(event.target.value as Sort)}>
           <option value="modified">{view === 'Recent' ? 'Recently opened' : view === 'Trash' ? 'Recently deleted' : 'Recently modified'}</option><option value="created">Recently created</option><option value="ascending">Name A–Z</option><option value="descending">Name Z–A</option>
         </select>
@@ -95,9 +104,9 @@ export function DocumentLibrary({ items, tabs, close, create, open, rename, dupl
             </div>
             <div className="library-row-actions">
               {view === 'Trash' ? <button type="button" className="secondary-button" disabled={busy} aria-label={'Restore ' + item.title} onClick={() => void run(() => restore(item.id), 'Document restored to the library.')}><RotateCcw size={13} /> Restore</button> : <>
-                <IconButton label={'Rename ' + item.title} disabled={busy} onClick={() => { setName(item.title); setPending({ kind: 'rename', item }) }}><Pencil size={15} /></IconButton>
+                <IconButton label={'Rename ' + item.title} disabled={busy} onClick={event => { confirmationTrigger.current = event.currentTarget; setName(item.title); setPending({ kind: 'rename', item }) }}><Pencil size={15} /></IconButton>
                 <IconButton label={'Duplicate ' + item.title} disabled={busy} onClick={() => void run(() => duplicate(item.id), 'close')}><Copy size={15} /></IconButton>
-                <IconButton label={'Delete ' + item.title} disabled={busy} onClick={() => setPending({ kind: 'remove', item })}><Trash2 size={15} /></IconButton>
+                <IconButton label={'Delete ' + item.title} disabled={busy} onClick={event => { confirmationTrigger.current = event.currentTarget; setPending({ kind: 'remove', item }) }}><Trash2 size={15} /></IconButton>
               </>}
             </div>
           </li>)}</ul>}

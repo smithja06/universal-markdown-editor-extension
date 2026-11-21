@@ -46,7 +46,7 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
     const input = value.trim()
     const command = editor.chain().focus()
     if (request.position !== undefined) command.setNodeSelection(request.position)
-    let result = false
+    let result: boolean
     if (name === 'link') {
       if (!safeUrl(input)) { setError('Enter a URL, file path, or heading anchor.'); return }
       result = selection.empty && !wasLink
@@ -64,7 +64,7 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
       if (!input || (name === 'reference' && !safeUrl(input))) { setError('Enter a valid ' + (name === 'footnote' ? 'footnote.' : 'URL.')); return }
       const isFootnote = name === 'footnote'
       const definition = isFootnote ? '[^' + identifier + ']: ' + input.replace(/\n/g, '\n    ') : '[' + identifier + ']: <' + input.replace(/[<>]/g, encodeURIComponent) + '>'
-      const display = isFootnote ? '[^' + identifier + ']' : '[' + (selectionText.replace(/[\[\]]/g, '') || identifier) + '][' + identifier + ']'
+      const display = isFootnote ? '[^' + identifier + ']' : '[' + (selectionText.replace(/[[\]]/g, '') || identifier) + '][' + identifier + ']'
       if (editor.state.doc.children.some(block => block.type.name === 'rawBlock' && String(block.attrs.value).toLowerCase().startsWith((isFootnote ? '[^' : '[') + identifier.toLowerCase() + ']:'))) {
         setError('This identifier already has a definition.'); return
       }
@@ -86,19 +86,19 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
   return <Modal title={labels[name]} close={close} wide={name === 'mermaid'}>
     <form onSubmit={submit} className="dialog-form">
       {name === 'table' && <>
-        <div className="table-picker" aria-label="Table size grid">{Array.from({ length: 6 }, (_, row) => Array.from({ length: 8 }, (_, column) =>
-          <button key={row + '-' + column} type="button" className={row < rows && column < columns ? 'selected' : ''} title={(row + 1) + ' rows by ' + (column + 1) + ' columns'} aria-label={(row + 1) + ' rows by ' + (column + 1) + ' columns'} onMouseEnter={() => { setRows(row + 1); setColumns(column + 1) }} onClick={() => { setRows(row + 1); setColumns(column + 1) }} />
+        <div className="table-picker" role="group" aria-label="Table size grid">{Array.from({ length: 6 }, (_, row) => Array.from({ length: 8 }, (_, column) =>
+          <button key={row + '-' + column} type="button" tabIndex={-1} className={row < rows && column < columns ? 'selected' : ''} title={(row + 1) + ' rows by ' + (column + 1) + ' columns'} aria-label={(row + 1) + ' rows by ' + (column + 1) + ' columns'} onMouseEnter={() => { setRows(row + 1); setColumns(column + 1) }} onClick={() => { setRows(row + 1); setColumns(column + 1) }} />
         ))}</div>
-        <div className="field-row"><label className="field">Rows<input type="number" min={1} max={20} value={rows} onChange={event => setBounded(event.target.value, setRows)} /></label><label className="field">Columns<input type="number" min={1} max={20} value={columns} onChange={event => setBounded(event.target.value, setColumns)} /></label></div>
+        <div className="field-row"><label className="field">Rows<input data-dialog-focus type="number" min={1} max={20} value={rows} onChange={event => setBounded(event.target.value, setRows)} /></label><label className="field">Columns<input type="number" min={1} max={20} value={columns} onChange={event => setBounded(event.target.value, setColumns)} /></label></div>
         <label className="check-field"><input type="checkbox" checked={header} onChange={event => setHeader(event.target.checked)} /> Include a header row</label>
       </>}
       {name === 'link' && <>
         {!wasLink && selection.empty && <label className="field">Link text<input value={label} onChange={event => setLabel(event.target.value)} placeholder="Text to display" /></label>}
-        <label className="field">Destination<input autoFocus value={value} onChange={event => setValue(event.target.value)} placeholder="https://, #heading, or ./file.md" /></label>
+        <label className="field">Destination<input data-dialog-focus value={value} onChange={event => setValue(event.target.value)} placeholder="https://, #heading, or ./file.md" /></label>
         {anchors.length > 0 && <label className="field">Link to a heading<select value={value.startsWith('#') ? value : ''} onChange={event => setValue(event.target.value)}><option value="">Choose a heading</option>{anchors.map(item => <option key={item.anchor} value={'#' + item.anchor}>{item.title}</option>)}</select></label>}
       </>}
       {name === 'image' && <>
-        <label className="field">Image URL<input autoFocus value={value} onChange={event => setValue(event.target.value)} placeholder="https://example.com/image.png" /></label>
+        <label className="field">Image URL<input data-dialog-focus value={value} onChange={event => setValue(event.target.value)} placeholder="https://example.com/image.png" /></label>
         <button className="secondary-button upload-button" type="button" onClick={() => { close(); chooseLocalImage() }}>Choose a local image</button>
         <label className="field">Alternative text<input value={label} onChange={event => setLabel(event.target.value)} placeholder="Describe the image" /></label>
         <label className="field">Caption<input value={caption} onChange={event => setCaption(event.target.value)} placeholder="Optional caption" /></label>
@@ -106,12 +106,12 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
       </>}
       {name === 'mermaid' && <>
         <label className="field">Diagram template<select value="" onChange={event => setValue(diagramPresets[event.target.value as keyof typeof diagramPresets])}><option value="">Choose a template</option>{Object.keys(diagramPresets).map(key => <option key={key}>{key}</option>)}</select></label>
-        <div className="diagram-editor"><label className="field">Mermaid source<textarea autoFocus rows={9} spellCheck={false} value={value} onChange={event => setValue(event.target.value)} /></label><div><span>Preview</span><div className="dialog-preview"><DiagramPreview value={value} /></div></div></div>
+        <div className="diagram-editor"><label className="field">Mermaid source<textarea data-dialog-focus rows={9} spellCheck={false} value={value} onChange={event => setValue(event.target.value)} /></label><div><span>Preview</span><div className="dialog-preview"><DiagramPreview value={value} /></div></div></div>
       </>}
-      {isEquation && <label className="field">LaTeX expression<textarea autoFocus spellCheck={false} rows={3} value={value} onChange={event => setValue(event.target.value)} placeholder="x^2 + y^2 = z^2" /></label>}
-      {name === 'wikiLink' && <label className="field">Target or target|label<input autoFocus value={value} onChange={event => setValue(event.target.value)} placeholder="Project notes|Notes" /></label>}
+      {isEquation && <label className="field">LaTeX expression<textarea data-dialog-focus spellCheck={false} rows={3} value={value} onChange={event => setValue(event.target.value)} placeholder="x^2 + y^2 = z^2" /></label>}
+      {name === 'wikiLink' && <label className="field">Target or target|label<input data-dialog-focus value={value} onChange={event => setValue(event.target.value)} placeholder="Project notes|Notes" /></label>}
       {(name === 'footnote' || name === 'reference') && <>
-        <label className="field">Identifier<input autoFocus value={label} onChange={event => setLabel(event.target.value)} placeholder={name === 'footnote' ? 'note' : 'reference'} /></label>
+        <label className="field">Identifier<input data-dialog-focus value={label} onChange={event => setLabel(event.target.value)} placeholder={name === 'footnote' ? 'note' : 'reference'} /></label>
         <label className="field">{name === 'footnote' ? 'Footnote text' : 'Destination'}<textarea rows={name === 'footnote' ? 3 : 1} value={value} onChange={event => setValue(event.target.value)} /></label>
       </>}
       {error && <p className="field-error" role="alert">{error}</p>}

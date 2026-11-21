@@ -97,6 +97,68 @@ describe('Markdown source preservation', () => {
     reopened.editor.destroy()
   })
 
+  it.each(['Plan', '42'])('uses a standard inline image after resizing a legacy width-only image named %s', alt => {
+    const legacy = `<div data-folio-block="1"><p>Sketch <span data-folio-image="" class="document-image"><img src="/p.png" alt="${alt}" width="120"></span> for review.</p></div>\n`
+    const { editor, session } = open(legacy)
+    expect(editor.state.doc.firstChild?.child(1).attrs.width).toBe('120')
+    expect(writeMarkdown(session, editor.state.doc).source).toBe(legacy)
+
+    editor.chain().setNodeSelection(8).updateAttributes('image', { width: '160' }).run()
+    const { source } = writeMarkdown(session, editor.state.doc)
+    expect(source).toBe(`Sketch <img src="/p.png" alt="${alt}" width="160"> for review.\n`)
+    editor.destroy()
+
+    const reopened = open(source)
+    expect(reopened.editor.state.doc.firstChild?.child(1)).toMatchObject({ type: { name: 'image' }, attrs: { src: '/p.png', alt, width: '160' } })
+    expect(writeMarkdown(reopened.session, reopened.editor.state.doc).source).toBe(source)
+    reopened.editor.destroy()
+  })
+
+  it('keeps inline image HTML opaque when its attributes cannot be round-tripped', () => {
+    const images = ['<img src="/p.png" alt="Plan" width="100%">', '<img src="/p.png" alt="Plan" data-custom="keep">',
+      '<img src="java&#x09;script:unsupported" alt="Plan">', '<img src="/p.png" width="120">']
+    const source = `Sketch ${images.join(' and ')} for review.\n`
+    const { editor, session } = open(source)
+    const inline = editor.state.doc.firstChild?.children.filter(node => node.type.name === 'rawInline')
+    expect(inline?.map(node => node.attrs.value)).toEqual(images)
+    editor.commands.insertContentAt(1, 'Updated ')
+    expect(writeMarkdown(session, editor.state.doc).source).toBe('Updated ' + source)
+    editor.destroy()
+  })
+
+  it.each([' width="120"', ''])('preserves an explicit empty HTML image title after adjacent formatting%s', width => {
+    const image = `<img src="/p.png" alt="Plan"${width} title="">`
+    const { editor, session } = open(`Text ${image} tail.\n`)
+    editor.chain().setTextSelection({ from: 1, to: 5 }).toggleBold().run()
+    const { source } = writeMarkdown(session, editor.state.doc)
+    expect(source).toContain('**Text**')
+    expect(source).toContain('title=""')
+    const reopened = open(source)
+    expect(reopened.editor.state.doc.firstChild?.children.find(node => node.type.name === 'image')?.attrs.title).toBe('')
+    reopened.editor.destroy()
+    editor.destroy()
+  })
+
+  it('keeps Markdown quote and list markers around visual edits to styled paragraphs', () => {
+    const legacy = '<div data-folio-block="1"><blockquote><p style="text-align: center;">A quote</p></blockquote></div>\n\n<div data-folio-block="1"><ul><li><p style="margin-left: 2em;">A list item</p></li></ul></div>\n'
+    const { editor, session } = open(legacy)
+    expect(editor.state.doc.child(0).firstChild?.attrs.textAlign).toBe('center')
+    expect(editor.state.doc.child(1).firstChild?.firstChild?.attrs.indent).toBe('2em')
+    expect(writeMarkdown(session, editor.state.doc).source).toBe(legacy)
+
+    editor.commands.insertContentAt(2, 'Updated ')
+    editor.commands.insertContentAt(editor.state.doc.child(0).nodeSize + 3, 'Updated ')
+    const { source } = writeMarkdown(session, editor.state.doc)
+    expect(source).toBe('> <p style="text-align: center;">Updated A quote</p>\n\n- <p style="margin-left: 2em;">Updated A list item</p>\n')
+    editor.destroy()
+
+    const reopened = open(source)
+    expect(reopened.editor.state.doc.child(0).firstChild?.attrs.textAlign).toBe('center')
+    expect(reopened.editor.state.doc.child(1).firstChild?.firstChild?.attrs.indent).toBe('2em')
+    expect(writeMarkdown(reopened.session, reopened.editor.state.doc).source).toBe(source)
+    reopened.editor.destroy()
+  })
+
   it('makes supported imported HTML editable and retains unfamiliar HTML and directives', () => {
     const source = 'See <u>linked</u> and <kbd data-key="ctrl">Ctrl</kbd>.\n\n<p style="text-align: center">Centered</p>\n\n<p data-custom="keep">Unknown paragraph</p>\n\n:::widget{mode="wide"}\nPrivate content.\n:::\n'
     const { editor, session } = open(source)

@@ -15,6 +15,8 @@ interface Props {
   create(): void
 }
 
+const tabId = (id: string) => 'document-tab-' + id
+
 export function DocumentTabs({ tabs, activeId, canReopen, disabled, select, close, closeOthers, reopen, create }: Props) {
   const [context, setContext] = useState<string>()
   const strip = useRef<HTMLDivElement>(null)
@@ -22,7 +24,7 @@ export function DocumentTabs({ tabs, activeId, canReopen, disabled, select, clos
   const closedFocus = useRef<string | undefined>(undefined)
   const actionTab = tabs.find(tab => tab.id === (context ?? activeId)) ?? tabs.find(tab => tab.id === activeId)
 
-  const tabButton = (id: string) => strip.current?.querySelector<HTMLButtonElement>(`#document-tab-${CSS.escape(id)}`)
+  const tabButton = (id: string) => strip.current?.querySelector<HTMLButtonElement>('#' + CSS.escape(tabId(id)))
   useEffect(() => {
     if (activeId) tabButton(activeId)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [activeId])
@@ -55,18 +57,21 @@ export function DocumentTabs({ tabs, activeId, canReopen, disabled, select, clos
   }
 
   return <div className="document-tabs">
-    <div className="document-tab-strip" ref={strip} role="tablist" aria-label="Open documents">
+    {/* Give the tablist only tab buttons while keeping each close button beside its tab. */}
+    {tabs.length > 0 && <div className="document-tab-list" role="tablist" aria-label="Open documents" aria-owns={tabs.map(tab => tabId(tab.id)).join(' ')} />}
+    <div className="document-tab-strip" ref={strip}>
       {tabs.map(tab => {
         const status = tab.status === 'unavailable' ? 'Local save unavailable' : tab.status === 'pending' ? 'Saving locally' : tab.dirty ? 'Changes since last file save' : ''
         return <div key={tab.id} className={'document-tab ' + (tab.id === activeId ? 'document-tab-active' : '')}
           onContextMenu={event => { event.preventDefault(); openActions(tab.id) }}>
-          <button type="button" role="tab" id={'document-tab-' + tab.id} aria-selected={tab.id === activeId} aria-controls="document-panel"
+          <button type="button" role="tab" id={tabId(tab.id)} aria-selected={tab.id === activeId} aria-controls="document-panel"
             aria-label={tab.title} aria-description={status || undefined} title={status ? `${tab.title} • ${status}` : tab.title} tabIndex={tab.id === activeId ? 0 : -1}
             onClick={() => select(tab.id)} onKeyDown={event => navigate(event, tab.id)}>
             <FileText size={14} aria-hidden="true" /><span>{tab.title}</span>
             {!!status && <i className={tab.status === 'unavailable' ? 'tab-save-error' : tab.status === 'pending' ? 'tab-saving' : ''} />}
           </button>
-          <button className="close-document-tab" type="button" aria-label={'Close ' + tab.title} title={'Close ' + tab.title} onClick={() => closeTab(tab.id)}><X size={14} /></button>
+          <button className="close-document-tab" type="button" tabIndex={-1} aria-label={'Close ' + tab.title}
+            title={'Close ' + tab.title} onClick={() => closeTab(tab.id)}><X size={14} /></button>
         </div>
       })}
     </div>

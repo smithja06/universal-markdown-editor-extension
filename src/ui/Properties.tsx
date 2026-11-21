@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { BarChart3, ChevronDown, ChevronRight, FileSliders, Layers3, ListTree, PanelRightClose, Palette, Tags } from 'lucide-react'
 import { readMetadata, updateMetadata, type Heading, type Statistics } from '../document/metadata'
-import { useWorkspace } from '../document/workspace'
+import type { Appearance } from '../document/workspace'
 import { accentAtHue, accentHex, accentHue, accentSpectrum } from '../appearance'
 import { IconButton } from './controls'
 
@@ -100,11 +100,14 @@ function FrontMatter({ value, update }: { value: string; update(value: string): 
         </label>
       })}
       <div className="section-heading"><h3>Custom fields</h3></div>
-      {custom.map(([name, previous]) => <label className="field" key={name + String(previous)}>{name}
-        {typeof previous === 'object'
-          ? <button type="button" className="secondary-button" onClick={() => switchMode('raw')}>Edit in YAML</button>
-          : <input defaultValue={String(previous ?? '')} onBlur={event => { if (event.currentTarget.value !== String(previous ?? '')) saveField(name, event.currentTarget.value) }} />}
-      </label>)}
+      {custom.map(([name, previous]) => {
+        const display = typeof previous === 'string' || typeof previous === 'number' || typeof previous === 'boolean' ? String(previous) : ''
+        return <label className="field" key={name + display}>{name}
+          {typeof previous === 'object'
+            ? <button type="button" className="secondary-button" onClick={() => switchMode('raw')}>Edit in YAML</button>
+            : <input defaultValue={display} onBlur={event => { if (event.currentTarget.value !== display) saveField(name, event.currentTarget.value) }} />}
+        </label>
+      })}
       <form className="custom-fields" onSubmit={event => { event.preventDefault(); if (!key.trim()) return; if (current.fields.has(key.trim()) || predefined.some(([field]) => field === key.trim())) { setFeedback('A field with that name already exists.'); return }; saveField(key.trim(), customValue); setKey(''); setCustomValue('') }}>
         <input aria-label="Custom key" placeholder="Key" value={key} onChange={event => setKey(event.target.value)} /><input aria-label="Custom value" placeholder="Value" value={customValue} onChange={event => setCustomValue(event.target.value)} />
         <button type="submit" className="secondary-button" disabled={!key.trim() || !customValue.trim()}>Add field</button>
@@ -114,8 +117,9 @@ function FrontMatter({ value, update }: { value: string; update(value: string): 
   </section>
 }
 
-function AppearancePanel() {
-  const { appearance, setAppearance } = useWorkspace()
+interface AppearanceSettings { appearance: Appearance; setAppearance(value: Partial<Appearance>): void }
+
+function AppearancePanel({ appearance, setAppearance }: AppearanceSettings) {
   const hex = accentHex(appearance.accentColor)
   return <section className="properties-content fields-panel">
     <div className="section-heading"><h3>Appearance</h3></div>
@@ -146,7 +150,7 @@ function StatisticsPanel({ data }: { data: Statistics }) {
   </section>
 }
 
-export function Properties({ tab, setTab, headings, active, statistics, metadata, onMetadata, close, jump, width, setWidth }: {
+export function Properties({ tab, setTab, headings, active, statistics, metadata, onMetadata, close, jump, width, setWidth, appearance, setAppearance }: AppearanceSettings & {
   tab: Tab; setTab(tab: Tab): void; headings: Heading[]; active: string; statistics: Statistics; metadata: string; onMetadata(value: string): void; close(): void;
   jump(heading: Heading): void; width: number; setWidth(value: number): void
 }) {
@@ -163,9 +167,10 @@ export function Properties({ tab, setTab, headings, active, statistics, metadata
       <IconButton label="Close document properties" onClick={close}><PanelRightClose size={16} /></IconButton>
     </div>
     <div className="property-tabs" role="tablist" aria-label="Properties views" onKeyDown={event => {
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
       event.preventDefault()
-      const next = (tabs.findIndex(item => item.name === tab) + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+        : (tabs.findIndex(item => item.name === tab) + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length
       setTab(tabs[next].name)
       document.getElementById(id + '-tab-' + next)?.focus()
     }}>
@@ -173,10 +178,10 @@ export function Properties({ tab, setTab, headings, active, statistics, metadata
         <Icon size={16} /><span>{name}</span>
       </button>)}
     </div>
-    <div className="property-panel" id={id + '-panel'} role="tabpanel" aria-labelledby={id + '-tab-' + tabs.findIndex(item => item.name === tab)}>
+    <div className="property-panel" id={id + '-panel'} role="tabpanel" tabIndex={0} aria-labelledby={id + '-tab-' + tabs.findIndex(item => item.name === tab)}>
       {tab === 'Outline' && <Outline headings={headings} active={active} jump={jump} />}
       {tab === 'Front matter' && <FrontMatter value={metadata} update={onMetadata} />}
-      {tab === 'Appearance' && <AppearancePanel />}
+      {tab === 'Appearance' && <AppearancePanel appearance={appearance} setAppearance={setAppearance} />}
       {tab === 'Statistics' && <StatisticsPanel data={statistics} />}
     </div>
   </aside>

@@ -9,30 +9,35 @@ export function CommandPalette({ entries, recent, scope, run, close }: {
   entries: PaletteEntry[]; recent: string[]; scope: 'all' | 'documents' | 'headings'; run(entry: PaletteEntry): void; close(): void
 }) {
   const id = useId()
-  const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
-  const results = useMemo(() => {
+  const { results, total } = useMemo(() => {
     const matched = entries.map((entry, order) => ({ entry, order, recent: recent.indexOf(entry.key), score: fuzzyScore(query, entry.label, entry.keywords) })).filter(entry => entry.score >= 0)
     const rank = (position: number) => position < 0 ? Infinity : position
     matched.sort((left, right) => right.score - left.score || rank(left.recent) - rank(right.recent) || left.order - right.order)
-    return matched.slice(0, 80).map(({ entry, recent }) => ({ ...entry, group: !query.trim() && recent >= 0 ? 'Recently used' : entry.category }))
+    return { total: matched.length, results: matched.slice(0, 80).map(({ entry, recent }) => ({ ...entry, group: !query.trim() && recent >= 0 ? 'Recently used' : entry.category })) }
   }, [entries, query, recent])
   const current = Math.min(index, Math.max(0, results.length - 1))
 
-  useEffect(() => { input.current?.focus(); input.current?.select() }, [])
-  useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }) }, [current, query])
+  useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }) }, [current, results])
   const placeholder = scope === 'documents' ? 'Find an open or saved document' : scope === 'headings' ? 'Find a heading' : 'Search commands and documents'
 
   return <Modal title={scope === 'documents' ? 'Switch document' : scope === 'headings' ? 'Go to heading' : 'Command Palette'} close={close} wide>
     <div className="command-palette">
-      <label className="palette-search"><Search size={17} /><input ref={input} autoFocus role="combobox" aria-label={placeholder} placeholder={placeholder}
+      <label className="palette-search"><Search size={17} /><input data-dialog-focus role="combobox" aria-label={placeholder} placeholder={placeholder}
         aria-expanded="true" aria-controls={id} aria-activedescendant={results.length ? `${id}-${current}` : undefined} aria-autocomplete="list" spellCheck={false}
         value={query} onChange={event => { setQuery(event.target.value); setIndex(0) }} onKeyDown={event => {
-          if (!results.length) return
+          if (!results.length || event.nativeEvent.isComposing) return
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setIndex((current + (event.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length) }
-          if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); run(results[current]) }
+          if (event.key === 'PageDown' || event.key === 'PageUp') {
+            event.preventDefault()
+            const container = list.current
+            const option = container?.querySelector<HTMLElement>('[aria-selected="true"]')
+            const step = Math.max(1, Math.floor((container?.clientHeight ?? 0) / (option?.offsetHeight || 1)))
+            setIndex(Math.max(0, Math.min(results.length - 1, current + (event.key === 'PageDown' ? step : -step))))
+          }
+          if (event.key === 'Enter') { event.preventDefault(); run(results[current]) }
         }} /></label>
       <div ref={list} id={id} className="palette-results" role="listbox" aria-label="Matching commands">
         {results.map((entry, position) => <div key={entry.key} role="presentation">
@@ -43,7 +48,9 @@ export function CommandPalette({ entries, recent, scope, run, close }: {
           </div>
         </div>)}
       </div>
-      {!results.length && <p className="muted" role="status">No matches.</p>}
+      <p className={results.length ? 'sr-only' : 'muted'} role="status">
+        {total === 0 ? 'No matches.' : total === 1 ? '1 result.' : total > results.length ? `Showing ${results.length} of ${total} results.` : `${total} results.`}
+      </p>
     </div>
   </Modal>
 }

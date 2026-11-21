@@ -1,7 +1,7 @@
-import { useEffect, useId, useState } from 'react'
+import { lazy, Suspense, useEffect, useId, useState } from 'react'
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from '@tiptap/react'
 import { Code2, FileCode2, GitFork, ListTree, Pencil } from 'lucide-react'
-import katex from 'katex'
+import { LazyBoundary } from '../LazyBoundary'
 import { renderDiagram } from '../document/diagrams'
 import { documentInfo } from '../document/metadata'
 import { BlockMath, InlineMath, MermaidBlock, RawBlock, Toc, WikiLink } from './schema'
@@ -12,14 +12,15 @@ function MermaidPreview({ value, id }: { value: string; id: string }) {
     if (!value.trim()) { setResult({}); return }
     const controller = new AbortController()
     setResult({})
-    const timeout = window.setTimeout(async () => {
+    async function render() {
       try {
         const svg = await renderDiagram(id, value, { mode: 'preview', signal: controller.signal })
         if (!controller.signal.aborted) setResult({ svg })
       } catch (error) {
         if (!controller.signal.aborted) setResult({ error: error instanceof Error ? error.message.split('\n')[0] : 'Invalid Mermaid syntax.' })
       }
-    }, 260)
+    }
+    const timeout = window.setTimeout(() => { void render() }, 260)
     return () => { controller.abort(); window.clearTimeout(timeout) }
   }, [value, id])
   if (!value.trim()) return <span className="muted">Enter Mermaid code to preview the diagram.</span>
@@ -32,10 +33,7 @@ export function DiagramPreview({ value }: { value: string }) {
   return <MermaidPreview value={value} id={id} />
 }
 
-function MathPreview({ value, block }: { value: string; block: boolean }) {
-  const html = katex.renderToString(value, { displayMode: block, throwOnError: false, trust: false, strict: 'ignore', maxExpand: 1000, maxSize: 20 })
-  return <span aria-label={'Equation ' + value} dangerouslySetInnerHTML={{ __html: html }} />
-}
+const MathPreview = lazy(() => import('./MathPreview'))
 
 function editAtom(props: NodeViewProps) {
   const position = props.getPos()
@@ -52,8 +50,12 @@ function DiagramNode(props: NodeViewProps) {
 
 function EquationNode(props: NodeViewProps) {
   const block = props.node.type.name === 'blockMath'
+  const value = String(props.node.attrs.value)
+  const fallback = <code aria-label={'Equation ' + value}>{value}</code>
   return <NodeViewWrapper as={block ? 'div' : 'span'} className={block ? 'equation-block' : 'equation-inline'} contentEditable={false}>
-    <button type="button" title="Edit equation" onClick={() => editAtom(props)}><MathPreview value={props.node.attrs.value} block={block} /></button>
+    <button type="button" title="Edit equation" onClick={() => editAtom(props)}>
+      <LazyBoundary fallback={fallback}><Suspense fallback={fallback}><MathPreview value={value} block={block} /></Suspense></LazyBoundary>
+    </button>
   </NodeViewWrapper>
 }
 
