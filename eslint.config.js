@@ -5,7 +5,7 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 export default defineConfig(
-  globalIgnores(['dist/', 'coverage/', 'playwright-report/', 'test-results/']),
+  globalIgnores(['dist/', 'extension/dist/', 'coverage/', 'playwright-report/', 'test-results/']),
   { linterOptions: { reportUnusedDisableDirectives: 'error' } },
   {
     files: ['**/*.{js,mjs,cjs}'],

@@ -106,9 +106,9 @@ export function fullFormatItems(editor: Editor, openLink: () => void): Item[] {
   ]
 }
 
-export function Toolbar({ editor, state, source, ready, execute, shortcut, insertItems, extraFormats, styleItems, sourceCanUndo, sourceCanRedo }: {
+export function Toolbar({ editor, state, source, ready, execute, shortcut, insertItems, extraFormats, styleItems, sourceCanUndo, sourceCanRedo, hostHistory }: {
   editor: Editor | null; source: boolean; ready: boolean; execute(id: string): void; shortcut(id: string): string | undefined;
-  state: ReturnType<typeof useFormatting>; insertItems: Item[]; extraFormats: Item[]; styleItems: Item[]; sourceCanUndo: boolean; sourceCanRedo: boolean
+  state: ReturnType<typeof useFormatting>; insertItems: Item[]; extraFormats: Item[]; styleItems: Item[]; sourceCanUndo: boolean; sourceCanRedo: boolean; hostHistory?: boolean
 }) {
   const enabled = !!editor && !!state && ready && !source
   const active = (name: string) => state?.marks.includes(name) ?? false
@@ -154,8 +154,8 @@ export function Toolbar({ editor, state, source, ready, execute, shortcut, inser
   ]
   return <div className="toolbar" role="toolbar" aria-label={source ? 'Source controls' : 'Formatting controls'}>
     <div className="toolbar-group history-tools">
-      <IconButton label={label('Undo', 'edit.undo')} onClick={() => execute('edit.undo')} disabled={!ready || (source ? !sourceCanUndo : !state?.undo)}><Undo2 size={17} /></IconButton>
-      <IconButton label={label('Redo', 'edit.redo')} onClick={() => execute('edit.redo')} disabled={!ready || (source ? !sourceCanRedo : !state?.redo)}><Redo2 size={17} /></IconButton>
+      <IconButton label={label('Undo', 'edit.undo')} onClick={() => execute('edit.undo')} disabled={!(hostHistory ?? (ready && (source ? sourceCanUndo : state?.undo)))}><Undo2 size={17} /></IconButton>
+      <IconButton label={label('Redo', 'edit.redo')} onClick={() => execute('edit.redo')} disabled={!(hostHistory ?? (ready && (source ? sourceCanRedo : state?.redo)))}><Redo2 size={17} /></IconButton>
     </div>
     {source ? <div className="source-toolbar-label"><Code2 size={16} /> Markdown source <span>{shortcut('search.find')} to find</span></div> : <>
       <div className="toolbar-group style-tools">

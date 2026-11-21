@@ -620,6 +620,10 @@ kbd { font: 11px/1.4 "Cascadia Code", Consolas, monospace; color: var(--muted); 
 .split-dragging, .split-dragging * { cursor: col-resize !important; user-select: none !important; }
 .preview-notice { display: flex; align-items: flex-start; flex: none; gap: 7px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--quiet); color: var(--warning); font-size: 12px; }
 .preview-notice svg { flex: none; }
+.host-notice { display: grid; gap: 8px; padding: 10px clamp(10px, 2vw, 22px); border-bottom: 1px solid var(--line-strong); background: var(--quiet); }
+.host-notice p { margin: 0; color: var(--warning); }
+.host-notice > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.host-notice textarea { display: block; width: 100%; min-height: 8em; margin-top: 4px; padding: 5px; border: 1px solid var(--line-strong); color: var(--text); font-family: monospace; }
 
 @media (max-width: 780px) {
   .mode-selector button span { display: none; }

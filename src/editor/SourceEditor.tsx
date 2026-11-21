@@ -14,6 +14,7 @@ interface Props {
   active: boolean
   lineNumberDisplay: boolean
   wordWrap: boolean
+  readOnly?: boolean
   onChange(value: string): void
   canEdit(): boolean
   onLocation(location: SourceLocation): void
@@ -23,7 +24,7 @@ interface Props {
 
 export interface SourceRuntime { view: EditorView; apply(value: string | EditorState): void }
 
-export function replaceSource(view: EditorView | null, source: string, origin: 'visual' | 'metadata' | 'search', recordHistory = true) {
+export function replaceSource(view: EditorView | null, source: string, origin: 'visual' | 'metadata' | 'search' | 'host', recordHistory = true) {
   if (!view) return
   const previous = view.state.doc.toString()
   if (previous === source) return
@@ -36,6 +37,7 @@ export function replaceSource(view: EditorView | null, source: string, origin: '
     afterEnd--
   }
   view.dispatch({
+    filter: origin !== 'host',
     changes: { from: start, to: beforeEnd, insert: source.slice(start, afterEnd) },
     annotations: [
       ...(recordHistory ? [isolateHistory.of('full')] : [Transaction.addToHistory.of(false)]),
@@ -58,6 +60,7 @@ export function SourceEditor(props: Props) {
     const configuration = () => [
       ...(latest.current.lineNumberDisplay ? [lineNumbers(), highlightActiveLineGutter()] : []),
       ...(latest.current.wordWrap ? [EditorView.lineWrapping] : []),
+      EditorState.readOnly.of(!!latest.current.readOnly), EditorView.editable.of(!latest.current.readOnly),
     ]
     const reportLocation = (state: EditorState) => {
       const head = state.selection.main.head
@@ -73,7 +76,7 @@ export function SourceEditor(props: Props) {
           keymap.of([{ key: 'Mod-Shift-z', run: redo, preventDefault: true }, ...defaultKeymap, ...historyKeymap, ...selectionKeymap, indentWithTab]),
           EditorView.contentAttributes.of({ 'aria-label': 'Markdown source editor', 'aria-multiline': 'true', tabindex: '0' }),
           EditorView.updateListener.of(update => {
-            if (update.docChanged && update.transactions.some(transaction => !transaction.isUserEvent('folio.visual'))) {
+            if (update.docChanged && update.transactions.some(transaction => transaction.docChanged && !transaction.isUserEvent('folio.visual') && !transaction.isUserEvent('folio.host'))) {
               latest.current.onChange(update.state.doc.toString())
             }
             if (update.selectionSet || update.docChanged) reportLocation(update.state)
@@ -105,8 +108,9 @@ export function SourceEditor(props: Props) {
     view.current?.dispatch({ effects: settings.current.reconfigure([
       ...(props.lineNumberDisplay ? [lineNumbers(), highlightActiveLineGutter()] : []),
       ...(props.wordWrap ? [EditorView.lineWrapping] : []),
+      EditorState.readOnly.of(!!props.readOnly), EditorView.editable.of(!props.readOnly),
     ]) })
-  }, [props.lineNumberDisplay, props.wordWrap])
+  }, [props.lineNumberDisplay, props.wordWrap, props.readOnly])
 
   return <div ref={container} className="source-editor" />
 }

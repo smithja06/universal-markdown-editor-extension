@@ -6,16 +6,22 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:extension": "tsc --noEmit && tsc --project extension/tsconfig.json && vite build --config vite.webview.config.ts && esbuild extension/src/extension.ts --bundle --platform=node --target=node20 --external:vscode --outfile=extension/dist/extension.cjs",
+    "package:extension": "npm run build:extension && cd extension && vsce package --no-dependencies --out dist/folio.vsix",
     "lint": "eslint . --max-warnings 0",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:extension": "npm run build:extension && playwright test --config playwright.vscode.config.ts"
   },
   "engines": {
     "node": "^22.13.0 || >=24.0.0"
   },
   "overrides": {
-    "katex": "$katex"
+    "katex": "$katex",
+    "@vscode/vsce": {
+      "minimatch": "^11.0.9"
+    }
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",
@@ -74,8 +80,11 @@
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/vscode": "1.100.0",
     "@typescript/native": "npm:typescript@^7.0.2",
     "@vitejs/plugin-react": "^6.3.0",
+    "@vscode/vsce": "^4.1.1",
+    "esbuild": "^0.28.2",
     "eslint": "^10.15.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "fake-indexeddb": "^6.2.8",

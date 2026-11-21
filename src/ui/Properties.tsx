@@ -59,13 +59,17 @@ const predefined = [
   ['created', 'Created date'], ['updated', 'Updated date'], ['category', 'Category'],
 ] as const
 
-function FrontMatter({ value, update }: { value: string; update(value: string): void }) {
+function FrontMatter({ value, update, readOnly }: { value: string; update(value: string): void; readOnly?: boolean }) {
   const [format, setFormat] = useState<'form' | 'raw'>('form')
   const [draft, setDraft] = useState(value)
   const [key, setKey] = useState('')
   const [customValue, setCustomValue] = useState('')
   const [feedback, setFeedback] = useState('')
   useEffect(() => { setDraft(value) }, [value])
+  if (readOnly) return <section className="properties-content fields-panel">
+    <div className="section-heading"><h3>Front matter</h3></div>
+    <label className="field">YAML front matter<textarea rows={9} readOnly value={value} /></label>
+  </section>
   const current = readMetadata(value)
   const activeFormat = current.error ? 'raw' : format
   const custom = [...current.fields.entries()].filter(([name]) => !predefined.some(([field]) => field === name))
@@ -150,9 +154,9 @@ function StatisticsPanel({ data }: { data: Statistics }) {
   </section>
 }
 
-export function Properties({ tab, setTab, headings, active, statistics, metadata, onMetadata, close, jump, width, setWidth, appearance, setAppearance }: AppearanceSettings & {
+export function Properties({ tab, setTab, headings, active, statistics, metadata, onMetadata, close, jump, width, setWidth, appearance, setAppearance, readOnly }: AppearanceSettings & {
   tab: Tab; setTab(tab: Tab): void; headings: Heading[]; active: string; statistics: Statistics; metadata: string; onMetadata(value: string): void; close(): void;
-  jump(heading: Heading): void; width: number; setWidth(value: number): void
+  jump(heading: Heading): void; width: number; setWidth(value: number): void; readOnly?: boolean
 }) {
   const id = useId()
   return <aside className="properties" style={{ '--sidebar-width': width + 'px' } as React.CSSProperties} aria-label="Document properties">
@@ -180,7 +184,7 @@ export function Properties({ tab, setTab, headings, active, statistics, metadata
     </div>
     <div className="property-panel" id={id + '-panel'} role="tabpanel" tabIndex={0} aria-labelledby={id + '-tab-' + tabs.findIndex(item => item.name === tab)}>
       {tab === 'Outline' && <Outline headings={headings} active={active} jump={jump} />}
-      {tab === 'Front matter' && <FrontMatter value={metadata} update={onMetadata} />}
+      {tab === 'Front matter' && <FrontMatter value={metadata} update={onMetadata} readOnly={readOnly} />}
       {tab === 'Appearance' && <AppearancePanel appearance={appearance} setAppearance={setAppearance} />}
       {tab === 'Statistics' && <StatisticsPanel data={statistics} />}
     </div>

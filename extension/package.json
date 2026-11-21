@@ -1,0 +1,27 @@
+{
+  "name": "folio-markdown-editor",
+  "displayName": "Folio Markdown Editor",
+  "description": "Edit Markdown visually or in a synchronized split view using your VS Code document.",
+  "version": "0.1.0",
+  "publisher": "smithja06",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/smithja06/universal-markdown-editor-extension.git",
+    "directory": "extension"
+  },
+  "engines": { "vscode": "^1.100.0" },
+  "categories": ["Other"],
+  "main": "./dist/extension.cjs",
+  "files": ["dist/extension.cjs", "dist/webview", "LICENSE"],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "folio.markdown",
+        "displayName": "Folio Markdown Editor",
+        "selector": [{ "filenamePattern": "*.md" }, { "filenamePattern": "*.markdown" }],
+        "priority": "option"
+      }
+    ]
+  }
+}

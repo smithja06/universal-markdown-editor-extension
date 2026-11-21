@@ -18,7 +18,7 @@ import { highlightSourceSearch, highlightVisualSearch, VisualSearchDecorations }
 import { splitAnchors, type BlockAnchor } from './splitScroll'
 import { openMarkdown, rebaseMarkdown, setFrontMatter, writeMarkdown, type MarkdownSession } from '../document/markdown'
 import type { WritableMarkdownHandle } from '../document/files'
-import { WorkspaceRestoreConflict, type FileInput, type FolioHost } from '../host/contracts'
+import { WorkspaceRestoreConflict, type FileInput, type FolioHost, type LiveDocumentSnapshot } from '../host/contracts'
 import { documentInfo, type Heading } from '../document/metadata'
 import { availableTitle, draftSummary, emptyLayout, newDocument, welcomeSource, withoutTabs, type DocumentFile, type EditorMode, type EditorPane, type TabView, type WorkspaceLayout, type WorkspaceView } from '../document/workspace'
 import { versionInterval, versionStorageError, type DocumentVersion, type VersionTrigger } from '../document/versions'
@@ -38,7 +38,7 @@ interface TabSession {
 
 export function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error) }
 
-export function useDocument(notify: (message: string) => void, visualScroll: RefObject<HTMLDivElement | null>, { storage, files }: FolioHost, viewSettings: WorkspaceView) {
+export function useDocument(notify: (message: string) => void, visualScroll: RefObject<HTMLDivElement | null>, { storage, files, liveDocument }: FolioHost, viewSettings: WorkspaceView) {
   const collection = useDocumentCollection(storage)
   const { workspace, documents, drafts, persisted, writing, enqueue, changeLayout, loadCollection, loadFile, persist, cache: cacheFile, opened, updateSummary, forget } = collection
   const [file, setFile] = useState<DocumentFile>(() => newDocument('Getting started', { source: welcomeSource, lineEnding: '\n', bom: false }))
@@ -53,6 +53,9 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   const [historyError, setHistoryError] = useState('')
   const [editorEpoch, setEditorEpoch] = useState(0)
   const [saveStatuses, setSaveStatuses] = useState<Record<string, LocalStatus>>({})
+  const [liveState, setLiveState] = useState<LiveDocumentSnapshot>()
+  const liveReadOnly = useRef(false)
+  const liveSource = useRef<string>(undefined)
   const fileRef = useRef(file)
   const tabSessions = useRef(new Map<string, TabSession>())
   const sourceRuntime = useRef<SourceRuntime | null>(null)
@@ -75,6 +78,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   const viewTimer = useRef<number | undefined>(undefined)
   const versionTimer = useRef<number | undefined>(undefined)
   const mirrorTimer = useRef<number | undefined>(undefined)
+  const summaryTimer = useRef<number | undefined>(undefined)
   const editVersion = useRef(0)
   const revision = useRef(new Map<string, number>())
   const saveStatusRef = useRef(new Map<string, LocalStatus>())
@@ -83,7 +87,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   const restoring = useRef(false)
   const searchCache = useRef<Partial<Record<SearchScope, SearchDocument>>>({})
   const searchListeners = useRef(new Set<() => void>())
-  const canEdit = useCallback(() => !!workspace.current.activeId && !restoring.current, [workspace])
+  const canEdit = useCallback(() => !!workspace.current.activeId && !restoring.current && !liveReadOnly.current, [workspace])
   const refreshSearch = useCallback(() => { for (const listener of searchListeners.current) listener() }, [])
   const subscribeSearch = useCallback((listener: () => void) => {
     searchListeners.current.add(listener)
@@ -93,7 +97,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   const editor = useEditor({
     extensions: [...createExtensions(nodeViewExtensions), VisualSearchDecorations, Extension.create({
       name: 'workspaceEditing',
-      addProseMirrorPlugins: () => [new Plugin({ filterTransaction: transaction => !transaction.docChanged || canEdit() })],
+      addProseMirrorPlugins: () => [new Plugin({ filterTransaction: transaction => !transaction.docChanged || transaction.getMeta('folio.host') === true || canEdit() })],
     })],
     shouldRerenderOnTransaction: false,
     editorProps: { attributes: { 'aria-label': 'Visual document editor', 'aria-multiline': 'true', role: 'textbox', spellcheck: 'true' } },
@@ -164,18 +168,20 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   }, [editor, visualScroll, workspace, viewSettings])
 
   const saveView = useCallback(() => {
+    if (liveDocument) return
     const view = captureView()
     if (view) saveLayout({ ...workspace.current, tabs: workspace.current.tabs.map(tab => tab.id === view.id ? view : tab) })
-  }, [captureView, saveLayout, workspace])
+  }, [captureView, liveDocument, saveLayout, workspace])
 
   const trackView = useCallback(() => {
+    if (liveDocument) return
     const id = workspace.current.activeId
     if (!id || restoring.current || pendingScroll.current?.id === id) return
     window.clearTimeout(viewTimer.current)
     viewTimer.current = window.setTimeout(() => {
       if (!restoring.current && workspace.current.activeId === id) saveView()
     }, 350)
-  }, [saveView, workspace])
+  }, [liveDocument, saveView, workspace])
 
   const automaticVersion = useCallback(async (candidate: DocumentFile, trigger: Exclude<VersionTrigger, 'manual'>) => {
     try {
@@ -275,12 +281,13 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     setActiveHeading(anchor)
   }
 
-  const applySession = useCallback((baseline: MarkdownSession, update: 'reset' | 'history' | 'mirror' = 'reset') => {
+  const applySession = useCallback((baseline: MarkdownSession, update: 'reset' | 'history' | 'mirror' | 'host' = 'reset') => {
     if (!editor) return
     const oldState = editor.state
     if (update !== 'reset') {
       baseline = rebaseMarkdown(baseline, oldState.doc)
       const transaction = visualProjection(oldState, baseline.document, update === 'history')
+      if (update === 'host') transaction.setMeta('folio.host', true)
       if (transaction.docChanged) {
         editor.view.dispatch(transaction)
         if (update === 'history') editor.view.dispatch(closeHistory(editor.state.tr))
@@ -301,7 +308,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const wasPaused = Boolean(issue.current)
     issue.current = message
     setPreviewIssue(message)
-    if (wasPaused !== Boolean(message)) editor?.setEditable(!message, false)
+    if (wasPaused !== Boolean(message)) editor?.setEditable(!message && !liveReadOnly.current, false)
   }, [editor])
 
   const remember = useCallback((document: ProseMirrorNode, source: string) => {
@@ -344,8 +351,20 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   const queueEdit = useCallback((origin: EditorPane) => {
     authority.current = origin
     const version = ++editVersion.current
-    setVisualDirty(true)
-    schedule()
+    if (liveDocument) {
+      try {
+        const source = project().source
+        liveSource.current = source
+        liveDocument.edit(source)
+        window.clearTimeout(summaryTimer.current)
+        summaryTimer.current = window.setTimeout(() => {
+          if (version === editVersion.current) summarize(parseSource(source))
+        }, 300)
+      } catch (error) { notify(errorMessage(error)) }
+    } else {
+      setVisualDirty(true)
+      schedule()
+    }
     refreshSearch()
     window.clearTimeout(mirrorTimer.current)
     if (viewSettings.getState().mode !== 'split') return
@@ -357,7 +376,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
         else notify(errorMessage(error))
       }
     }, 140)
-  }, [notify, refreshSearch, schedule, setIssue, synchronize, viewSettings])
+  }, [liveDocument, notify, parseSource, project, refreshSearch, schedule, setIssue, summarize, synchronize, viewSettings])
 
   visualUpdate.current = () => {
     if (!canEdit() || viewSettings.getState().mode === 'source' || issue.current) return
@@ -539,6 +558,51 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
 
   useEffect(() => {
     if (!editor) return
+    if (liveDocument) {
+      const receive = (state: LiveDocumentSnapshot) => {
+        setLiveState(state)
+        const readOnly = !state.available || state.conflict !== undefined
+        liveReadOnly.current = readOnly
+        const next: DocumentFile = { id: state.id, title: state.title, source: state.source, lineEnding: state.lineEnding,
+          bom: false, savedSource: state.source, savedTitle: state.title, updated: Date.now() }
+        try {
+          if (!session.current) {
+            const view: TabView = { id: next.id, mode: 'visual' }
+            loadCollection([draftSummary(next)], { activeId: next.id, tabs: [view], closed: [] })
+            showTab(next, view)
+          } else {
+            if (liveSource.current !== next.source) {
+              ++editVersion.current
+              window.clearTimeout(mirrorTimer.current)
+              window.clearTimeout(summaryTimer.current)
+              // Native edits can change Markdown delimiters without changing the visual tree.
+              history.current = []
+              authority.current = 'source'
+              replaceSource(sourceView.current, next.source, 'host', false)
+              const diagnostic = validateSource(next.source)[0]
+              if (diagnostic) {
+                setIssue(diagnostic.message)
+                summarize(parseSource(next.source))
+                refreshSearch()
+              } else {
+                applySession(parseSource(next.source), 'host')
+                setIssue(null)
+              }
+            }
+            replaceFile(next)
+          }
+          liveSource.current = next.source
+          const editable = !readOnly && !issue.current
+          if (editor.isEditable !== editable) editor.setEditable(editable, false)
+          setStatus(readOnly ? 'unavailable' : state.pending ? 'pending' : 'saved')
+        } catch (error) {
+          setStatus('unavailable')
+          notify(errorMessage(error))
+        }
+      }
+      receive(liveDocument.read())
+      return liveDocument.subscribe(receive)
+    }
     let active = true
     const restore = async () => {
       try {
@@ -578,10 +642,11 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     }
     void restore().catch(error => { if (active) { setStatus('unavailable'); notify(errorMessage(error)) } })
     return () => { active = false }
-  }, [editor, cacheFile, loadCollection, loadFile, markStatus, notify, opened, persistDraft, queueVersion, saveLayout, showTab, storage])
+  }, [editor, applySession, cacheFile, liveDocument, loadCollection, loadFile, markStatus, notify, opened, parseSource, persistDraft, queueVersion, refreshSearch, replaceFile, saveLayout, setIssue, showTab, storage, summarize])
 
   useEffect(() => {
     const onHidden = (event: Event) => {
+      if (liveDocument) return
       if (restoring.current || !session.current || (event.type !== 'pagehide' && document.visibilityState !== 'hidden')) return
       if (timer.current !== undefined) flush(true)
       else { void queueVersion(project(), 'checkpoint'); saveView() }
@@ -594,9 +659,10 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       window.clearTimeout(timer.current)
       window.clearTimeout(viewTimer.current)
       window.clearTimeout(mirrorTimer.current)
+      window.clearTimeout(summaryTimer.current)
       window.clearTimeout(versionTimer.current)
     }
-  }, [flush, project, queueVersion, saveView])
+  }, [flush, liveDocument, project, queueVersion, saveView])
 
   const setSource = useCallback((source: string) => {
     if (viewSettings.getState().mode === 'visual' || !workspace.current.activeId || restoring.current) return
@@ -812,6 +878,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   }
 
   async function save(options: { saveAs?: boolean; download?: boolean } = {}) {
+    if (liveDocument) { liveDocument.run('save'); return }
     try {
       if (!workspace.current.activeId) return
       const next = project()
@@ -885,7 +952,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   }
 
   function changeTitle(title: string) {
-    if (!canEdit()) return
+    if (liveDocument || !canEdit()) return
     const normalized = title.trim() || 'Untitled document'
     if (normalized === fileRef.current.title) return
     replaceFile({ ...fileRef.current, title: normalized })
@@ -893,7 +960,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   }
 
   function changeMetadata(value: string) {
-    if (!editor) return
+    if (!editor || !canEdit()) return
     try {
       if (active.current === 'source') {
         if (!activatePane('source')) return
@@ -954,7 +1021,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     }
   }
 
-  const dirty = visualDirty || file.source !== file.savedSource || file.title !== file.savedTitle
+  const dirty = liveState ? liveState.dirty || liveState.pending || liveState.conflict !== undefined : visualDirty || file.source !== file.savedSource || file.title !== file.savedTitle
   const tabs = collection.layout.tabs.map(tab => {
     const summary = documents.current.get(tab.id)
     const current = tab.id === collection.layout.activeId
@@ -965,7 +1032,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   return {
     editor, file, recent, status, sourceView, registerSource, setSource, canEdit, trackView, info, metadata, warnings, activeHeading,
     activePane, activatePane, previewIssue, scrollAnchors,
-    dirty, tabs, library: collection.library, layout: collection.layout,
+    dirty, liveState, tabs, library: collection.library, layout: collection.layout,
     editorEpoch, historyError, loadVersions, createVersion, restoreHistoryVersion,
     captureSearch, subscribeSearch, presentSearch, applySearch, clearSearch,
     project, switchMode, createDocument, openDocument, renameDocument, duplicateDocument, deleteDocument, restoreDocument, closeTab, closeOtherTabs, reopenTab,

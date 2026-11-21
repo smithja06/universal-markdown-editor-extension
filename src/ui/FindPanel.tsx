@@ -8,6 +8,7 @@ import { IconButton } from './controls'
 
 export interface FindPanelHandle { focus(replace?: boolean): void; move(step: number): void }
 interface Props {
+  readOnly?: boolean
   panelRef: Ref<FindPanelHandle>
   documentId: string
   title: string
@@ -23,7 +24,7 @@ interface Props {
   close(): void
 }
 
-export function FindPanel({ panelRef, documentId, title, mode, startReplace, find, capture, subscribe, present, replace, clear, openSource, close }: Props) {
+export function FindPanel({ panelRef, documentId, title, mode, startReplace, find, capture, subscribe, present, replace, clear, openSource, close, readOnly }: Props) {
   const replaceId = useId()
   const [term, setTerm] = useState('')
   const [value, setValue] = useState('')
@@ -147,8 +148,8 @@ export function FindPanel({ panelRef, documentId, title, mode, startReplace, fin
     </div>
     <form id={replaceId} className="find-replace-row" hidden={!expanded} onSubmit={event => { event.preventDefault(); performReplace(false) }}>
       <input className="find-input" aria-label="Replace with" placeholder="Replace with" value={value} onChange={event => { setValue(event.target.value); setActionError('') }} />
-      <button type="submit" className="secondary-button" disabled={!hits?.length || !model?.canReplace}>Replace</button>
-      <button type="button" className="secondary-button" disabled={!hits?.length || !model?.canReplace} onClick={() => performReplace(true)}>Replace all</button>
+      <button type="submit" className="secondary-button" disabled={readOnly || !hits?.length || !model?.canReplace}>Replace</button>
+      <button type="button" className="secondary-button" disabled={readOnly || !hits?.length || !model?.canReplace} onClick={() => performReplace(true)}>Replace all</button>
     </form>
     {sourceOnly && <div className="find-feedback">This match is visible in Markdown Source. <button type="button" onClick={openSource}>Show source</button></div>}
     {unmapped && <div className="find-feedback">This match is shown near its Markdown block. An exact source span is unavailable.</div>}
