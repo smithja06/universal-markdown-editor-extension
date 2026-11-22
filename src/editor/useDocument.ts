@@ -322,9 +322,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const next = project()
     const current = editor.state.doc
     if (authority.current === 'visual') {
-      const view = sourceView.current
-      const sourceChanged = !!view && view.state.doc.toString() !== next.source
-      replaceSource(sourceView.current, next.source, 'visual', recordHistory)
+      const sourceChanged = replaceSource(sourceView.current, next.source, 'visual', recordHistory)
       paired.current = { source: next.source, document: current, version: editVersion.current }
       remember(current, next.source)
       if (sourceChanged) refreshSearch()
@@ -353,7 +351,8 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const version = ++editVersion.current
     if (liveDocument) {
       try {
-        const source = project().source
+        // setSource already received the serialized CodeMirror document for this transaction.
+        const source = origin === 'source' ? fileRef.current.source : project().source
         liveSource.current = source
         liveDocument.edit(source)
         window.clearTimeout(summaryTimer.current)
@@ -463,9 +462,9 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       }
     }
     replaceFile(next)
-    const visible = view.mode === 'source' ? openMarkdown(next.source, editor.schema) : baseline
-    summarize(visible, view.mode === 'source' ? visible.document : editor.state.doc)
-    if (view.mode !== 'source') {
+    if (view.mode === 'source') summarize(openMarkdown(next.source, editor.schema))
+    else if (resumed) {
+      summarize(baseline, editor.state.doc)
       setMetadata(editor.state.doc.attrs.frontMatter ?? '')
       let preserved = 0
       editor.state.doc.descendants(node => { if (node.type.name === 'rawBlock' || node.type.name === 'rawInline') preserved++ })

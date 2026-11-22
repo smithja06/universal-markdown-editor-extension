@@ -1,4 +1,75 @@
-# Folio Phase 6 Milestone 2.1 benchmarks
+# Folio Phase 6 extension benchmarks
+
+## Milestone 2.2 compared with Milestone 2.1
+
+Both builds used Windows 11 Pro 25H2 x64 (26200.9974), desktop VS Code 1.147.0 (`8a14f0cc1b08d531eb83255ea3764ae22aa932b5`), an AMD Ryzen AI 9 HX 370, Node 24.13.0, and one Playwright worker. The reference build came from the approved `06d1c50` checkpoint. Each case used a fresh VS Code profile and the same 75 ms target input cadence and fixture sizes as the historical method below. Each build ran 15 paced cases and four unpaced Source cases. All 30 paced cases had one browser journal write and one host checkpoint reply per key, zero storage failures, and an exact autosave. The 2.2 harness asserts both counts.
+
+| Size (MB) | Mode | Typing p95 (ms) | Checkpoint creation p95 (ms) | Checkpoint reply p95 (ms) | Initial Visual ready (s) | Mode switch (s) |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 0.1 | Source | 11.09 → 9.03 | 3.50 → 3.10 | 7.70 → 8.50 | 1.16 → 0.99 | 0.42 → 0.19 |
+| 0.1 | Visual | 14.47 → 9.27 | 4.50 → 3.20 | 11.70 → 8.80 | 2.19 → 1.02 | — |
+| 0.1 | Split | 15.21 → 9.79 | 5.20 → 3.40 | 12.60 → 9.10 | 2.05 → 0.94 | 0.45 → 0.20 |
+| 0.5 | Source | 21.10 → 10.96 | 9.00 → 4.50 | 13.10 → 8.20 | 2.44 → 1.25 | 0.51 → 0.18 |
+| 0.5 | Visual | 28.67 → 13.07 | 15.00 → 6.30 | 21.90 → 32.70 | 2.39 → 1.22 | — |
+| 0.5 | Split | 33.92 → 12.97 | 18.00 → 6.60 | 29.40 → 27.50 | 2.43 → 1.27 | 0.72 → 0.41 |
+| 1 | Source | 38.86 → 15.38 | 20.40 → 8.00 | 23.50 → 9.70 | 2.88 → 1.48 | 0.63 → 0.12 |
+| 1 | Visual | 45.72 → 22.64 | 25.20 → 13.60 | 36.70 → 54.00 | 2.82 → 1.41 | — |
+| 1 | Split | 55.83 → 21.53 | 33.20 → 12.40 | 52.50 → 18.10 | 2.74 → 1.52 | 0.85 → 0.53 |
+| 2 | Source | 61.14 → 38.46 | 35.50 → 21.30 | 39.20 → 20.70 | 4.17 → 2.02 | 1.36 → 0.50 |
+| 2 | Visual | 75.97 → 32.72 | 56.50 → 21.10 | 298.30 → 27.60 | 3.78 → 2.04 | — |
+| 2 | Split | 91.27 → 35.50 | 60.70 → 24.60 | 194.70 → 31.40 | 3.98 → 1.75 | 1.58 → 0.71 |
+| 5 | Source | 91.32 → 44.11 | 62.70 → 26.30 | 650.00 → 21.50 | 6.81 → 3.09 | 1.40 → 0.67 |
+| 5 | Visual | 201.90 → 87.12 | 116.90 → 61.90 | 2555.00 → 512.50 | 6.82 → 3.20 | — |
+| 5 | Split | 200.91 → 89.93 | 120.70 → 63.20 | 2658.00 → 1032.40 | 6.75 → 3.24 | 5.04 → 1.47 |
+
+Source input now reuses the string already produced by CodeMirror for the transaction. A fresh Visual view computes its document statistics once. Visual-to-Source synchronization reuses the replacement operation's change check. The benchmark still opens a full Markdown parse and Visual document and initializes CodeMirror for the source pane. Split adds preview synchronization and scroll mapping. The browser still serializes the full recovery snapshot and the host receives every checkpoint. At 5 MB Source, p95 for the browser storage call itself was 15.1 → 7.8 ms with the same storage code, illustrating the load variance between the two full matrices. The matrix measures the observed end-to-end result and cannot attribute the whole change to Folio.
+
+Each unpaced Source case recorded all 64 checkpoint replies in both builds.
+
+| Size (MB) | Typing p95 (ms) | Checkpoint reply p95 (ms) | Host handler p95 (ms) | Host reply delivery p95 (ms) |
+| ---: | ---: | ---: | ---: | ---: |
+| 0.1 | 17.82 → 8.81 | 47.80 → 27.10 | 14.71 → 9.38 | 45 → 23 |
+| 0.5 | 20.62 → 13.55 | 78.60 → 115.40 | 14.30 → 16.14 | 71 → 36 |
+| 1 | 44.47 → 33.05 | 573.50 → 185.60 | 15.01 → 9.17 | 566 → 182 |
+| 2 | 66.15 → 40.46 | 1414.10 → 528.60 | 12.93 → 13.25 | 1411 → 528 |
+
+At 5 MB Split in the paced matrix, host reply delivery p95 was 2638 → 1024 ms, with host handler p95 of 37.70 → 16.26 ms. The separately calculated stage percentiles describe distributions and cannot be added together. At 2 MB in the burst and 5 MB Split under paced input, most of the acknowledgement tail follows the host reply.
+
+### Longer paired sessions
+
+The longer run used 384 keys per case and added memory samples after keys 128 and 256. Each row ran for about 30–32 seconds, followed by the autosave probe. All eight runs passed, with 384 browser journal writes, 384 host replies, zero failures in either store, and exact autosave for each case.
+
+```powershell
+$env:FOLIO_BENCHMARK = '1'
+$env:FOLIO_BENCHMARK_LONG = '1'
+npx playwright test --config playwright.vscode.config.ts sustained.bench.ts --grep 'at 2000000 bytes|sustained Markdown Source at 5000000 bytes'
+Remove-Item Env:FOLIO_BENCHMARK_LONG
+Remove-Item Env:FOLIO_BENCHMARK
+```
+
+| Size (MB) | Mode | Typing p95 (ms) | Creation p95 (ms) | Checkpoint reply p95 (ms) | Initial Visual ready (s) | Mode switch (s) |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 2 | Source | 38.63 → 20.44 | 21.70 → 11.60 | 21.10 → 10.60 | 1.91 → 1.88 | 0.61 → 0.56 |
+| 2 | Visual | 64.36 → 37.83 | 44.50 → 24.20 | 157.50 → 30.40 | 2.22 → 2.03 | — |
+| 2 | Split | 61.13 → 36.18 | 41.80 → 22.90 | 115.10 → 32.00 | 1.90 → 1.99 | 0.91 → 0.94 |
+| 5 | Source | 87.56 → 54.11 | 57.80 → 36.00 | 529.70 → 29.80 | 3.32 → 3.30 | 2.41 → 0.70 |
+
+The 5 MB Source typing and mode-switch improvements repeated. Its initial Visual startup was effectively flat in this pair, so the large startup improvement in the first matrix did not reproduce. Full parsing, DOM creation, and editor initialization remain on the startup path. At 5 MB Source, host reply delivery p95 was 517 → 26 ms, while handler p95 was 15.42 → 12.20 ms. Host CPU rose from 12.3% to 16.6% of one logical core as native edit acknowledgements increased from 183 to 379. Exact autosave was 1.19 → 1.22 s.
+
+| Session | Webview JS heap in 2.1 (MiB) | Webview JS heap in 2.2 (MiB) | Final host RSS (MiB) | Final host JS heap (MiB) |
+| --- | --- | --- | ---: | ---: |
+| 2 MB Source | 38.4 / 37.7 / 38.6 / 62.8 | 41.1 / 123.7 / 115.9 / 84.4 | 306.3 → 295.0 | 83.7 → 94.4 |
+| 2 MB Visual | 29.4 / 58.0 / 105.6 / 63.7 | 28.8 / 70.7 / 60.6 / 173.7 | 292.1 → 296.0 | 80.2 → 86.5 |
+| 2 MB Split | 43.0 / 157.1 / 138.1 / 79.1 | 32.1 / 160.8 / 55.8 / 126.4 | 295.5 → 311.0 | 82.6 → 114.0 |
+| 5 MB Source | 70.3 / 225.5 / 167.6 / 179.4 | 65.2 / 163.6 / 86.1 / 164.9 | 368.3 → 313.8 | 148.6 → 112.3 |
+
+The four webview heap samples are before typing, after keys 128 and 256, and after queue drain. The 5 MB Source host RSS started at 287.9 → 284.8 MiB and ended at 368.3 → 313.8 MiB. Webview heap varied within each run. The 2 MB Visual and Split end snapshots were higher in 2.2, while the 5 MB Source end snapshot was lower. Neither garbage collection nor peak capture was controlled, and the run covers one active view for roughly half a minute. These snapshots justify longer profiling across repeated mode switches and multiple retained views if memory grows in use.
+
+### Regression thresholds
+
+On a comparable, idle desktop, repeat a timing threshold breach in three isolated profiles and use the median of those runs. Investigate 5 MB Source typing p95 over **110 ms**, checkpoint creation p95 over **75 ms**, Visual startup over **8 s**, a Source switch over **4 s**, or a Split switch over **6 s**. Investigate checkpoint acknowledgement p95 over **2 s** at paced 5 MB Source or **3 s** in the 2 MB Source burst. These are investigation thresholds for comparable runs. The strict harness checks are complete checkpoint delivery, zero failures in the two stores under normal test conditions, and exact autosaved content. Hardware-dependent timings belong in repeated comparison runs.
+
+## Historical Milestone 2.1 comparison
 
 ## Method
 
