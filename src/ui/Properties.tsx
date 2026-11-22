@@ -121,12 +121,13 @@ function FrontMatter({ value, update, readOnly }: { value: string; update(value:
   </section>
 }
 
-interface AppearanceSettings { appearance: Appearance; setAppearance(value: Partial<Appearance>): void }
+interface AppearanceSettings { appearance: Appearance; setAppearance(value: Partial<Appearance>): void; hostTheme?: boolean }
 
-function AppearancePanel({ appearance, setAppearance }: AppearanceSettings) {
+function AppearancePanel({ appearance, setAppearance, hostTheme }: AppearanceSettings) {
   const hex = accentHex(appearance.accentColor)
   return <section className="properties-content fields-panel">
     <div className="section-heading"><h3>Appearance</h3></div>
+    {hostTheme ? <p className="muted">Colors follow the VS Code theme.</p> : <>
     <label className="field">Theme<select value={appearance.theme} onChange={event => setAppearance({ theme: event.target.value === 'dark' ? 'dark' : 'light' })}><option value="light">Light</option><option value="dark">Dark</option></select></label>
     <fieldset className="accent-field">
       <legend>Accent color</legend>
@@ -134,7 +135,7 @@ function AppearancePanel({ appearance, setAppearance }: AppearanceSettings) {
       <input type="range" className="accent-hue" aria-label="Accent hue" aria-valuetext={hex} min={0} max={359}
         value={accentHue(appearance.accentColor)} style={{ '--accent-spectrum': accentSpectrum } as React.CSSProperties}
         onChange={event => setAppearance({ accentColor: accentAtHue(event.currentTarget.valueAsNumber) })} />
-    </fieldset>
+    </fieldset></>}
     <label className="field">Editor font<select value={appearance.font} onChange={event => setAppearance({ font: event.target.value as typeof appearance.font })}><option>Default</option><option>Sans serif</option><option>Serif</option><option>Monospace</option></select></label>
     <label className="field">Editor font size<select value={appearance.fontSize} onChange={event => setAppearance({ fontSize: Number(event.target.value) })}>{[12, 14, 15, 16, 18, 20, 22, 24].map(size => <option key={size} value={size}>{size} px</option>)}</select></label>
     <label className="field">Editor line height<select value={appearance.lineHeight} onChange={event => setAppearance({ lineHeight: Number(event.target.value) })}>{[1.25, 1.5, 1.7, 1.9, 2.2].map(value => <option key={value}>{value}</option>)}</select></label>
@@ -154,7 +155,7 @@ function StatisticsPanel({ data }: { data: Statistics }) {
   </section>
 }
 
-export function Properties({ tab, setTab, headings, active, statistics, metadata, onMetadata, close, jump, width, setWidth, appearance, setAppearance, readOnly }: AppearanceSettings & {
+export function Properties({ tab, setTab, headings, active, statistics, metadata, onMetadata, close, jump, width, setWidth, appearance, setAppearance, hostTheme, readOnly }: AppearanceSettings & {
   tab: Tab; setTab(tab: Tab): void; headings: Heading[]; active: string; statistics: Statistics; metadata: string; onMetadata(value: string): void; close(): void;
   jump(heading: Heading): void; width: number; setWidth(value: number): void; readOnly?: boolean
 }) {
@@ -185,7 +186,7 @@ export function Properties({ tab, setTab, headings, active, statistics, metadata
     <div className="property-panel" id={id + '-panel'} role="tabpanel" tabIndex={0} aria-labelledby={id + '-tab-' + tabs.findIndex(item => item.name === tab)}>
       {tab === 'Outline' && <Outline headings={headings} active={active} jump={jump} />}
       {tab === 'Front matter' && <FrontMatter value={metadata} update={onMetadata} readOnly={readOnly} />}
-      {tab === 'Appearance' && <AppearancePanel appearance={appearance} setAppearance={setAppearance} />}
+      {tab === 'Appearance' && <AppearancePanel appearance={appearance} setAppearance={setAppearance} hostTheme={hostTheme} />}
       {tab === 'Statistics' && <StatisticsPanel data={statistics} />}
     </div>
   </aside>

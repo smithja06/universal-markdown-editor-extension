@@ -7,7 +7,7 @@ import type { EditorView } from '@codemirror/view'
 import type { EditorState as SourceState } from '@codemirror/state'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { createExtensions } from './schema'
-import { nodeViewExtensions } from './nodeViews'
+import { nodeViewExtensions, workspaceImageExtension } from './nodeViews'
 import { replaceSource, type SourceRuntime } from './SourceEditor'
 import { useDocumentCollection } from './useDocumentCollection'
 import { sourceToVisual, visualToSource } from './markdownSelection'
@@ -38,7 +38,7 @@ interface TabSession {
 
 export function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error) }
 
-export function useDocument(notify: (message: string) => void, visualScroll: RefObject<HTMLDivElement | null>, { storage, files, liveDocument }: FolioHost, viewSettings: WorkspaceView) {
+export function useDocument(notify: (message: string) => void, visualScroll: RefObject<HTMLDivElement | null>, { storage, files, liveDocument, resources }: FolioHost, viewSettings: WorkspaceView) {
   const collection = useDocumentCollection(storage)
   const { workspace, documents, drafts, persisted, writing, enqueue, changeLayout, loadCollection, loadFile, persist, cache: cacheFile, opened, updateSummary, forget } = collection
   const [file, setFile] = useState<DocumentFile>(() => newDocument('Getting started', { source: welcomeSource, lineEnding: '\n', bom: false }))
@@ -95,7 +95,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   }, [])
 
   const editor = useEditor({
-    extensions: [...createExtensions(nodeViewExtensions), VisualSearchDecorations, Extension.create({
+    extensions: [...createExtensions(resources ? [...nodeViewExtensions, workspaceImageExtension(resources)] : nodeViewExtensions), VisualSearchDecorations, Extension.create({
       name: 'workspaceEditing',
       addProseMirrorPlugins: () => [new Plugin({ filterTransaction: transaction => !transaction.docChanged || transaction.getMeta('folio.host') === true || canEdit() })],
     })],

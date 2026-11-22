@@ -1,6 +1,16 @@
 import { expect, it } from 'vitest'
 import { connectionMessage, isClientMessage, isHostMessage, rebaseSource, sourceChange, spliceSource } from './protocol'
 
+it('accepts only listed editor actions and bounded resource request shapes', () => {
+  expect(isHostMessage({ type: 'action', action: 'view.mode.split' })).toBe(true)
+  expect(isHostMessage({ type: 'action', action: 'workbench.action.closeWindow' })).toBe(false)
+  expect(isClientMessage({ type: 'resource', operation: 'open', id: 1, reference: './notes.md#heading' })).toBe(true)
+  expect(isClientMessage({ type: 'resource', operation: 'read', id: 1, reference: './notes.md' })).toBe(false)
+  expect(isClientMessage({ type: 'resource', operation: 'image', id: 1, reference: 'a'.repeat(4097) })).toBe(false)
+  expect(isHostMessage({ type: 'resourceResult', id: 1, ok: true, image: 'http://example.org/asset.png' })).toBe(false)
+  expect(isHostMessage({ type: 'resourceResult', id: 1, ok: true, image: 'data:image/svg+xml;base64,AAAA' })).toBe(false)
+})
+
 it('validates message directions and requires safe revisions and normalized LF source', () => {
   const state = { uri: 'file:///notes.md', title: 'notes.md', source: 'one\ntwo', revision: 2, dirty: true, available: true, eol: '\r\n' }
   expect(isHostMessage({ type: 'state', state, edit: { id: 1, accepted: false, message: 'Changed externally.' } })).toBe(true)

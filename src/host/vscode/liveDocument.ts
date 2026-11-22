@@ -30,6 +30,7 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
   let message: string | undefined
   let recoveryWarning: string | undefined
   let recoveryContext: RecoveryContext | undefined
+  let backupBase: Pick<DocumentState, 'revision' | 'source'> | undefined
   let draft: RecoveryDraft | undefined
   let archived: readonly RecoveryDraft[] = []
   const dismissing = new Map<string, { generation: number; committed: boolean }>()
@@ -96,7 +97,18 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
     } catch {
       recoveryWarning = 'This draft has no confirmed recovery copy yet. Keep this editor open and copy your Markdown if synchronization stalls.'
     }
-    try { transport.post({ type: 'checkpoint', draft }) } catch { /* The webview recovery copy stays intact. */ }
+    try {
+      if (reason === 'pending' && backupBase && backupBase.source.length >= 64_000) {
+        const change = sourceChange(backupBase.source, desired)
+        if (!change || change.text.length <= 64_000) {
+          transport.post({ type: 'checkpoint', draft: {
+            id, uri, generation: draft.generation, bom: draft.bom, eol: draft.eol, baseRevision: backupBase.revision, change,
+          } })
+          return
+        }
+      }
+      transport.post({ type: 'checkpoint', draft })
+    } catch { /* The webview recovery copy stays intact. */ }
     if (reason !== 'pending') refreshRecovery()
   }
 
@@ -177,6 +189,9 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
   function reconcile(state: DocumentState, acknowledgement?: Acknowledgement) {
     if (authoritative && (state.uri !== authoritative.uri || state.revision < authoritative.revision || !authoritative.available)) return
     if (acknowledgement && acknowledgement.id !== inFlight?.id) return
+    if (!backupBase && state.available && state.revision === recoveryContext?.baseRevision) {
+      backupBase = { revision: state.revision, source: state.source }
+    }
     if (!state.available) {
       authoritative = deferred && deferred.revision > state.revision ? { ...deferred, available: false } : state
       deferred = undefined

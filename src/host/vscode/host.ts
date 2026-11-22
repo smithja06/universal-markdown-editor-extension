@@ -5,6 +5,8 @@ import type { DocumentStorage, FileOperations, FolioHost } from '../contracts'
 import SearchWorker from '../searchWorker.ts?worker&inline'
 import { createLiveDocumentClient, type LiveDocumentTransport } from './liveDocument'
 import type { RecoveryJournal } from './recovery'
+import { createWorkspaceResources } from './resources'
+import { onWebviewTheme } from './theme'
 
 function unavailable() {
   return new Error('This operation is unavailable in the VS Code editor.')
@@ -39,17 +41,27 @@ const search = createSearch(() => new SearchWorker())
 
 export function createWebviewHost(transport: LiveDocumentTransport, platform: ShortcutPlatform, theme: Appearance['theme'], journal: RecoveryJournal) {
   const liveDocument = createLiveDocumentClient(transport, journal)
+  const resources = createWorkspaceResources(transport)
   let settings = normalizeAppearance({ theme })
   let recent: string[] = []
   return {
     liveDocument,
     storage,
     files,
-    keyboard: { platform },
+    keyboard: { platform, handledByHost: new Set(['workspace.palette']) },
     appearance: {
       read: () => settings,
       write(value) { settings = value },
+      themeFromHost: onWebviewTheme,
     },
+    commands: {
+      attach(api) {
+        return transport.listen(message => {
+          if (message.type === 'action') api.execute(message.action)
+        })
+      },
+    },
+    resources,
     clipboard: {
       async writeText(text) {
         await liveDocument.copy(typeof text === 'string' ? text : await text())
@@ -60,5 +72,6 @@ export function createWebviewHost(transport: LiveDocumentTransport, platform: Sh
       read: () => recent,
       write(ids) { recent = ids },
     },
-  } satisfies FolioHost
+    dispose() { resources.dispose(); liveDocument.dispose() },
+  } satisfies FolioHost & { dispose(): void }
 }

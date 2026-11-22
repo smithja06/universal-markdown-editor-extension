@@ -1,5 +1,8 @@
 import { isMap, isScalar, parseDocument } from 'yaml'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import { headingSlug } from './headingSlug'
+
+export { headingSlug } from './headingSlug'
 
 export function readMetadata(source: string) {
   const document = parseDocument(source, { keepSourceTokens: true })
@@ -23,10 +26,6 @@ export function updateMetadata(source: string, key: string, value: string | stri
 
 export interface Heading { title: string; level: number; anchor: string; position: number }
 export interface Statistics { words: number; characters: number; compact: number; minutes: number; headings: number; links: number; images: number }
-
-export function headingSlug(text: string) {
-  return text.trim().toLowerCase().normalize('NFKC').replace(/[^\p{Letter}\p{Number}\s_-]/gu, '').trim().replace(/\s+/g, '-') || 'section'
-}
 
 export function documentInfo(doc: ProseMirrorNode) {
   const outline: Heading[] = []

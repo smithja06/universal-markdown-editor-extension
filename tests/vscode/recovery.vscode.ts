@@ -192,21 +192,23 @@ test.describe('unacknowledged edits', () => {
     expect((await read('original.md')).text).toBe('# Replacement at old path\n')
   })
 
-  test('recovers from VS Code workspace storage after an extension-host restart', async ({ desktop }) => {
+  test('recovers a compact VS Code backup after an extension-host restart', async ({ desktop }) => {
     const { page, workspace, command, read, restart } = desktop
     const file = 'host-restart.md'
-    await writeFile(join(workspace, file), original)
+    const large = original + 'Retain the rest of this Markdown document.\r\n\r\n'.repeat(1_800)
+    await writeFile(join(workspace, file), large)
     await command('open', { file, editor: 'folio' })
     await editWhileHeld(page, 'folio-test-hold-edits', false)
     await expect(folio(page).locator('body')).toHaveAttribute('data-folio-test-stored', '2')
+    await expect(folio(page).locator('body')).toHaveAttribute('data-folio-test-packed', '2')
     await restart('host')
     await command('close')
     await command('open', { file, editor: 'folio' })
     const frame = folio(page)
     await expect(frame.getByRole('heading', { name: 'Shared', exact: true })).toBeVisible()
     await frame.getByText('View pending Markdown', { exact: true }).click()
-    await expect(frame.getByRole('textbox', { name: 'Pending Markdown' })).toHaveValue('# Shared Folio draft\n\n  **Keep**\n')
-    expect((await read(file)).text).toBe(original)
+    await expect(frame.getByRole('textbox', { name: 'Pending Markdown' })).toHaveValue(large.replace('# Shared', '# Shared Folio draft').replace(/\r\n/g, '\n'))
+    expect((await read(file)).text).toBe(large)
   })
 
   test('recovers from webview storage after reloading the VS Code window', async ({ desktop }) => {

@@ -13,8 +13,45 @@
   "engines": { "vscode": "^1.100.0" },
   "categories": ["Other"],
   "main": "./dist/extension.cjs",
+  "extensionKind": ["workspace"],
+  "capabilities": { "virtualWorkspaces": true },
   "files": ["dist/extension.cjs", "dist/webview", "LICENSE"],
   "contributes": {
+    "commands": [
+      { "command": "folio.showVisual", "title": "Show Visual Editor", "category": "Folio", "enablement": "activeCustomEditorId == folio.markdown" },
+      { "command": "folio.showMarkdown", "title": "Show Markdown Source", "category": "Folio", "enablement": "activeCustomEditorId == folio.markdown" },
+      { "command": "folio.showSplit", "title": "Show Split Editor", "category": "Folio", "enablement": "activeCustomEditorId == folio.markdown" },
+      { "command": "folio.toggleProperties", "title": "Toggle Document Properties", "category": "Folio", "enablement": "activeCustomEditorId == folio.markdown" },
+      { "command": "folio.goToHeading", "title": "Go to Heading", "category": "Folio", "enablement": "activeCustomEditorId == folio.markdown" },
+      { "command": "folio.showCommands", "title": "Show Folio Commands", "category": "Folio", "enablement": "activeCustomEditorId == folio.markdown" }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "folio.showVisual", "when": "activeCustomEditorId == folio.markdown" },
+        { "command": "folio.showMarkdown", "when": "activeCustomEditorId == folio.markdown" },
+        { "command": "folio.showSplit", "when": "activeCustomEditorId == folio.markdown" },
+        { "command": "folio.toggleProperties", "when": "activeCustomEditorId == folio.markdown" },
+        { "command": "folio.goToHeading", "when": "activeCustomEditorId == folio.markdown" },
+        { "command": "folio.showCommands", "when": "activeCustomEditorId == folio.markdown" }
+      ],
+      "editor/title": [
+        { "submenu": "folio.editorActions", "when": "activeCustomEditorId == folio.markdown", "group": "1_view" }
+      ],
+      "folio.editorActions": [
+        { "command": "folio.showVisual", "group": "1_mode@1" },
+        { "command": "folio.showMarkdown", "group": "1_mode@2" },
+        { "command": "folio.showSplit", "group": "1_mode@3" },
+        { "command": "folio.toggleProperties", "group": "2_document@1" },
+        { "command": "folio.goToHeading", "group": "2_document@2" },
+        { "command": "folio.showCommands", "group": "2_document@3" }
+      ]
+    },
+    "submenus": [{ "id": "folio.editorActions", "label": "Folio" }],
+    "keybindings": [
+      { "command": "folio.showVisual", "key": "ctrl+alt+shift+v", "mac": "cmd+alt+shift+v", "when": "activeCustomEditorId == folio.markdown && !inputFocus" },
+      { "command": "folio.showMarkdown", "key": "ctrl+alt+shift+m", "mac": "cmd+alt+shift+m", "when": "activeCustomEditorId == folio.markdown && !inputFocus" },
+      { "command": "folio.showSplit", "key": "ctrl+alt+shift+s", "mac": "cmd+alt+shift+s", "when": "activeCustomEditorId == folio.markdown && !inputFocus" }
+    ],
     "customEditors": [
       {
         "viewType": "folio.markdown",

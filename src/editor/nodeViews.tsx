@@ -4,7 +4,8 @@ import { Code2, FileCode2, GitFork, ListTree, Pencil } from 'lucide-react'
 import { LazyBoundary } from '../LazyBoundary'
 import { renderDiagram } from '../document/diagrams'
 import { documentInfo } from '../document/metadata'
-import { BlockMath, InlineMath, MermaidBlock, RawBlock, Toc, WikiLink } from './schema'
+import { BlockMath, DocumentImage, InlineMath, MermaidBlock, RawBlock, Toc, WikiLink, safeUrl } from './schema'
+import type { FolioHost } from '../host/contracts'
 
 function MermaidPreview({ value, id }: { value: string; id: string }) {
   const [result, setResult] = useState<{ svg?: string; error?: string }>({})
@@ -96,3 +97,24 @@ export const nodeViewExtensions = [
   WikiLink.extend({ addNodeView: () => ReactNodeViewRenderer(WikiNode) }),
   Toc.extend({ addNodeView: () => ReactNodeViewRenderer(TocNode) }),
 ]
+
+export function workspaceImageExtension(resources: NonNullable<FolioHost['resources']>) {
+  function WorkspaceImage({ node }: NodeViewProps) {
+    const { src, alt, width, title, caption, align } = node.attrs
+    const embedded = typeof src === 'string' && /^data:image\//i.test(src) && safeUrl(src, true) ? src : undefined
+    const [resolved, setResolved] = useState<{ reference: string; image: string }>()
+    useEffect(() => {
+      if (embedded || !src || typeof src !== 'string') return
+      const controller = new AbortController()
+      void resources.image(src, controller.signal).then(image => {
+        if (image && !controller.signal.aborted) setResolved({ reference: src, image })
+      })
+      return () => controller.abort()
+    }, [embedded, src])
+    return <NodeViewWrapper as="span" className="document-image" data-folio-image="" data-folio-align={align || undefined} contentEditable={false}>
+      <img src={embedded ?? (resolved?.reference === src ? resolved?.image : undefined)} alt={alt ?? ''} title={title ?? undefined} width={/^\d+$/.test(width ?? '') ? width : undefined} />
+      {caption && <span className="image-caption">{caption}</span>}
+    </NodeViewWrapper>
+  }
+  return DocumentImage.extend({ addNodeView: () => ReactNodeViewRenderer(WorkspaceImage) })
+}
