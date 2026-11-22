@@ -87,4 +87,4 @@ Windows 11 Pro 25H2 x64 (26200.9974) ran desktop VS Code 1.147.0 (`8a14f0cc1b08d
 
 The Windows desktop suite covers extension activation, native commands, editing modes, theme integration, exact saves, rename and delete, pending-edit recovery, and a real local extension-host restart. The added synthetic-provider cases pin down the `WorkspaceEdit.createFile` race boundary, concurrent no-overwrite rename behavior for the test provider, and failures after partial writes or publication. A provider-backed `.markdown` case verifies image loading with an encoded Unicode name and an exact BOM/CRLF save. See the [platform coverage and runbooks](extension-qualification.md).
 
-The [attachment design](extension-attachments.md) records the local publication candidate and the remaining containment and cleanup requirements. Generic provider insertion remains unsupported.
+The [attachment design](extension-attachments.md) records the local publication candidate and the remaining containment and cleanup requirements. Generic provider insertion remains unsupported. The [project handoff](PROJECT_HANDOFF.md) records current verification and the next milestone.
