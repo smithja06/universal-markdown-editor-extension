@@ -76,9 +76,10 @@ async function stageExtension(extensions: string, delayEdits: boolean) {
   ])
 }
 
-export const test = base.extend<{ desktop: Desktop; delayEdits: boolean }>({
+export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtualWorkspace: boolean }>({
   delayEdits: [false, { option: true }],
-  desktop: async ({ delayEdits }, use, testInfo) => {
+  virtualWorkspace: [false, { option: true }],
+  desktop: async ({ delayEdits, virtualWorkspace }, use, testInfo) => {
     const temp = resolve(tmpdir())
     const directory = await mkdtemp(join(temp, prefix))
     const workspace = join(directory, 'workspace')
@@ -116,9 +117,13 @@ export const test = base.extend<{ desktop: Desktop; delayEdits: boolean }>({
       }))])
       const env: NodeJS.ProcessEnv = { ...process.env }
       delete env.ELECTRON_RUN_AS_NODE
+      const windowWorkspace = virtualWorkspace ? join(directory, 'folio.code-workspace') : workspace
+      if (virtualWorkspace) await writeFile(windowWorkspace, JSON.stringify({
+        folders: [{ path: './workspace' }, { uri: 'folio-test-remote://test-server/project', name: 'Provider workspace' }],
+      }))
       child = spawn(executable(), [
         '--user-data-dir=' + profile, '--extensions-dir=' + extensions,
-        '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', '--skip-welcome', '--new-window', workspace,
+        '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', '--skip-welcome', '--new-window', windowWorkspace,
       ], { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
       child.once('error', error => messages.push({ kind: 'spawn error', text: error.message }))
       const processOutput = (kind: string, data: Buffer) => {

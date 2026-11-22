@@ -3,6 +3,7 @@ import { Compartment, EditorState, Transaction, type Extension } from '@codemirr
 import { EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab, isolateHistory, redo } from '@codemirror/commands'
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
+import { syntaxTree } from '@codemirror/language'
 import { sourceSearchDecorations } from './searchDecorations'
 
 export interface SourceLocation { line: number; column: number }
@@ -20,6 +21,7 @@ interface Props {
   onLocation(location: SourceLocation): void
   onReady(runtime: SourceRuntime | null): void
   onLanguageError(): void
+  onOpenLink?(reference: string, event: MouseEvent): boolean
 }
 
 export interface SourceRuntime { view: EditorView; apply(value: string | EditorState): void }
@@ -75,6 +77,17 @@ export function SourceEditor(props: Props) {
           language.current.of(languageSupport.current ?? []),
           keymap.of([{ key: 'Mod-Shift-z', run: redo, preventDefault: true }, ...defaultKeymap, ...historyKeymap, ...selectionKeymap, indentWithTab]),
           EditorView.contentAttributes.of({ 'aria-label': 'Markdown source editor', 'aria-multiline': 'true', tabindex: '0' }),
+          EditorView.domEventHandlers({
+            click(event, view) {
+              if (!latest.current.onOpenLink || event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return false
+              const position = view.posAtCoords({ x: event.clientX, y: event.clientY })
+              if (position === null) return false
+              let node = syntaxTree(view.state).resolveInner(position, 1)
+              while (node.parent && node.name !== 'Link') node = node.parent
+              const url = node.name === 'Link' ? node.getChild('URL') : null
+              return !!url && latest.current.onOpenLink(view.state.sliceDoc(url.from, url.to).replace(/^<(.*)>$/, '$1'), event)
+            },
+          }),
           EditorView.updateListener.of(update => {
             if (update.docChanged && update.transactions.some(transaction => transaction.docChanged && !transaction.isUserEvent('folio.visual') && !transaction.isUserEvent('folio.host'))) {
               latest.current.onChange(update.state.doc.toString())

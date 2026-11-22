@@ -3,17 +3,19 @@ import '@fontsource-variable/inter'
 import '@fontsource-variable/manrope'
 import '../../styles.css'
 import './scrollbars.css'
+import './theme.css'
 import App from '../../App'
 import { createWebviewHost } from './host'
 import { connectionMessage, isHostMessage, type ClientMessage } from './protocol'
 import { createRecoveryJournal } from './recovery'
+import { webviewTheme } from './theme'
 
 declare function acquireVsCodeApi(): { postMessage(message: { connection: string; message: ClientMessage }): void }
 
 const container = document.getElementById('root')
 if (container) {
   const root = createRoot(container)
-  const theme = document.body.matches('.vscode-dark, .vscode-high-contrast') ? 'dark' : 'light'
+  const theme = webviewTheme()
   const platform = /Mac|iPhone|iPad/.test(navigator.platform) ? 'mac' : 'other'
 
   const loading = (message?: string) => <main className="app" data-theme={theme}>
@@ -60,7 +62,7 @@ if (container) {
       window.removeEventListener('focus', refresh)
       document.removeEventListener('visibilitychange', refresh)
       unsubscribe()
-      host.liveDocument.dispose()
+      host.dispose()
       root.unmount()
     }, { once: true })
   }

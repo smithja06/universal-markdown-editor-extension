@@ -1,6 +1,6 @@
 # Folio in VS Code
 
-## Phase 6 through Milestone 1.1
+## Phase 6 through Milestone 2
 
 The extension registers `folio.markdown` as an optional `CustomTextEditorProvider` for `.md` and `.markdown`. VS Code continues to open Markdown in the native Text Editor by default. **Reopen Editor With → Folio Markdown Editor** opens the shared Folio interface with Visual, Markdown, and Split views. [Custom Editor API](https://code.visualstudio.com/api/extension-guides/custom-editors)
 
@@ -14,11 +14,21 @@ Build with `npm run build:extension`. Start an Extension Development Host from t
 | Standalone storage | `src/host/browser.ts` retains the IndexedDB workspace, local appearance preferences, document library, exports, and version history. |
 | VS Code adapter | `src/host/vscode/host.ts` supplies the live document, clipboard, session-local preferences, and cancellable search worker to the shared host interfaces. `extension/src/extension.ts` uses VS Code for document editing and saving. VS Code owns tabs, dirty state, undo, redo, and persisted files. |
 
+## Native commands, themes, and workspace resources
+
+The VS Code Command Palette and editor title’s **Folio** submenu expose Visual, Markdown Source, Split, Document Properties, Go to Heading, and Folio’s own command list when Folio is active. Mode shortcuts use Ctrl+Alt+Shift+V, M, or S on Windows and Linux and Cmd+Option+Shift+V, M, or S on macOS. The standard VS Code Command Palette shortcut remains available. Folio runs Save, Undo, and Redo through the shared buffer after pending input settles.
+
+Folio follows the active VS Code color theme, including light and dark high-contrast themes. Workbench tokens set the webview’s backgrounds, text, borders, selections, menus, and focus outlines. Editor font, spacing, and layout controls remain available in Folio’s Properties panel. Standalone Folio retains its appearance controls and IndexedDB storage. [VS Code theme color reference](https://code.visualstudio.com/api/references/theme-color)
+
+Inline workspace images render in Visual and Split views. Ctrl+click on Windows or Linux and Cmd+click on macOS opens relative `.md` and `.markdown` links from Folio’s Visual or Markdown panes. A leading slash resolves from the containing workspace folder. Other paths resolve relative to the Markdown file and may navigate to its parent directories within the workspace. Outside a workspace, paths are confined to the document’s own directory. VS Code opens the target in its editor, with heading fragments and `#L<number>` supported. Folio stores the original Markdown reference in the editor model.
+
+The host preserves the document URI’s scheme and authority and uses VS Code’s workspace API for provider-backed files. Image requests allow raster formats up to 5 MiB. The webview deduplicates repeated references and limits concurrent requests. Resolution rejects out-of-root paths, symbolic links, encoded separators, unsupported formats, and URI schemes supplied by the document. Local raster reads verify canonical containment and read through a bounded file handle. The webview receives raster data URLs under its existing CSP, so workspace folders stay outside `localResourceRoots`. Provider file APIs lack atomic no-follow reads, and VS Code opens Markdown targets by URI after revalidation. Concurrent filesystem changes around that final open remain a limitation. Reference-style and wiki links retain their Markdown syntax. [VS Code remote extension guidance](https://code.visualstudio.com/api/advanced-topics/remote-extensions)
+
 ## Synchronization and recovery
 
 The extension host binds a session to a `TextDocument`. Each webview connection sends edits tagged with the base version and a rising request ID. The host serializes edits from all views of the document, checks the version immediately before `WorkspaceEdit`, and acknowledges the exact resulting snapshot. The client checks the connection, request ID, revision, and accepted text before clearing a pending edit. A status request can retrieve the host's last acknowledgement. If the request times out, Folio preserves the draft for review and asks the host to cancel any application it has yet to start. [VS Code document and workspace APIs](https://code.visualstudio.com/api/references/vscode-api)
 
-Every new draft generation is recorded synchronously in the webview's origin storage and sent to the host for backup in VS Code workspace storage. This includes keystrokes that arrive while the previous edit is awaiting acknowledgement. Both copies are scoped to the workspace and keyed by the view's recovery ID. A record includes the exact document URI and a generation number that protects newer drafts from older cleanup messages. After synchronization, Folio clears the corresponding recovery record. VS Code's normal dirty-buffer, save, and hot-exit behavior applies to committed edits. [VS Code webview origin persistence](https://code.visualstudio.com/updates/v1_73#_consistent-origin-for-webviews-and-webview-views)
+Every new draft generation is recorded synchronously in the webview's origin storage and sent to the host for backup in VS Code workspace storage. This includes keystrokes that arrive while the previous edit is awaiting acknowledgement. For large documents, the host can persist a compact, self-contained backup with a compressed copy of the connection’s initial text and a replacement range. The fallback records a full snapshot for larger changes, missing bases, and conflicts. Each generation is submitted immediately, including when webview storage fails. Both stores are scoped to the workspace and keyed by the view's recovery ID. A record includes the exact document URI and a generation number that protects newer drafts from older cleanup messages. After synchronization, Folio clears the corresponding recovery record. VS Code's normal dirty-buffer, save, and hot-exit behavior applies to committed edits. [VS Code webview origin persistence](https://code.visualstudio.com/updates/v1_73#_consistent-origin-for-webviews-and-webview-views)
 
 `onDidChangeTextDocument` publishes native edits, undo, redo, and external file reloads accepted by VS Code. The view can rebase provably disjoint ranges. Overlap pauses editing in that view and records the complete Folio draft and the exact native Markdown at detection. Each snapshot retains its line endings and BOM metadata. The bridge uses LF-normalized text with UTF-16 offsets and VS Code retains the original file encoding when it saves.
 
@@ -26,7 +36,22 @@ On reopen, Folio displays the current VS Code document alongside any unresolved 
 
 Folio's Save, Undo, and Redo wait for its pending edits to settle. A native save can only save the text VS Code has received. An edit that arrives afterward can make the document dirty again. Undo grouping follows the submitted workspace edits. Coalesced edits that span a wide range can require manual reconciliation even when a finer merge could resolve them.
 
-The recovery journals add one document-sized serialization and storage update per changed snapshot, plus a host backup sent asynchronously. Storage quotas and unusually large documents can affect typing latency or leave only one recovery copy. Folio warns when the current draft has no confirmed recovery copy. A renderer or system crash before either store records or flushes the draft, simultaneous storage failure, profile-data removal, and input still held by an IME can lose changes. Losing an acknowledgement or interrupting cleanup can leave a recovery copy for text that reached VS Code.
+The synchronous webview journal still serializes each changed snapshot. Storage quotas and unusually large documents can affect typing latency or leave only one recovery copy. Folio warns when the current draft has no confirmed recovery copy. A renderer or system crash before either store records or flushes the draft, simultaneous storage failure, profile-data removal, and input still held by an IME can lose changes. Losing an acknowledgement or interrupting cleanup can leave a recovery copy for text that reached VS Code.
+
+## Typing and checkpoint benchmark
+
+The benchmark ran on Windows 11 with desktop VS Code 1.147.0 and one worker on an AMD Ryzen AI 9 HX 370. Each size opened in an isolated VS Code profile, warmed up the Markdown Source pane, then issued 64 individual keystrokes without waiting for the preceding edit to be acknowledged. The baseline was the approved Milestone 1.1 tree. The final measurements use the compact host backup.
+
+| Markdown size | Typing p50 / p95 (ms) | Local storage p95 (ms) | Host backup acknowledgement p95 (ms) | Host CPU (ms) | Host RSS change (MiB) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 100 KB | 9.87 / 14.88 → 7.10 / 11.06 | 0.3 → 0.2 | 56.8 → 161.9 | 640 → 438 | +31.9 → +15.8 |
+| 500 KB | 12.27 / 26.50 → 9.43 / 13.12 | 0.6 → 0.5 | 81.7 → 42.4 | 313 → 219 | +47.6 → +37.8 |
+| 1 MB | 18.83 / 35.21 → 15.16 / 31.90 | 3.4 → 2.3 | 290.1 → 145.3 | 672 → 282 | +77.6 → +38.1 |
+| 2 MB | 32.00 / 52.71 → 41.61 / 57.07 | 5.9 → 5.7 | 718.0 → 1,417.5 | 1,532 → 422 | +43.9 → +23.8 |
+
+Typing measures the input round trip through Playwright. Local storage measures `setItem` alone. Host backup acknowledgement includes workbench IPC and renderer scheduling. RSS is sampled at the start and end of the burst and is sensitive to garbage collection. Compact backups cut the 2 MB checkpoint submission p95 from 5.5 to 0.2 ms and reduced host CPU by 72%. The 2 MB typing p95 and the 100 KB and 2 MB acknowledgement p95s were higher in this sample. The synchronous webview snapshot and full document state updates still scale with document size. A first experiment that coalesced backup writes produced slower tails and was removed.
+
+Run the isolated benchmark from PowerShell with `$env:FOLIO_BENCHMARK = '1'; npm run test:extension`. Clear the environment variable before running the ordinary desktop suite. The benchmark covers synthetic Markdown Source input and process snapshots. Long sessions, Visual-mode timing, and documents larger than 2 MB were outside this measurement.
 
 ## Webview security
 
@@ -36,4 +61,6 @@ The provider rewrites trusted, built assets with `asWebviewUri`, restricts `loca
 
 Run `npm run test:extension` with desktop VS Code installed. `FOLIO_VSCODE_EXECUTABLE` can point to the application binary. The harness installs the production build into an isolated desktop profile and uses real buffer, panel, file, window, and extension-host operations. Its recovery fixtures can independently hold edit messages, block host checkpoints, or disable webview storage writes. The standalone commands remain `npm test`, `npm run build`, and `npm run test:e2e`.
 
-The next milestone can add native command and theme settings, workspace-aware links and attachments, and broader platform and resource coverage. Keep native save, undo, and URI handling in the extension host as those capabilities are added.
+Windows desktop coverage includes a real VS Code window and a synthetic non-file provider with an authority and workspace root. macOS, Linux, and real VS Code Remote hosts were unavailable for this milestone. The 12-worker Chromium run reproduced an invalid-regex timeout when worker startup used the matching budget. Syntax validation now happens before spawning the worker, and the matching timer starts once the worker is ready. The earlier intermittent tab-navigation failure did not recur in six parallel repetitions.
+
+The next milestone should validate macOS, Linux, and real VS Code Remote sessions, add long-run performance measurements for both editor panes, and then consider workspace attachment insertion.

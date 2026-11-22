@@ -36,6 +36,7 @@ export interface FileOperations {
 export interface AppearancePreferences {
   read(): Appearance
   write(appearance: Appearance): void
+  themeFromHost?: (listener: (theme: Appearance['theme']) => void) => () => void
 }
 
 export interface LiveDocumentSnapshot {
@@ -69,6 +70,10 @@ export interface FolioHost {
   notifications?: { show(message: string): void }
   keyboard: { platform: ShortcutPlatform; handledByHost?: ReadonlySet<string> }
   commands?: { attach(api: { commands(): Command[]; execute(id: string, argument?: string): boolean }): () => void }
+  resources?: {
+    image(reference: string, signal: AbortSignal): Promise<string | undefined>
+    openMarkdown(reference: string): Promise<void>
+  }
   search(texts: string[], term: string, options: SearchOptions, signal: AbortSignal): Promise<TextMatch[]>
   recentCommands: { read(): string[]; write(ids: string[]): void }
 }

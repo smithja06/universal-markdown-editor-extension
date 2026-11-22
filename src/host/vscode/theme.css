@@ -1,0 +1,55 @@
+/* The workbench updates these variables in place when its color theme changes. */
+body:is(.vscode-light, .vscode-dark, .vscode-high-contrast, .vscode-high-contrast-light) .app {
+  --ui: var(--vscode-editor-background);
+  --paper: var(--vscode-editor-background);
+  --canvas: var(--vscode-sideBar-background, var(--paper));
+  --quiet: var(--vscode-editorWidget-background, var(--ui));
+  --hover: var(--vscode-list-hoverBackground, var(--quiet));
+  --ink: var(--vscode-editor-foreground, var(--vscode-foreground));
+  --text: var(--ink);
+  --muted: var(--vscode-descriptionForeground, var(--text));
+  --soft: var(--vscode-editorLineNumber-foreground, var(--muted));
+  --line: var(--vscode-contrastBorder, var(--vscode-editorWidget-border, color-mix(in srgb, var(--text) 22%, transparent)));
+  --line-strong: var(--vscode-contrastBorder, var(--vscode-input-border, var(--line)));
+  --danger: var(--vscode-errorForeground, var(--text));
+  --warning: var(--vscode-editorWarning-foreground, var(--text));
+  --shadow: var(--vscode-widget-shadow, transparent);
+  --drop: var(--vscode-list-dropBackground, var(--quiet));
+  --accent: var(--vscode-textLink-foreground, var(--text));
+  --accent-strong: var(--vscode-textLink-activeForeground, var(--accent));
+  --accent-surface: var(--vscode-list-hoverBackground, var(--quiet));
+  --accent-outline: var(--vscode-focusBorder, var(--line-strong));
+  --accent-fill: var(--vscode-button-background, var(--quiet));
+  --accent-fill-hover: var(--vscode-button-hoverBackground, var(--accent-fill));
+  --accent-fill-text: var(--vscode-button-foreground, var(--text));
+  --accent-fill-border: var(--vscode-button-border, var(--line));
+}
+
+.app :focus-visible { outline-color: var(--vscode-focusBorder, var(--accent)); }
+.app ::selection {
+  background-color: var(--vscode-editor-selectionBackground);
+  color: var(--vscode-editor-selectionForeground, inherit);
+}
+.app .source-editor .cm-selectionBackground {
+  background: var(--vscode-editor-inactiveSelectionBackground, var(--vscode-editor-selectionBackground));
+}
+.app .source-editor .cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+  background: var(--vscode-editor-selectionBackground);
+}
+.app .dropdown {
+  background: var(--vscode-menu-background, var(--quiet));
+  border-color: var(--vscode-contrastBorder, var(--vscode-menu-border, var(--line)));
+}
+.app .dropdown button { color: var(--vscode-menu-foreground, var(--text)); }
+.app .dropdown button:is(:hover:not(:disabled), :focus-visible, [aria-selected="true"]) {
+  background: var(--vscode-menu-selectionBackground, var(--hover));
+  color: var(--vscode-menu-selectionForeground, var(--text));
+}
+.app .palette-option[aria-selected="true"] {
+  background: var(--vscode-quickInputList-focusBackground, var(--hover));
+  color: var(--vscode-quickInputList-focusForeground, var(--text));
+}
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .app :is(.palette-option[aria-selected="true"], .dropdown button[aria-selected="true"], .mode-selector button[aria-pressed="true"]) {
+  outline: 1px solid var(--vscode-contrastActiveBorder, var(--vscode-focusBorder, var(--ink)));
+  outline-offset: -1px;
+}

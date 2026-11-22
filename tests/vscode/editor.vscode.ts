@@ -72,7 +72,7 @@ test('opens optionally, keeps exact BOM and CRLF, and saves through native undo 
   expect((await read(file)).text).toBe(final)
 })
 
-test('uses the Folio theme for scrollbars in both editor panes and properties', async ({ desktop }) => {
+test('follows live VS Code light, dark and high-contrast themes across Folio', async ({ desktop }) => {
   const { page, workspace, command } = desktop
   const file = 'scrollbars.md'
   await writeFile(join(workspace, file), '# Scrollbars\n\n' + 'Scrollable Markdown paragraph.\n\n'.repeat(80))
@@ -83,14 +83,44 @@ test('uses the Folio theme for scrollbars in both editor panes and properties', 
   await frame.getByRole('button', { name: 'Toggle document properties' }).click()
   await frame.getByRole('tab', { name: 'Appearance' }).click()
 
-  const theme = frame.getByRole('combobox', { name: 'Theme', exact: true })
+  await expect(frame.getByText('Colors follow the VS Code theme.')).toBeVisible()
   const scrollers = ['.visual-scroll', '.source-editor .cm-scroller', '.property-panel']
-  for (const [appearance, colors] of [
-    ['light', 'rgb(139, 139, 139) rgb(255, 255, 255)'],
-    ['dark', 'rgb(113, 131, 120) rgb(28, 36, 32)'],
+  for (const [theme, appearance, bodyClass, thumb] of [
+    ['Light+', 'light', 'vscode-light', 'rgb(139, 139, 139)'],
+    ['Dark+', 'dark', 'vscode-dark', 'rgb(113, 131, 120)'],
+    ['Default High Contrast', 'dark', 'vscode-high-contrast', 'rgb(113, 131, 120)'],
+    ['Default High Contrast Light', 'light', 'vscode-high-contrast-light', 'rgb(139, 139, 139)'],
   ]) {
-    await theme.selectOption(appearance)
-    for (const scroller of scrollers) await expect(frame.locator(scroller)).toHaveCSS('scrollbar-color', colors)
+    await command('theme', { theme })
+    await expect(frame.locator('body')).toHaveClass(new RegExp(`(?:^| )${bodyClass}(?: |$)`))
+    const app = frame.locator('.app')
+    await expect(app).toHaveAttribute('data-theme', appearance)
+    const colors = await app.evaluate(element => {
+      const probe = document.createElement('span')
+      element.append(probe)
+      const tokens = ['editor-background', 'editor-foreground', 'focusBorder', 'menu-background', 'editor-selectionBackground']
+      const values = tokens.map(token => {
+        probe.style.color = `var(--vscode-${token})`
+        return getComputedStyle(probe).color
+      })
+      probe.remove()
+      return values
+    })
+    const [background, foreground, focus, menu, selection] = colors
+    await expect(app).toHaveCSS('background-color', background)
+    await expect(visual(frame)).toHaveCSS('color', foreground)
+    for (const scroller of scrollers) await expect(frame.locator(scroller)).toHaveCSS('scrollbar-color', `${thumb} ${background}`)
+    const view = frame.getByRole('button', { name: 'View', exact: true })
+    await view.focus()
+    await page.keyboard.press('Tab')
+    await page.keyboard.press('Shift+Tab')
+    await expect(view).toBeFocused()
+    await expect(view).toHaveCSS('outline-color', focus)
+    await view.click()
+    await expect(frame.locator('.dropdown')).toHaveCSS('background-color', menu)
+    await page.keyboard.press('Escape')
+    const markdown = source(frame)
+    expect(await markdown.evaluate(element => getComputedStyle(element, '::selection').backgroundColor)).toBe(selection)
   }
 })
 

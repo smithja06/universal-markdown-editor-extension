@@ -71,6 +71,10 @@ export default function App({ host }: { host: FolioHost }) {
   const { editor } = doc
   const formatting = useFormatting(editor)
   const { mode, sidebar, setSidebar, appearance, setAppearance } = useStore(workspaceView)
+  const themeFromHost = host.appearance.themeFromHost
+  useEffect(() => themeFromHost?.(theme => {
+    if (workspaceView.getState().appearance.theme !== theme) setAppearance({ theme })
+  }), [setAppearance, themeFromHost, workspaceView])
   const accents = useMemo(() => accentTheme(appearance.accentColor, appearance.theme), [appearance.accentColor, appearance.theme])
   const split = mode === 'split'
   const source = mode === 'source' || (split && doc.activePane === 'source')
@@ -107,6 +111,14 @@ export default function App({ host }: { host: FolioHost }) {
   const commandRef = useRef(registry)
   commandRef.current = registry
   const platform = host.keyboard.platform
+  function openWorkspaceLink(href: string) {
+    if (!host.resources || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)) return false
+    try {
+      if (!/\.(?:md|markdown)$/i.test(decodeURIComponent(href.split('#', 1)[0]))) return false
+    } catch { return false }
+    void host.resources.openMarkdown(href).catch(error => notify(errorMessage(error)))
+    return true
+  }
   const execute = (id: string, argument?: string) => {
     try { registry.execute(id, argument) } catch (error) { notify(errorMessage(error)) }
   }
@@ -268,10 +280,13 @@ export default function App({ host }: { host: FolioHost }) {
       else doc.switchMode('source')
     }
     const anchor = (event: MouseEvent) => {
-      const link = (event.target as HTMLElement).closest<HTMLAnchorElement>('a[href^="#"]')
-      const destination = link?.getAttribute('href')?.slice(1)
-      const heading = doc.info.outline.find(item => item.anchor === destination)
-      if (heading) { event.preventDefault(); jump(heading) }
+      const href = (event.target as HTMLElement).closest<HTMLAnchorElement>('a[href]')?.getAttribute('href')
+      if (href?.startsWith('#')) {
+        const heading = doc.info.outline.find(item => item.anchor === href.slice(1))
+        if (heading) { event.preventDefault(); jump(heading) }
+      } else if (href && (event.detail === 0 || (platform === 'mac' ? event.metaKey : event.ctrlKey)) && openWorkspaceLink(href)) {
+        event.preventDefault()
+      }
     }
     const editImage = (event: MouseEvent) => {
       if (!(event.target instanceof HTMLImageElement) || !doc.activatePane('visual')) return
@@ -377,7 +392,7 @@ export default function App({ host }: { host: FolioHost }) {
       available: () => ready && (liveDocument ? liveWritable : source ? !!doc.sourceView.current && redoDepth(doc.sourceView.current.state) > 0 : !!editor?.can().redo()) },
     { label: '', divider: true },
     { id: 'search.find', label: 'Find and replace', keywords: 'search text match', icon: <Search size={16} />, shortcut: 'Ctrl+F', disabled: !ready, run: () => showSearch() },
-    { id: 'workspace.palette', label: 'Command Palette', shortcut: 'Ctrl+Shift+P', run: () => setPalette(previous => previous ? null : 'all') },
+    { id: 'workspace.palette', label: 'Command Palette', shortcut: host.keyboard.handledByHost?.has('workspace.palette') ? undefined : 'Ctrl+Shift+P', run: () => setPalette(previous => previous ? null : 'all') },
     { label: 'Move block up', icon: <ArrowUp size={16} />, disabled: source || !editable, run: () => editor && moveSelectedBlock(editor, -1) },
     { label: 'Move block down', icon: <ArrowDown size={16} />, disabled: source || !editable, run: () => editor && moveSelectedBlock(editor, 1) },
     { label: 'Keyboard shortcuts', run: () => setDialog('shortcuts') },
@@ -497,7 +512,7 @@ export default function App({ host }: { host: FolioHost }) {
     ? doc.liveState.conflict !== undefined ? 'Sync paused' : !doc.liveState.available ? 'File unavailable' : doc.liveState.pending ? 'Syncing to VS Code…' : doc.liveState.dirty ? 'Unsaved in VS Code' : 'Saved in VS Code'
     : doc.status === 'loading' ? 'Opening workspace…' : !ready ? 'No open documents' : doc.status === 'pending' ? 'Saving draft…' : doc.status === 'unavailable' ? 'Local storage unavailable' : 'Saved locally'
   const StatusIcon = doc.status === 'unavailable' ? CloudOff : doc.status === 'saved' ? Check : LoaderCircle
-  const style = { ...accents, '--writing-font': fonts[appearance.font], '--writing-size': appearance.fontSize + 'px', '--writing-leading': appearance.lineHeight } as CSSProperties
+  const style = { ...(!themeFromHost && accents), '--writing-font': fonts[appearance.font], '--writing-size': appearance.fontSize + 'px', '--writing-leading': appearance.lineHeight } as CSSProperties
   return <div ref={root} className="app" data-theme={appearance.theme} style={style} onClickCapture={event => {
     if (document.activeElement === titleInput.current && event.target !== titleInput.current) titleInput.current?.blur()
   }}>
@@ -583,12 +598,13 @@ export default function App({ host }: { host: FolioHost }) {
             onFocusCapture={() => { if (split) doc.activatePane('source') }}
             onBeforeInputCapture={event => { if (!doc.activatePane('source')) event.preventDefault() }}>
             {started && <SourceEditor initial={doc.file.source} active={ready && mode !== 'visual'} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} readOnly={!!liveDocument && !liveWritable} canEdit={doc.canEdit} onChange={doc.setSource}
+              onOpenLink={host.resources ? (href, event) => (platform === 'mac' ? event.metaKey : event.ctrlKey) && openWorkspaceLink(href) : undefined}
               onLocation={location => { setLocation(location); doc.trackView() }} onReady={doc.registerSource} onLanguageError={() => notify('Markdown aids could not be loaded. Source editing is still available.')} />}
           </div>
         </section>
         {dragging && <div className="drop-overlay" aria-hidden="true"><Upload size={29} /><strong>Drop a Markdown file or image</strong></div>}
       </main>
-      {ready && sidebar && <Properties appearance={appearance} setAppearance={setAppearance} tab={tab} setTab={setTab} headings={doc.info.outline} active={doc.activeHeading || doc.info.outline[0]?.anchor || ''} statistics={doc.info.statistics} key={doc.file.id}
+      {ready && sidebar && <Properties appearance={appearance} setAppearance={setAppearance} hostTheme={!!themeFromHost} tab={tab} setTab={setTab} headings={doc.info.outline} active={doc.activeHeading || doc.info.outline[0]?.anchor || ''} statistics={doc.info.statistics} key={doc.file.id}
         metadata={doc.metadata} readOnly={!!liveDocument && !liveWritable} onMetadata={doc.changeMetadata} close={closeProperties} jump={jump} width={width} setWidth={value => setWidth(Math.min(430, Math.max(250, value)))} />}
     </div>
     <footer className="statusbar">

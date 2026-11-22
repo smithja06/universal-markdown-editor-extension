@@ -2,6 +2,8 @@
 
 Folio is an optional Markdown editor for Visual Studio Code. Open a `.md` or `.markdown` file, choose **Reopen Editor With…**, then select **Folio Markdown Editor**. Use the mode selector to switch between Visual, Markdown, and Split. The standard Text Editor remains available, and VS Code manages the document, save, undo, and redo.
 
+Folio follows the VS Code color theme. Its commands appear in the VS Code Command Palette and the editor title’s **Folio** submenu while Folio is active. Inline workspace images render in Visual and Split views. Ctrl+click or Cmd+click opens workspace Markdown links.
+
 If an interrupted edit or conflict leaves a pending draft, Folio offers it for review when you next open a Markdown file in the same workspace. Use **View pending Markdown** to inspect it and **Copy pending draft** to reconcile your changes in VS Code. On a conflict, you can also inspect the VS Code version captured at the time. Drafts retain their original file URI after moves or deletion.
 
 ## Build from source
