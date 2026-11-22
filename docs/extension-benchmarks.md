@@ -1,5 +1,30 @@
 # Folio Phase 6 extension benchmarks
 
+## Milestone 2.4 preparation
+
+The Windows 11 Pro 25H2 x64 (26200.9974) run used VS Code 1.147.0 and Node 24.13.0. It reused the harness below with three fresh profiles, 5,000,000-byte Markdown Source documents, 384 keys per run, and a 75 ms target cadence. Each run recorded 384 browser journals and 384 host replies, zero storage failures, and byte-exact autosave. The 2.3 column uses the earlier recorded runs. This is a cross-session comparison against historical results.
+
+| 5 MB Source measurement | 2.3 median of three | 2.4 median of three |
+| --- | ---: | ---: |
+| Typing p95 | 40.88 ms | 42.13 ms |
+| Checkpoint creation p95 | 25.10 ms | 26.00 ms |
+| Host checkpoint acknowledgement p95 | 19.50 ms | 20.20 ms |
+| Initial Visual ready | 3.11 s | 3.60 s |
+| Switch to Source | 0.68 s | 0.17 s |
+| Exact autosave | 1.17 s | 1.18 s |
+
+The 2.4 range was 41.15–54.22 ms for typing p95, 25.30–32.50 ms for checkpoint creation p95, and 19.90–26.90 ms for acknowledgement p95. All observations stayed below the investigation thresholds. This workload measures the editor and draft recovery. The upload feature is disabled.
+
+The repeated-view run passed all 16 disposal cycles with zero remaining webview iframes after each close. Each cycle opened a roughly 1 MB document in two views. The host JS heap and workbench heap were sampled after garbage collection, and RSS was recorded separately.
+
+| Measurement (MiB) | 2.3 warm → 16 cycles | 2.4 warm → 16 cycles |
+| --- | ---: | ---: |
+| Extension-host JS heap | 49.63 → 50.21 | 49.84 → 50.45 |
+| Extension-host RSS | 221.16 → 222.34 | 223.63 → 225.32 |
+| Workbench renderer JS heap | 68.06 → 70.62 | 67.52 → 70.59 |
+
+From cycle 12 to 16, the 2.4 host JS heap grew by 0.04 MiB and the workbench JS heap grew by 0.16 MiB. This run samples short-lived view disposal. Long-running retention and separate webview renderer heaps remain unmeasured.
+
 ## Milestone 2.3 qualification
 
 Windows 11 Pro 25H2 x64 (26200.9974), VS Code 1.147.0, AMD Ryzen AI 9 HX 370, and Node 24.13.0. The latest Milestone 2.2 checkpoint (`95018b5`) and the 2.3 build each ran three fresh profiles in the existing 384-key, 75 ms, 5 MB Markdown Source workload. Each run recorded 384 browser journals, 384 host replies, zero failures in both stores, and exact autosave. The product source and lockfile were unchanged. The Windows worktrees differed in checkout line endings, which changed some generated bundle hashes. Baseline dependency setup overlapped early baseline samples, so use the medians and ranges as regression evidence rather than attributing the timing differences to product changes.

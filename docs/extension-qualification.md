@@ -11,6 +11,20 @@
 
 Use [the attachment qualification decision](extension-attachments.md#milestone-23-qualification-decision) for filesystem guarantees and [the benchmarks](extension-benchmarks.md) for performance. Report results per OS, VS Code build, transport, and backing filesystem.
 
+## Milestone 2.4 local filesystem probes
+
+The native probe was run on Windows 11 Pro 25H2 x64 (26200.9974), NTFS, with Node 24.13.0 for the Node probes. Use the original checkout and keep the test directories disposable. The fixture deliberately tests behaviors that disqualify an attachment backend. A passing probe reproduces the recorded behavior.
+
+```powershell
+$env:FOLIO_LOCAL_FS_PROBE_DIR = (New-Item -Force -ItemType Directory -Path 'test-results/milestone-24-fs').FullName
+$env:FOLIO_QUALIFY_LOCAL_FS = '1'
+npm test -- src/host/vscode/attachmentPath.test.ts src/host/vscode/attachmentFilesystem.test.ts
+Remove-Item Env:FOLIO_LOCAL_FS_PROBE_DIR, Env:FOLIO_QUALIFY_LOCAL_FS
+powershell.exe -NoProfile -File tests/vscode/attachment-ntfs.ps1
+```
+
+The native PowerShell probe requires Windows x64 and an NTFS checkout. It writes only inside a disposable test fixture. It checks ordinary directory rename denial while handles are held, a junction opened without traversal, file identity, non-replacement of exact and case-equivalent names, and cleanup by the live stage handle. It also tests that the same native no-overwrite operation permits a canonically equivalent spelling. See the [Milestone 2.4 decision](extension-attachments.md#milestone-24-qualification-result) before adopting any of these primitives in a production backend.
+
 ## Disposable fixture
 
 Save the following as `fixture.cjs` outside the repository. Run `node fixture.cjs folio-qualification` from a disposable parent directory. For Remote, run it from a terminal on the workspace machine.
