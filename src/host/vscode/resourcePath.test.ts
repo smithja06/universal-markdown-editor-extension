@@ -19,3 +19,14 @@ it('rejects Windows alias and traversal segments and accepts a case-insensitive 
   expect(resolve('NUL.png')).toBeUndefined()
   expect(resolve('directory./photo.png')).toBeUndefined()
 })
+
+it('decodes attachment-style references once across nested workspace paths', () => {
+  const document = '/workspace/docs/nested/current.markdown'
+  const root = '/workspace'
+  const reference = '../../assets/caf%C3%A9%20%23%25%28final%29%252F.png'
+  const expected = { path: '/workspace/assets/café #%(final)%2F.png', fragment: '' }
+  expect(resolveWorkspacePath(document, root, reference)).toEqual(expected)
+  expect(resolveWorkspacePath(document, root, reference, true)).toEqual(expected)
+  expect(resolveWorkspacePath(document, root, '../' + reference)).toBeUndefined()
+  expect(resolveWorkspacePath(document, '/workspace-other', reference)).toBeUndefined()
+})

@@ -1,6 +1,6 @@
 # Folio in VS Code
 
-## Phase 6 through Milestone 2.2
+## Phase 6 through Milestone 2.3
 
 The extension registers `folio.markdown` as an optional `CustomTextEditorProvider` for `.md` and `.markdown`. VS Code continues to open Markdown in the native Text Editor by default. **Reopen Editor With → Folio Markdown Editor** opens the shared Folio interface with Visual, Markdown, and Split views. [Custom Editor API](https://code.visualstudio.com/api/extension-guides/custom-editors)
 
@@ -83,12 +83,8 @@ Windows 11 Pro 25H2 x64 (26200.9974) ran desktop VS Code 1.147.0 (`8a14f0cc1b08d
 | `npm run package:extension` | Passed. The 181-entry VSIX contains the opt-in manifest, extension host, webview entry, and referenced assets. |
 | Benchmark suite | Both revisions passed 19 standard and four longer cases. Measurements and thresholds are in the [benchmark report](extension-benchmarks.md). |
 
-### Native and Remote validation runbook
+### Milestone 2.3 qualification
 
-On a native macOS or Linux desktop, run `npm ci` and `npm run test:extension` against a desktop VS Code installation. Set `FOLIO_VSCODE_EXECUTABLE` if the executable is outside the harness's default locations. Record the operating system version, architecture, VS Code build and client keyboard layout. On that same desktop, use **Reopen Editor With** to check both `.md` and `.markdown`, reopen to the native editor, and exercise the mode shortcuts with focus in each pane. Verify light, dark and high-contrast themes, UTF-8 BOM/CRLF bytes after a Save, links and images, a second Folio view, and rename and deletion. The automated suite covers the buffer, save, recovery and host-restart behavior.
+The Windows desktop suite covers extension activation, native commands, editing modes, theme integration, exact saves, rename and delete, pending-edit recovery, and a real local extension-host restart. The added synthetic-provider cases pin down the `WorkspaceEdit.createFile` race boundary, concurrent no-overwrite rename behavior for the test provider, and failures after partial writes or publication. A provider-backed `.markdown` case verifies image loading with an encoded Unicode name and an exact BOM/CRLF save. See the [platform coverage and runbooks](extension-qualification.md).
 
-For a real Remote run, install the packaged VSIX in the Remote workspace and use **Developer: Show Running Extensions** to record its extension host alongside the local client and server versions. Open a two-root Remote workspace with the same filenames in each root, a nested Markdown file, an image in its root, and a duplicate image in the other root. Open Folio, follow a relative and a root-relative link, check that the image and root stay isolated, and compare bytes on the remote filesystem after a Folio edit and native Save. Open a second Folio view and a native view, then repeat with disjoint and overlapping changes. Rename and delete the document while Folio is open and check that any recovery draft retains the original URI.
-
-On a disposable remote fixture, interrupt the real connection with an edit awaiting acknowledgement, reconnect, then separately restart the remote extension host. Record whether the original client survived and which copy recovered each pending generation. Confirm that committed content matches VS Code and the saved bytes, that unresolved drafts are offered for manual recovery, and that a recreated file at the same URI receives no automatic edits. Repeat provider-backed reads and saves after reconnect. Synthetic provider fault injection is useful for reproducing filesystem errors while the desktop extension host stays alive. Real Remote validation exercises the transport and extension-host lifecycle.
-
-Review the [workspace image insertion design and test plan](extension-attachments.md) before starting attachment work. The remaining qualification work is native macOS and Linux and at least one real Remote workspace, including its write and recovery lifecycle.
+The [attachment design](extension-attachments.md) records the local publication candidate and the remaining containment and cleanup requirements. Generic provider insertion remains unsupported.

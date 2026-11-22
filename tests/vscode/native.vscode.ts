@@ -66,6 +66,25 @@ test('previews workspace images and opens Markdown links without rewriting relat
 test.describe('provider-native resources', () => {
   test.use({ virtualWorkspace: true, delayEdits: true })
 
+  test('preserves BOM, CRLF, and a Unicode image reference in a provider .markdown save', async ({ desktop }) => {
+    const { page, command } = desktop
+    const file = 'portable.markdown'
+    const asset = '![Portable image](../media/caf%C3%A9%20%23%25%28final%29%252F.png)'
+    const before = '# Provider fidelity\r\n\r\n' + asset + '\r\n'
+    await command('addVirtualWorkspace', { markdown: '\uFEFF' + before, pixel, file })
+    await command('open', { file, editor: 'folio', virtual: 1 })
+    const frame = folio(page)
+    const heading = frame.getByRole('heading', { name: 'Provider fidelity' })
+    await expect.poll(() => frame.getByRole('img', { name: 'Portable image' }).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1)
+    await heading.click()
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowRight' : 'End')
+    await page.keyboard.insertText(' edited')
+    const edited = before.replace('Provider fidelity', 'Provider fidelity edited')
+    await expect.poll(async () => (await command<{ text: string }>('read', { file, virtual: 1 })).text).toBe(edited)
+    await command('saveDocument', { file, virtual: 1 })
+    expect(await command('readProviderFile', { file, encoding: 'base64' })).toBe(Buffer.from('\uFEFF' + edited).toString('base64'))
+  })
+
   test('resolves images and Markdown links through a non-file workspace provider', async ({ desktop }) => {
     const { page, command } = desktop
     const original = '# Provider document\n\n![Remote asset](../media/pixel.png)\n\n![Same asset](../media/pixel.png)\n\n![Symlink](./secret-link.png)\n\n![Replaced](../media/race.png)\n\n[Next](./target.md#L1)\n'

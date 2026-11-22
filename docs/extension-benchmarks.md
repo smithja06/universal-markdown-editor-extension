@@ -1,5 +1,48 @@
 # Folio Phase 6 extension benchmarks
 
+## Milestone 2.3 qualification
+
+Windows 11 Pro 25H2 x64 (26200.9974), VS Code 1.147.0, AMD Ryzen AI 9 HX 370, and Node 24.13.0. The latest Milestone 2.2 checkpoint (`95018b5`) and the 2.3 build each ran three fresh profiles in the existing 384-key, 75 ms, 5 MB Markdown Source workload. Each run recorded 384 browser journals, 384 host replies, zero failures in both stores, and exact autosave. The product source and lockfile were unchanged. The Windows worktrees differed in checkout line endings, which changed some generated bundle hashes. Baseline dependency setup overlapped early baseline samples, so use the medians and ranges as regression evidence rather than attributing the timing differences to product changes.
+
+| 5 MB Source measurement | 2.2 median of three | 2.3 median of three |
+| --- | ---: | ---: |
+| Typing p95 | 55.96 ms | 40.88 ms |
+| Checkpoint creation p95 | 38.30 ms | 25.10 ms |
+| Host checkpoint acknowledgement p95 | 32.00 ms | 19.50 ms |
+| Initial Visual ready | 3.28 s | 3.11 s |
+| Switch to Source | 0.70 s | 0.68 s |
+| Exact autosave | 1.20 s | 1.17 s |
+
+The 5 MB Source typing p95 range was 41.62–63.74 ms in 2.2 and 40.09–41.74 ms in 2.3. The host acknowledgement p95 range was 20.30–82.90 ms and 19.50–19.90 ms. All samples were below the investigation thresholds. The 16-key 5 MB Split smoke run reached 101.11 ms typing p95, 900.40 ms checkpoint acknowledgement p95, 3.17 s startup, and 1.48 s for the switch. The recorded 2.2 comparison was 89.93 ms, 1,032.40 ms, 3.24 s, and 1.47 s. The 2.3 Split run autosaved exactly. Most of its acknowledgement tail followed the host reply, with 891 ms delivery p95 and 13.71 ms host handler p95.
+
+The paired 64-key unpaced 2 MB Source replay captured all checkpoint replies in both builds. Typing p95 was 40.49 → 41.07 ms and checkpoint acknowledgement p95 was 199.60 → 191.80 ms, below its 3 s investigation threshold. The burst measures in-memory synchronization. Exact disk autosave is covered by the sustained cases.
+
+### Repeated view disposal
+
+Each revision ran in a fresh profile. After one warm-up cycle, the harness opened each of 16 distinct approximately 1 MB Markdown files in two Visual views, verified both views rendered, and closed them before moving to the next document. Each cycle required zero remaining webview iframes. The sample after every four cycles collects extension-host JS heap after garbage collection, host RSS, and the VS Code workbench renderer's JS heap after a CDP garbage collection.
+
+| Measurement (MiB) | 2.2 warm → 16 cycles | 2.3 warm → 16 cycles |
+| --- | ---: | ---: |
+| Extension-host JS heap | 49.66 → 50.24 | 49.63 → 50.21 |
+| Extension-host RSS | 221.97 → 222.46 | 221.16 → 222.34 |
+| Workbench renderer JS heap | 67.52 → 70.62 | 68.06 → 70.62 |
+
+Growth slowed in both runs. From cycle 12 to 16, host JS heap changed by 0.01 MiB in 2.2 and 0.00 MiB in 2.3. Workbench JS heap rose by 0.16 MiB and 0.19 MiB. This probe covers view open and disposal without edits. Separate webview renderer heaps and long-running native memory retention remain unmeasured. Investigate sustained post-GC growth across multiple comparable profiles. The Windows [recovery suite](extension-readiness.md#milestone-23-qualification) separately exercises pending edits, real local host restart, window reload, and provider outages.
+
+```powershell
+npm run build:extension
+$env:FOLIO_BENCHMARK = '1'
+$env:FOLIO_BENCHMARK_LONG = '1'
+npx playwright test --config playwright.vscode.config.ts sustained.bench.ts -g 'sustained Markdown Source at 5000000 bytes' --repeat-each=3
+Remove-Item Env:FOLIO_BENCHMARK_LONG
+npx playwright test --config playwright.vscode.config.ts sustained.bench.ts -g 'sustained Split Editor at 5000000 bytes'
+npx playwright test --config playwright.vscode.config.ts typing.bench.ts -g 'at 2000000 bytes'
+npx playwright test --config playwright.vscode.config.ts retention.bench.ts
+Remove-Item Env:FOLIO_BENCHMARK
+```
+
+Set `FOLIO_BENCHMARK_BUILD` to the earlier build's `extension/dist` to compare it using the same fixture bridge. Clear it before measuring the current build.
+
 ## Milestone 2.2 compared with Milestone 2.1
 
 Both builds used Windows 11 Pro 25H2 x64 (26200.9974), desktop VS Code 1.147.0 (`8a14f0cc1b08d531eb83255ea3764ae22aa932b5`), an AMD Ryzen AI 9 HX 370, Node 24.13.0, and one Playwright worker. The reference build came from the approved `06d1c50` checkpoint. Each case used a fresh VS Code profile and the same 75 ms target input cadence and fixture sizes as the historical method below. Each build ran 15 paced cases and four unpaced Source cases. All 30 paced cases had one browser journal write and one host checkpoint reply per key, zero storage failures, and an exact autosave. The 2.2 harness asserts both counts.
