@@ -2,11 +2,18 @@
 const { readFile, rename, writeFile } = require('node:fs/promises')
 const { join } = require('node:path')
 const { setTimeout: delay } = require('node:timers/promises')
+const { queryObjects } = require('node:v8')
 const vscode = require('vscode')
 const directory = join(__dirname, '..', '..', 'bridge')
 const virtualRoot = vscode.Uri.parse('folio-test-remote://test-server/project')
 const virtualFiles = new Map([['/project', null], ['/project/docs', null], ['/project/media', null]])
 const virtualChanges = new vscode.EventEmitter()
+const qualificationDirectory = vscode.Uri.joinPath(virtualRoot, 'media')
+const qualificationPath = /^\/project\/media\/qualification-[a-z0-9-]+\.(?:stage|png)$/
+// Querying an uninstantiated class requests GC without allocating an array of live objects.
+class HeapProbe {}
+let attachmentFault
+let attachmentWriteOptions
 
 function fileStat(type, size = 0) { return { type, size, ctime: 0, mtime: 0 } }
 function virtualFile(uri) {
@@ -20,8 +27,20 @@ function uri(file, virtual = false) {
   return vscode.Uri.joinPath(virtual ? vscode.Uri.joinPath(virtualRoot, 'docs') : vscode.workspace.workspaceFolders[0].uri, file)
 }
 
+function attachmentUri(name) {
+  const target = vscode.Uri.joinPath(qualificationDirectory, `qualification-${name}`)
+  if (!qualificationPath.test(target.path)) throw new Error('Invalid attachment fixture path.')
+  return target
+}
+
+async function fsOutcome(operation) {
+  try { await operation; return 'ok' }
+  catch (error) { return error.code ?? error.name }
+}
+
 const operations = {
-  hostMetrics() {
+  hostMetrics({ collectGarbage }) {
+    if (collectGarbage) queryObjects(HeapProbe)
     const { rss, heapUsed } = process.memoryUsage()
     const { user, system } = process.cpuUsage()
     return { rss, heapUsed, cpu: user + system }
@@ -52,13 +71,14 @@ const operations = {
   save: () => vscode.commands.executeCommand('workbench.action.files.save'),
   theme: ({ theme }) => vscode.workspace.getConfiguration('workbench').update('colorTheme', theme, vscode.ConfigurationTarget.Global),
   showPalette: () => vscode.commands.executeCommand('workbench.action.showCommands'),
-  addVirtualWorkspace({ markdown, pixel }) {
+  addVirtualWorkspace({ markdown, pixel, file = 'source.md' }) {
     if (!vscode.workspace.getWorkspaceFolder(virtualRoot)) throw new Error('The provider workspace was not opened.')
-    virtualFiles.set('/project/docs/source.md', Buffer.from(markdown))
+    virtualFiles.set(uri(file, true).path, Buffer.from(markdown))
     virtualFiles.set('/project/docs/target.md', Buffer.from('# Virtual destination\n'))
     virtualFiles.set('/project/target.md', Buffer.from('# Provider root destination\n\nDetails.\n'))
     virtualFiles.set('/project/media/pixel.png', Buffer.from(pixel, 'base64'))
     virtualFiles.set('/project/media/race.png', Buffer.from(pixel, 'base64'))
+    virtualFiles.set('/project/media/café #%(final)%2F.png', Buffer.from(pixel, 'base64'))
     virtualFiles.set('/project/docs/secret-link.png', 'symlink')
     virtualFiles.set('/workspace', null)
     virtualFiles.set('/workspace/pixel.png', Buffer.from(pixel, 'base64'))
@@ -68,8 +88,38 @@ const operations = {
   boundaryReads: () => boundaryReads,
   setProviderUnavailable({ unavailable }) { providerUnavailable = !!unavailable },
   providerStatFailures: () => providerStatFailures,
-  async readProviderFile({ file }) {
-    try { return Buffer.from(await vscode.workspace.fs.readFile(uri(file, true))).toString('utf8') }
+  async attachmentCreate({ name, contents, method, fault }) {
+    const target = attachmentUri(name)
+    const bytes = Buffer.from(contents)
+    attachmentFault = fault
+    attachmentWriteOptions = undefined
+    try {
+      if (method === 'workspaceEdit') {
+        const edit = new vscode.WorkspaceEdit()
+        edit.createFile(target, { contents: bytes, overwrite: false })
+        return { applied: await vscode.workspace.applyEdit(edit), options: attachmentWriteOptions }
+      }
+      return { outcome: await fsOutcome(vscode.workspace.fs.writeFile(target, bytes)), options: attachmentWriteOptions }
+    } finally { attachmentFault = undefined }
+  },
+  async attachmentPublish({ first, second, to, fault }) {
+    const target = attachmentUri(to)
+    attachmentFault = fault
+    try {
+      return await Promise.all((second ? [first, second] : [first]).map(name =>
+        fsOutcome(vscode.workspace.fs.rename(attachmentUri(name), target, { overwrite: false }))))
+    } finally { attachmentFault = undefined }
+  },
+  async attachmentRead({ name }) {
+    try { return Buffer.from(await vscode.workspace.fs.readFile(attachmentUri(name))).toString('utf8') }
+    catch (error) {
+      if (error.code === 'FileNotFound') return null
+      throw error
+    }
+  },
+  attachmentDelete: ({ name }) => vscode.workspace.fs.delete(attachmentUri(name), { recursive: false }),
+  async readProviderFile({ file, encoding = 'utf8' }) {
+    try { return Buffer.from(await vscode.workspace.fs.readFile(uri(file, true))).toString(encoding) }
     catch (error) {
       if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') return null
       throw error
@@ -175,11 +225,23 @@ exports.activate = context => {
       if (uri.path.endsWith('/race.png')) virtualFiles.set(uri.path, 'symlink')
       return entry
     },
-    writeFile(uri, content) {
-      virtualFile(uri)
+    writeFile(uri, content, options) {
+      if (uri.authority !== virtualRoot.authority || !qualificationPath.test(uri.path)) virtualFile(uri)
       if (providerUnavailable) throw vscode.FileSystemError.Unavailable(uri)
+      const qualification = qualificationPath.test(uri.path)
+      if (qualification) {
+        attachmentWriteOptions = options
+        if (attachmentFault === 'concurrent-create') virtualFiles.set(uri.path, Buffer.from('concurrent bytes'))
+      }
+      const exists = virtualFiles.has(uri.path)
+      if (exists && options.create && !options.overwrite) throw vscode.FileSystemError.FileExists(uri)
+      if (!exists && !options.create) throw vscode.FileSystemError.FileNotFound(uri)
+      if (qualification && attachmentFault === 'partial-write') {
+        virtualFiles.set(uri.path, Buffer.from(content.subarray(0, 4)))
+        throw vscode.FileSystemError.Unavailable(uri)
+      }
       virtualFiles.set(uri.path, Buffer.from(content))
-      virtualChanges.fire([{ type: vscode.FileChangeType.Changed, uri }])
+      virtualChanges.fire([{ type: exists ? vscode.FileChangeType.Changed : vscode.FileChangeType.Created, uri }])
     },
     createDirectory() { throw vscode.FileSystemError.NoPermissions() },
     delete(uri) {
@@ -187,13 +249,14 @@ exports.activate = context => {
       virtualFiles.delete(uri.path)
       virtualChanges.fire([{ type: vscode.FileChangeType.Deleted, uri }])
     },
-    rename(from, to) {
+    rename(from, to, options) {
       const entry = virtualFile(from)
       if (to.authority !== virtualRoot.authority || !Buffer.isBuffer(entry)) throw vscode.FileSystemError.NoPermissions(from)
-      if (virtualFiles.has(to.path)) throw vscode.FileSystemError.FileExists(to)
+      if (virtualFiles.has(to.path) && !options.overwrite) throw vscode.FileSystemError.FileExists(to)
       virtualFiles.set(to.path, entry)
       virtualFiles.delete(from.path)
       virtualChanges.fire([{ type: vscode.FileChangeType.Deleted, uri: from }, { type: vscode.FileChangeType.Created, uri: to }])
+      if (qualificationPath.test(to.path) && attachmentFault === 'lost-publish-reply') throw vscode.FileSystemError.Unavailable(to)
     },
   }, { isCaseSensitive: true }))
   void run().catch(error => writeFile(join(directory, 'activation-error'), String(error)))
