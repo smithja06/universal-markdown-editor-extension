@@ -1,7 +1,7 @@
 import { Editor } from '@tiptap/core'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createExtensions } from '../editor/schema'
-import { openMarkdown, writeMarkdown } from './markdown'
+import { markdownProcessor, openMarkdown, writeMarkdown } from './markdown'
 import { decodeMarkdown, encodeMarkdown, markdownFilename } from './files'
 
 const sample = '\uFEFF---\r\ntitle: "Test"\r\ncustom: [a, b]\r\n---\r\n\r\nA title\r\n=======\r\n\r\nA  *word* and [reference][id].\r\n\r\n<section data-unknown="yes">keep me</section>\r\n\r\n[id]: /target "Title"\r\n'
@@ -319,5 +319,41 @@ describe('Markdown source preservation', () => {
     editor.commands.insertContentAt(pos, 'Start: ')
     expect(writeMarkdown(session, editor.state.doc).source).toBe(content.replace('A  _line_', 'Start: A  _line_'))
     editor.destroy()
+  })
+
+  it.each([
+    { before: '  ## A simple title  ## ', after: '  ## A revised simple title  ## ' },
+    { before: ' A simple paragraph.', after: ' A revised simple paragraph.' },
+  ])('keeps isolated plain text edits local to their Markdown block', ({ before, after }) => {
+    const preserved = '  **Leave this authored spacing and spelling alone**\n\n'.repeat(450)
+    const source = before + '\n\n' + preserved
+    const { editor, session } = open(source)
+    const parse = vi.spyOn(markdownProcessor, 'parse')
+    try {
+      editor.view.dispatch(editor.state.tr.insertText('revised ', 3))
+      const written = writeMarkdown(session, editor.state.doc)
+      expect(written.source).toBe(after + '\n\n' + preserved)
+      expect(parse.mock.calls.length).toBe(0)
+
+      const reopened = openMarkdown(written.source, editor.schema)
+      expect(reopened.document.firstChild?.textContent).toBe(editor.state.doc.firstChild?.textContent)
+    } finally {
+      parse.mockRestore()
+      editor.destroy()
+    }
+  })
+
+  it('checks the whole document when visual plain text introduces Markdown syntax', () => {
+    const { editor, session } = open('A simple paragraph.\n\n**Preserved**\n')
+    try {
+      editor.view.dispatch(editor.state.tr.insertText('1. ', 1))
+      const written = writeMarkdown(session, editor.state.doc)
+      const reopened = openMarkdown(written.source, editor.schema)
+      expect(reopened.document.firstChild?.type.name).toBe('paragraph')
+      expect(reopened.document.firstChild?.textContent).toBe('1. A simple paragraph.')
+      expect(written.source.endsWith('\n\n**Preserved**\n')).toBe(true)
+    } finally {
+      editor.destroy()
+    }
   })
 })

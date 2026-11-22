@@ -11,7 +11,7 @@ const viewType = 'folio.markdown'
 const unavailable = 'This document was moved, deleted, or closed. Reopen it from VS Code to continue.'
 const stale = 'The document changed in VS Code before this edit could be applied.'
 
-type StateMessage = Extract<HostMessage, { type: 'state' }>
+type Acknowledgement = Extract<HostMessage, { type: 'state' | 'accepted' }>
 type EditMessage = Extract<ClientMessage, { type: 'edit' }>
 type CommandMessage = Extract<ClientMessage, { type: 'command' }>
 
@@ -31,7 +31,7 @@ interface Client {
   backupBase: { revision: number; source: string; encoded?: PackedRecovery['base'] }
   imageReads: number
   navigation?: number
-  acknowledgement?: StateMessage
+  acknowledgement?: Acknowledgement
 }
 
 interface Session {
@@ -44,12 +44,13 @@ interface Session {
   watcher?: vscode.Disposable
 }
 
-function documentState(document: vscode.TextDocument, available: boolean): DocumentState {
+function documentState(document: vscode.TextDocument, available: boolean, previous?: DocumentState): DocumentState {
+  const revision = document.version
   return {
     uri: document.uri.toString(),
     title: document.uri.path.split('/').at(-1) || document.fileName,
-    revision: document.version,
-    source: document.getText().replace(/\r\n?/g, '\n'),
+    revision,
+    source: previous?.revision === revision ? previous.source : document.getText().replace(/\r\n?/g, '\n'),
     dirty: document.isDirty,
     eol: document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n',
     bom: document.encoding === 'utf8bom' || document.encoding === 'utf16le' || document.encoding === 'utf16be',
@@ -264,8 +265,8 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
 
   private refresh(session: Session) {
     if (!session.state.available) return
-    const next = documentState(session.document, !session.document.isClosed)
     const previous = session.state
+    const next = documentState(session.document, !session.document.isClosed, previous)
     if (previous.revision === next.revision && previous.dirty === next.dirty && previous.available === next.available &&
       previous.eol === next.eol && previous.bom === next.bom) return
     session.state = next
@@ -285,7 +286,11 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
   private sendState(view: View, state: DocumentState) { this.post(view, { type: 'state', state }) }
 
   private acknowledge(view: View, client: Client, state: DocumentState, id: number, accepted: boolean, message?: string) {
-    const reply: StateMessage = { type: 'state', state, edit: { id, accepted, message } }
+    const { source: _confirmedProposal, ...metadata } = state
+    // An accepted proposal was checked against the exact native text in apply().
+    const reply: Acknowledgement = accepted
+      ? { type: 'accepted', state: metadata, edit: { id } }
+      : { type: 'state', state, edit: { id, accepted, message } }
     client.acknowledgement = reply
     this.post(view, reply, client)
   }
@@ -333,7 +338,8 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
     const current = this.recovery.get(key)
     let dismissed = false
     try {
-      if (recoveryGeneration(current) > generation) return
+      // Compare with both the stored value and the newest generation submitted by this view.
+      if (recoveryGeneration(current) > generation || (id === client.journalId && client.generation > generation)) return
       if (id === client.journalId) client.generation = Math.max(client.generation, generation)
       if (current !== undefined) await this.recovery.update(key, undefined)
       dismissed = true
@@ -353,7 +359,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
     if (id <= client.abandoned || view.client !== client) return reject('This Folio edit expired before it reached VS Code.')
     const { document } = session
     if (!session.state.available || document.isClosed) return reject(unavailable)
-    const base = documentState(document, true)
+    const base = documentState(document, true, session.state)
     session.state = base
     if (base.revision !== revision) return reject(stale)
     if (change.to > base.source.length) return reject('The edit range is invalid.')

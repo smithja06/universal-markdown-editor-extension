@@ -1,0 +1,143 @@
+# Folio Phase 6 Milestone 2.1 benchmarks
+
+## Method
+
+The baseline is the Milestone 2 tree (`2ada555`). Both builds run on Windows 11 Pro x64 with desktop VS Code 1.147.0, an AMD Ryzen AI 9 HX 370, and one Playwright worker. Each case starts a fresh VS Code profile and opens an ASCII fixture with an ATX heading, paragraphs, emphasis, and workspace-relative Markdown links. Sizes are decimal bytes.
+
+Startup timing starts at the command to open the file and ends when the initial Visual heading is visible. The Source and Split cases then time switching from Visual until the Source pane is editable. Split typing uses the Visual pane with CodeMirror mounted. Each key appends to the heading. Playwright aims for one key every 75 ms and waits for input processing when a key takes longer. Source and 100 KB cases use 128 keys. Visual and Split use 48 keys at 500 KB, 32 at 1 and 2 MB, and 16 at 5 MB. Every case waits for native synchronization and outstanding host checkpoint replies. The autosave probe sets VS Code's one-second `afterDelay` policy, types one more key, and compares the saved file byte for byte with the intended text.
+
+Percentiles use the nearest rank. Input time is the Playwright keyboard round trip. Checkpoint creation is measured from `beforeinput` to the checkpoint post, including editor work, snapshot serialization, and the synchronous browser journal write. Browser storage time covers `localStorage.setItem` alone. Host backup time starts at the checkpoint post and ends when the browser receives its reply. The staged host probe separately times host entry through the VS Code storage API response. Local wall-clock timestamps separate submission-to-host ingress from host reply-to-webview delivery. These timings have millisecond precision. The storage promise indicates workbench acceptance and does not measure a disk flush. [VS Code Memento implementation](https://github.com/microsoft/vscode/blob/8a14f0cc1b08d531eb83255ea3764ae22aa932b5/src/vs/workbench/api/common/extHostMemento.ts) [Workbench storage RPC](https://github.com/microsoft/vscode/blob/8a14f0cc1b08d531eb83255ea3764ae22aa932b5/src/vs/workbench/api/browser/mainThreadStorage.ts)
+
+CPU is extension-host user plus system time divided by elapsed time through queue drain, as a percentage of one logical core. This includes the desktop test bridge. RSS and JavaScript heap are snapshots before and after typing. Browser heap uses Chromium's `performance.memory`. These measurements depend on garbage collection and do not measure peak memory, retention over a long editing session, or renderer CPU.
+
+```powershell
+npm run build:extension
+$env:FOLIO_BENCHMARK = '1'
+npx playwright test --config playwright.vscode.config.ts sustained.bench.ts
+npx playwright test --config playwright.vscode.config.ts typing.bench.ts -g 'at 2000000 bytes'
+$env:FOLIO_BENCHMARK_LONG = '1'
+npx playwright test --config playwright.vscode.config.ts sustained.bench.ts -g 'at 2000000 bytes'
+Remove-Item Env:FOLIO_BENCHMARK_LONG
+Remove-Item Env:FOLIO_BENCHMARK
+```
+
+To compare an earlier revision with the same harness, build that revision separately and point `FOLIO_BENCHMARK_BUILD` to its `extension/dist` directory while running Playwright. Only the copied test extension receives the timing probes.
+
+## The 2 MB acknowledgement regression
+
+The original 64-key Source burst reported host acknowledgement p95 rising from 718 to 1,417.5 ms. The instrumented replay warmed up Source, positioned at the end, and issued the same 64 keys as soon as the preceding keyboard call returned without waiting for a native edit acknowledgement. The Milestone 1.1 tree (`e1d2f58`) and Milestone 2 each ran in an isolated window with the same probe. This reproduced the regression direction and located the delay after the host replied. Milestone 2 reduced checkpoint transport and host storage costs, but the renderer took longer to deliver the reply to Folio while input continued. An earlier repeat of the Milestone 2 burst reached 487.4 ms p95, so the exact tail varies with scheduling.
+
+At Milestone 2, measured p95 for this burst was 0.3 ms to submit the compact message, 1 ms from submission to entry at the host, 12.36 ms inside the host, and 1,252 ms from the host reply to its webview listener. Milestone 1.1's full checkpoints took 5.6, 91, 79.62, and 504 ms respectively. These are separate percentile distributions. Compact backups reduced host CPU as intended. In the paced 2 MB Source case, the Milestone 2 delivery p95 was 12 ms. The same build reached 15.76 s in the 2 MB Visual case, where the webview also reparsed the document for each edit.
+
+| 2 MB Source burst | Typing p50 / p95 (ms) | Checkpoint acknowledgement p50 / p95 (ms) | Host CPU (ms) | Δ Host RSS / heap (MiB) |
+| --- | ---: | ---: | ---: | ---: |
+| Milestone 1.1 | 42.76 / 70.44 | 427.60 / 609.70 | 2,001 | +98.0 / +48.6 |
+| Milestone 2 | 38.55 / 67.32 | 786.00 / 1,254.60 | 329 | +18.7 / +20.1 |
+| Milestone 2.1 | 41.86 / 67.61 | 969.30 / 1,702.80 | 485 | +8.0 / −12.7 |
+
+The new build still shows a long reply tail in the unpaced Source burst. In that run, the host replied in 13.39 ms p95 and reply delivery took 1,701 ms p95. Sustained, paced input and maximum-rate input exercise different amounts of queue contention.
+
+Milestone 2 sent the full native Markdown back on each accepted edit. Milestone 2.1 sends the edit identity and document metadata after verifying the exact native result, and reuses the already normalized text when the VS Code document version is unchanged. It also avoids the full Markdown parse for narrow, isolated plain-text Visual edits. Both changes reduce competition with checkpoint replies. Checkpoints still post immediately, and both recovery stores use the same formats and write cadence.
+
+## Sustained typing and checkpoint results
+
+Results show Milestone 2 → Milestone 2.1. Latencies are p50 / p95 in milliseconds.
+
+| Size | Mode | Keys | Typing | Checkpoint creation | Checkpoint acknowledgement |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 100 KB | Source | 128 | 8.47 / 10.36 → 11.18 / 14.24 | 2.70 / 3.60 → 3.30 / 4.60 | 7.00 / 9.00 → 7.00 / 9.70 |
+| 100 KB | Visual | 128 | 39.08 / 76.86 → 11.04 / 13.87 | 27.60 / 40.90 → 3.40 / 4.30 | 7.00 / 11.30 → 7.90 / 11.70 |
+| 100 KB | Split | 128 | 40.52 / 96.19 → 11.77 / 13.80 | 27.50 / 39.30 → 3.90 / 4.90 | 8.50 / 43.70 → 8.50 / 11.80 |
+| 500 KB | Source | 128 | 10.72 / 13.90 → 15.59 / 18.76 | 4.30 / 6.30 → 6.10 / 8.10 | 7.60 / 11.60 → 9.00 / 11.20 |
+| 500 KB | Visual | 48 | 168.26 / 399.51 → 19.23 / 25.50 | 124.80 / 147.80 → 9.10 / 12.30 | 13.90 / 164.60 → 14.50 / 19.20 |
+| 500 KB | Split | 48 | 138.30 / 548.84 → 20.63 / 25.42 | 125.30 / 151.30 → 9.90 / 11.70 | 857.50 / 2939.20 → 16.40 / 21.70 |
+| 1 MB | Source | 128 | 14.17 / 16.40 → 25.12 / 31.82 | 6.80 / 8.60 → 12.40 / 16.00 | 7.50 / 9.60 → 14.40 / 19.70 |
+| 1 MB | Visual | 32 | 262.41 / 290.88 → 34.80 / 42.52 | 253.60 / 282.00 → 20.30 / 25.20 | 4045.60 / 8023.50 → 25.90 / 32.10 |
+| 1 MB | Split | 32 | 255.30 / 299.14 → 34.83 / 42.17 | 245.90 / 290.90 → 20.40 / 24.90 | 3941.00 / 7905.90 → 28.40 / 43.10 |
+| 2 MB | Source | 128 | 20.33 / 23.41 → 39.56 / 47.81 | 11.30 / 13.80 → 22.30 / 25.70 | 9.90 / 12.20 → 20.90 / 28.50 |
+| 2 MB | Visual | 32 | 517.39 / 572.92 → 60.48 / 90.05 | 505.80 / 551.60 → 40.30 / 54.00 | 7915.00 / 15773.40 → 86.80 / 153.20 |
+| 2 MB | Split | 32 | 509.22 / 539.90 → 60.97 / 80.48 | 492.20 / 530.60 → 39.80 / 53.40 | 7768.90 / 15464.70 → 103.40 / 170.60 |
+| 5 MB | Source | 128 | 39.02 / 51.50 → 70.72 / 95.52 | 28.40 / 38.70 → 53.80 / 66.40 | 28.40 / 41.40 → 254.20 / 498.80 |
+| 5 MB | Visual | 16 | 1323.58 / 2614.28 → 137.51 / 169.22 | 1301.30 / 2581.10 → 99.10 / 107.20 | 15446.10 / 25902.90 → 1213.40 / 2225.60 |
+| 5 MB | Split | 16 | 2635.18 / 2835.00 → 151.55 / 182.85 | 2547.50 / 2785.50 → 103.50 / 122.80 | 18764.60 / 39949.50 → 1525.90 / 2666.10 |
+
+| Size | Mode | Browser storage p50 / p95 (ms) | Host handler p50 / p95 (ms) | Host reply delivery p95 (ms) | Native edit replies |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 100 KB | Source | 0.10 / 0.20 → 0.10 / 0.20 | 1.81 / 4.16 → 2.37 / 4.48 | 6 → 9 | 128 → 128 |
+| 100 KB | Visual | 0.10 / 0.20 → 0.10 / 0.20 | 1.78 / 4.43 → 2.30 / 4.69 | 9 → 7 | 128 → 128 |
+| 100 KB | Split | 0.10 / 0.20 → 0.10 / 0.20 | 1.83 / 6.80 → 2.35 / 3.41 | 40 → 8 | 127 → 128 |
+| 500 KB | Source | 0.40 / 0.60 → 0.60 / 0.70 | 1.76 / 4.66 → 2.01 / 4.45 | 9 → 9 | 128 → 128 |
+| 500 KB | Visual | 0.40 / 0.60 → 0.70 / 1.00 | 1.89 / 9.56 → 1.77 / 4.09 | 165 → 18 | 46 → 48 |
+| 500 KB | Split | 0.40 / 0.60 → 0.70 / 0.80 | 1.60 / 13.45 → 1.94 / 5.49 | 2938 → 24 | 14 → 48 |
+| 1 MB | Source | 1.40 / 1.80 → 2.60 / 3.30 | 2.08 / 4.12 → 2.16 / 7.40 | 7 → 16 | 128 → 128 |
+| 1 MB | Visual | 1.50 / 1.90 → 2.80 / 3.20 | 2.49 / 17.13 → 1.92 / 7.82 | 8028 → 29 | 2 → 32 |
+| 1 MB | Split | 1.40 / 2.10 → 2.80 / 3.20 | 3.06 / 14.75 → 2.17 / 9.28 | 7904 → 35 | 2 → 32 |
+| 2 MB | Source | 2.50 / 3.30 → 4.60 / 5.60 | 3.01 / 6.32 → 1.90 / 12.20 | 12 → 22 | 128 → 128 |
+| 2 MB | Visual | 2.40 / 3.40 → 4.70 / 5.50 | 3.63 / 16.14 → 2.73 / 11.94 | 15757 → 147 | 2 → 29 |
+| 2 MB | Split | 2.40 / 3.00 → 4.70 / 5.50 | 3.13 / 16.24 → 3.28 / 12.98 | 15447 → 166 | 2 → 25 |
+| 5 MB | Source | 7.20 / 9.30 → 11.80 / 13.80 | 7.98 / 16.75 → 5.17 / 16.81 | 31 → 486 | 128 → 43 |
+| 5 MB | Visual | 6.90 / 14.50 → 12.10 / 13.50 | 5.75 / 18.14 → 6.19 / 23.25 | 25888 → 2201 | 2 → 2 |
+| 5 MB | Split | 11.00 / 14.60 → 12.00 / 13.70 | 5.47 / 22.35 → 4.69 / 23.78 | 39932 → 2648 | 2 → 2 |
+
+## Startup, autosave, CPU, and memory
+
+The time column gives initial open / mode switch / autosave in seconds. The memory column gives start-to-finish changes in host RSS / host JavaScript heap / webview JavaScript heap in MiB. Negative values reflect lower end snapshots.
+
+| Size | Mode | Open / switch / autosave (s) | Host CPU ms (% of one core) | Δ Host RSS / host heap / webview heap (MiB) |
+| --- | --- | ---: | ---: | ---: |
+| 100 KB | Source | 1.28 / 0.30 / 1.11 → 2.28 / 0.21 / 1.11 | 1468 (14.1%) → 1671 (15.9%) | 40.0 / 5.1 / 22.7 → 16.1 / 22.9 / 10.6 |
+| 100 KB | Visual | 1.28 / — / 1.14 → 1.88 / — / 1.14 | 1890 (18.0%) → 1531 (14.4%) | 39.1 / 2.7 / 39.7 → 16.0 / 19.4 / 22.5 |
+| 100 KB | Split | 1.06 / 0.21 / 1.14 → 1.99 / 0.34 / 1.11 | 1593 (14.8%) → 1578 (15.0%) | 35.7 / 1.2 / 35.7 → 14.0 / 17.6 / 12.4 |
+| 500 KB | Source | 1.22 / 0.27 / 1.11 → 2.26 / 0.47 / 1.12 | 2031 (19.5%) → 1531 (14.5%) | 30.8 / 13.3 / 15.5 → 26.8 / 18.1 / 65.3 |
+| 500 KB | Visual | 2.44 / — / 1.24 → 2.18 / — / 1.15 | 954 (10.3%) → 922 (23.8%) | 41.9 / 25.4 / 28.2 → 31.7 / 1.1 / 42.5 |
+| 500 KB | Split | 1.63 / 1.05 / 1.22 → 2.43 / 0.63 / 1.13 | 655 (6.3%) → 672 (17.1%) | 6.9 / 3.2 / 70.1 → 30.8 / 12.2 / 44.3 |
+| 1 MB | Source | 1.48 / 0.38 / 1.10 → 2.72 / 0.62 / 1.15 | 1828 (17.5%) → 1938 (18.3%) | 36.1 / 14.7 / 41.3 → 29.8 / 15.5 / 49.9 |
+| 1 MB | Visual | 1.56 / — / 1.36 → 2.98 / — / 1.14 | 484 (5.6%) → 859 (31.6%) | 18.2 / 11.5 / 60.0 → 34.4 / 21.9 / 35.2 |
+| 1 MB | Split | 1.55 / 0.56 / 1.36 → 2.99 / 1.10 / 1.13 | 548 (6.4%) → 656 (24.4%) | 18.5 / 7.5 / -2.0 → 31.4 / 21.7 / 57.3 |
+| 2 MB | Source | 1.87 / 0.42 / 1.12 → 4.04 / 1.05 / 1.16 | 2047 (19.6%) → 1875 (17.6%) | 149.7 / 117.6 / 15.3 → 50.2 / 32.4 / -10.2 |
+| 2 MB | Visual | 2.18 / — / 1.61 → 4.09 / — / 1.19 | 470 (2.8%) → 390 (14.4%) | 52.9 / 37.8 / 9.9 → 28.2 / 28.4 / 58.5 |
+| 2 MB | Split | 1.96 / 0.79 / 1.63 → 4.14 / 1.56 / 1.18 | 796 (4.8%) → 422 (15.2%) | 4.1 / -14.2 / 138.6 → 28.1 / 13.3 / 25.1 |
+| 5 MB | Source | 3.41 / 0.71 / 1.16 → 7.14 / 2.56 / 1.26 | 4047 (38.7%) → 1234 (11.4%) | 5.0 / -7.4 / 133.6 → 72.0 / 87.4 / 129.6 |
+| 5 MB | Visual | 3.44 / — / 3.69 → 7.52 / — / 1.31 | 1328 (4.4%) → 312 (5.3%) | 6.6 / 1.2 / 126.5 → -5.7 / 16.0 / 93.4 |
+| 5 MB | Split | 6.62 / 3.96 / 3.94 → 7.45 / 3.37 / 1.33 | 2484 (5.4%) → 672 (10.7%) | 45.2 / 23.1 / 70.2 → 44.4 / 16.3 / 134.0 |
+
+## Large Source repeats and limits
+
+The second paired run used the same workload and fresh profiles. The 2 MB paced typing p95 values were close across the paired repeat, and the native edit acknowledgement improved. The 5 MB Source checkpoint tail was worse in both comparisons. In the paired repeat, most of the tail followed the host reply even though the host handler p95 fell from 23.4 to 15.05 ms. The unpaced Source burst p95 changed in opposite directions across the two comparisons. The measurements support a reduction in native reply cost and a remaining scheduling bottleneck at maximum input rate.
+
+| Repeat | Typing p50 / p95 (ms) | Checkpoint acknowledgement p50 / p95 (ms) | Native edit acknowledgement p95 (ms) | Host CPU (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| 2 MB paced Source | 39.19 / 50.39 → 40.89 / 52.29 | 20.20 / 26.90 → 21.10 / 27.90 | 71.10 → 15.10 | 3,766 → 1,906 |
+| 5 MB paced Source | 70.09 / 98.76 → 71.84 / 104.74 | 468.80 / 748.20 → 307.50 / 1,715.60 | 772.00 → 1,403.80 | 2,172 → 1,531 |
+| 2 MB unpaced Source | 41.37 / 77.83 → 43.36 / 67.53 | 1,028.60 / 1,849.90 → 761.80 / 1,125.10 | 1,955.80 → 1,080.30 | 547 → 499 |
+
+Both 15-case matrices and all paced Source repeats wrote the exact expected Markdown with autosave. No browser journal or host backup failures were observed in those fixtures. The webview still serializes the latest complete draft synchronously on each distinct generation. Its cost grows with the document, and storage quotas can leave only the host copy. The compact host record stays self-contained. There is no time-based coalescing that withholds a new generation when either storage channel is unavailable. Complex Visual edits and initial Visual load still parse the full document. At 5 MB, Visual and Split both remain visibly slower than smaller files. A first pass through the matrix is not a long-term memory-retention test.
+
+## Longer 2 MB sessions
+
+Milestone 2.1 also ran 384 keys per mode at the same target cadence. All three cases drained every checkpoint and autosaved the exact text. These sessions cover about half a minute each. The memory snapshots include garbage-collection effects and do not establish memory retention in longer sessions.
+
+| Mode | Elapsed (s) | Typing p50 / p95 (ms) | Creation p50 / p95 (ms) | Checkpoint acknowledgement p50 / p95 (ms) | Host CPU (% of one core) | Δ Host RSS / host heap / webview heap (MiB) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Source | 31.57 | 40.60 / 48.84 | 22.80 / 28.50 | 21.30 / 26.40 | 19.1% | 46.3 / 24.0 / 33.1 |
+| Visual | 31.59 | 61.14 / 84.62 | 40.00 / 48.40 | 80.40 / 164.20 | 15.0% | 17.8 / 25.5 / 83.0 |
+| Split | 31.33 | 60.51 / 82.84 | 39.90 / 47.20 | 87.00 / 171.70 | 13.4% | 48.3 / 32.2 / 22.4 |
+
+## Platform coverage
+
+| Environment | Coverage |
+| --- | --- |
+| Windows 11 Pro x64, VS Code 1.147.0, local workspace | Native commands and shortcuts, light/dark/high-contrast themes, webview assets, images and links, precise edits and saves, rename and deletion, multiple views, and recovery after host interruption. |
+| Windows desktop with a local root and a synthetic `folio-test-remote://test-server/project` provider | Provider-backed image and link resolution, multi-root path isolation, exact saved text, rename and deletion. The fixture runs through `vscode.workspace.fs` in a local extension host. |
+| macOS and Linux desktops | Unverified. No machines or suitable environments were available. |
+| Real VS Code Remote | Unverified. No SSH, WSL, Dev Container, or comparable remote workspace was available. |
+
+Workspace attachment insertion still needs validation of writes and recovery in a real remote workspace, including out-of-root handling and failures around rename, reconnect, or interruption. Native keyboard and resource behavior also need macOS and Linux verification.
+
+## Verification
+
+- ESLint and TypeScript passed for the shared application and extension host. The standalone and extension production builds passed. The VSIX packaged successfully and its archive contained the manifest, extension host bundle, and webview entry.
+- All 100 unit and integration tests and all 23 Windows desktop VS Code tests passed.
+- All 60 standalone Chromium tests passed at 12 workers with the desktop and build jobs finished. An earlier concurrent run passed 59 of 60 and timed out in the offline HTML export test. Its trace showed roughly 22 seconds from export activation to the HTML download status, leaving little of the test's 30-second budget for the remaining downloads and offline assertions. The same test passed alone in 3.5 seconds and passed in the full rerun.
+- The Windows restart suite recovered a 2.07 MB pending draft using only the host backup after killing the real extension host. It verified the complete recovery preview and copied BOM/CRLF bytes while the native buffer and disk retained their original content. Separate cases replayed stale storage and cleanup requests, recovered two views using different backup channels, and exercised Save, Undo, and Redo while an edit was pending.
+- The two full benchmark matrices, the historical Source replay, the paired Source repeats, and the longer 2 MB sessions all completed. The autosave probes compared the actual file against the intended contents.

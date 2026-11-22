@@ -26,6 +26,11 @@ const operations = {
     const { user, system } = process.cpuUsage()
     return { rss, heapUsed, cpu: user + system }
   },
+  async enableAutosave() {
+    const files = vscode.workspace.getConfiguration('files')
+    await files.update('autoSaveDelay', 1000, vscode.ConfigurationTarget.Global)
+    await files.update('autoSave', 'afterDelay', vscode.ConfigurationTarget.Global)
+  },
   async open({ file, editor, column, virtual }) {
     const options = { viewColumn: column ?? vscode.ViewColumn.One, preview: false }
     if (editor === 'folio') await vscode.commands.executeCommand('vscode.openWith', uri(file, virtual), 'folio.markdown', options)
@@ -51,12 +56,23 @@ const operations = {
     if (!vscode.workspace.getWorkspaceFolder(virtualRoot)) throw new Error('The provider workspace was not opened.')
     virtualFiles.set('/project/docs/source.md', Buffer.from(markdown))
     virtualFiles.set('/project/docs/target.md', Buffer.from('# Virtual destination\n'))
+    virtualFiles.set('/project/target.md', Buffer.from('# Provider root destination\n\nDetails.\n'))
     virtualFiles.set('/project/media/pixel.png', Buffer.from(pixel, 'base64'))
     virtualFiles.set('/project/media/race.png', Buffer.from(pixel, 'base64'))
     virtualFiles.set('/project/docs/secret-link.png', 'symlink')
+    virtualFiles.set('/workspace', null)
+    virtualFiles.set('/workspace/pixel.png', Buffer.from(pixel, 'base64'))
   },
   pixelReads: () => pixelReads,
   unsafeReads: () => unsafeReads,
+  boundaryReads: () => boundaryReads,
+  async readProviderFile({ file }) {
+    try { return Buffer.from(await vscode.workspace.fs.readFile(uri(file, true))).toString('utf8') }
+    catch (error) {
+      if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') return null
+      throw error
+    }
+  },
   async saveDocument({ file, virtual }) {
     if (!await (await vscode.workspace.openTextDocument(uri(file, virtual))).save()) throw new Error('Could not save the test document.')
   },
@@ -78,10 +94,15 @@ const operations = {
       await writeFile(join(directory, 'restart-outcome'), outcome).catch(() => undefined)
     }, 200)
   },
-  async rename({ file, to }) {
+  async rename({ file, to, virtual }) {
     const edit = new vscode.WorkspaceEdit()
-    edit.renameFile(uri(file), uri(to))
+    edit.renameFile(uri(file, virtual), uri(to, virtual))
     if (!await vscode.workspace.applyEdit(edit)) throw new Error('VS Code refused the native test rename.')
+  },
+  async deleteFile({ file, virtual }) {
+    const edit = new vscode.WorkspaceEdit()
+    edit.deleteFile(uri(file, virtual))
+    if (!await vscode.workspace.applyEdit(edit)) throw new Error('VS Code refused the native test deletion.')
   },
 }
 
@@ -118,6 +139,7 @@ async function run() {
 
 let pixelReads = 0
 let unsafeReads = 0
+let boundaryReads = 0
 exports.activate = context => {
   context.subscriptions.push(virtualChanges, vscode.workspace.registerFileSystemProvider(virtualRoot.scheme, {
     onDidChangeFile: virtualChanges.event,
@@ -140,6 +162,7 @@ exports.activate = context => {
       if (!entry) throw vscode.FileSystemError.FileIsADirectory(uri)
       if (entry === 'symlink') { unsafeReads++; throw new Error('Folio must never read through this symlink.') }
       if (uri.path.endsWith('/pixel.png')) pixelReads++
+      if (uri.path === '/workspace/pixel.png') boundaryReads++
       if (uri.path.endsWith('/race.png')) virtualFiles.set(uri.path, 'symlink')
       return entry
     },
@@ -149,8 +172,19 @@ exports.activate = context => {
       virtualChanges.fire([{ type: vscode.FileChangeType.Changed, uri }])
     },
     createDirectory() { throw vscode.FileSystemError.NoPermissions() },
-    delete() { throw vscode.FileSystemError.NoPermissions() },
-    rename() { throw vscode.FileSystemError.NoPermissions() },
+    delete(uri) {
+      if (!Buffer.isBuffer(virtualFile(uri))) throw vscode.FileSystemError.NoPermissions(uri)
+      virtualFiles.delete(uri.path)
+      virtualChanges.fire([{ type: vscode.FileChangeType.Deleted, uri }])
+    },
+    rename(from, to) {
+      const entry = virtualFile(from)
+      if (to.authority !== virtualRoot.authority || !Buffer.isBuffer(entry)) throw vscode.FileSystemError.NoPermissions(from)
+      if (virtualFiles.has(to.path)) throw vscode.FileSystemError.FileExists(to)
+      virtualFiles.set(to.path, entry)
+      virtualFiles.delete(from.path)
+      virtualChanges.fire([{ type: vscode.FileChangeType.Deleted, uri: from }, { type: vscode.FileChangeType.Created, uri: to }])
+    },
   }, { isCaseSensitive: true }))
   void run().catch(error => writeFile(join(directory, 'activation-error'), String(error)))
 }

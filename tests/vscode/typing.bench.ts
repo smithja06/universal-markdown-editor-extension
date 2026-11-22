@@ -10,7 +10,10 @@ const metrics = (samples: number[]) => {
   return { n: sorted.length, p50: round(sorted[Math.ceil(sorted.length * 0.5) - 1]), p95: round(sorted[Math.ceil(sorted.length * 0.95) - 1]) }
 }
 interface HostMetrics { rss: number; heapUsed: number; cpu: number }
-interface Samples { local: number[]; host: number[]; edit: number[]; checkpointIpc: number[]; failures: number }
+interface Samples {
+  local: number[]; host: number[]; edit: number[]; checkpointIpc: number[]; hostWrite: number[]; hostIngress: number[]; hostDelivery: number[]
+  failures: number
+}
 
 test.use({ delayEdits: true })
 
@@ -51,6 +54,7 @@ for (const size of [100_000, 500_000, 1_000_000, 2_000_000]) {
     console.log(JSON.stringify({
       bytes: Buffer.byteLength(source), input: metrics(time), local: metrics(samples.local),
       host: metrics(samples.host), acknowledgement: metrics(samples.edit), checkpointIpc: metrics(samples.checkpointIpc),
+      hostWrite: metrics(samples.hostWrite), hostIngress: metrics(samples.hostIngress), hostDelivery: metrics(samples.hostDelivery),
       hostCpuMs: (after.cpu - before.cpu) / 1000,
       hostRssMiB: (after.rss - before.rss) / 1024 ** 2,
       hostHeapMiB: (after.heapUsed - before.heapUsed) / 1024 ** 2,

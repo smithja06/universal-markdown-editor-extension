@@ -243,6 +243,11 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
         if (!authoritative) clearTimeout(timer)
         reconcile(incoming.state, incoming.edit)
         break
+      case 'accepted': {
+        const edit = inFlight
+        if (edit?.id === incoming.edit.id) reconcile({ ...incoming.state, source: edit.proposal }, { id: edit.id, accepted: true })
+        break
+      }
       case 'recovery':
         if (recoveryContext && (incoming.id !== recoveryContext.id || incoming.scope !== recoveryContext.scope)) break
         recoveryContext = incoming

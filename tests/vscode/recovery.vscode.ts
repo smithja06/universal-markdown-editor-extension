@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFile, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, type Page } from '@playwright/test'
@@ -92,7 +93,7 @@ test.describe('unacknowledged edits', () => {
     await expect(frame.getByRole('textbox', { name: 'Pending Markdown' })).toHaveValue('# Shared Folio draft\n\n  **Keep**\n')
   })
 
-  test('honors native Save and Undo while a disjoint Folio edit is in flight', async ({ desktop }) => {
+  test('honors native Save, Undo, and Redo while a disjoint Folio edit is in flight', async ({ desktop }) => {
     const { page, workspace, command, read } = desktop
     const file = 'native-undo.md'
     const path = join(workspace, file)
@@ -106,12 +107,18 @@ test.describe('unacknowledged edits', () => {
     await editWhileHeld(page)
     await command('open', { file, editor: 'native', column: 2 })
     await command('save')
-    expect(await readFile(path, 'utf8')).toBe('# Shared\r\n\r\n  **Native Keep**\r\n')
+    const native = '# Shared\r\n\r\n  **Native Keep**\r\n'
+    expect(await readFile(path, 'utf8')).toBe(native)
+    await command('undo')
+    await expect.poll(async () => (await read(file)).text).toBe(original)
+    await command('redo')
+    await expect.poll(async () => (await read(file)).text).toBe(native)
     await command('undo')
     await expect.poll(async () => (await read(file)).text).toBe(original)
     await frame.getByRole('heading', { name: 'Shared Folio draft' }).evaluate(() => dispatchEvent(new Event('folio-test-release-edits')))
     await expect.poll(async () => (await read(file)).text).toBe('# Shared Folio draft\r\n\r\n  **Keep**\r\n')
     expect((await read(file)).dirty).toBe(true)
+    expect(await readFile(path, 'utf8')).toBe(native)
   })
 
   test('keeps separate pending drafts from two Folio views of the same file', async ({ desktop }) => {
@@ -193,22 +200,105 @@ test.describe('unacknowledged edits', () => {
   })
 
   test('recovers a compact VS Code backup after an extension-host restart', async ({ desktop }) => {
+    test.setTimeout(120_000)
     const { page, workspace, command, read, restart } = desktop
     const file = 'host-restart.md'
-    const large = original + 'Retain the rest of this Markdown document.\r\n\r\n'.repeat(1_800)
-    await writeFile(join(workspace, file), large)
+    const path = join(workspace, file)
+    const paragraph = 'Retain the rest of this Markdown document. '.repeat(24) + '\r\n\r\n'
+    const large = original + paragraph.repeat(2_000)
+    const draft = large.replace('# Shared', '# Shared Folio draft')
+    const bom = '\uFEFF'
+    await writeFile(path, bom + large)
     await command('open', { file, editor: 'folio' })
-    await editWhileHeld(page, 'folio-test-hold-edits', false)
-    await expect(folio(page).locator('body')).toHaveAttribute('data-folio-test-stored', '2')
-    await expect(folio(page).locator('body')).toHaveAttribute('data-folio-test-packed', '2')
+    const initial = folio(page)
+    await initial.getByRole('button', { name: 'Markdown Source', exact: true }).click({ timeout: 45_000 })
+    const source = initial.getByRole('textbox', { name: 'Markdown source editor' })
+    await source.evaluate(() => {
+      dispatchEvent(new Event('folio-test-hold-edits'))
+      dispatchEvent(new Event('folio-test-disable-local-storage'))
+    })
+    await source.focus()
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowUp' : 'Control+Home')
+    await page.keyboard.press(end)
+    await page.keyboard.insertText(' Folio')
+    await page.keyboard.insertText(' draft')
+    await expect(initial.locator('body')).toHaveAttribute('data-folio-test-stored', '2')
+    await expect(initial.locator('body')).toHaveAttribute('data-folio-test-packed', '2')
+
     await restart('host')
     await command('close')
     await command('open', { file, editor: 'folio' })
     const frame = folio(page)
-    await expect(frame.getByRole('heading', { name: 'Shared', exact: true })).toBeVisible()
+    await expect(frame.getByRole('heading', { name: 'Shared', exact: true })).toBeVisible({ timeout: 45_000 })
     await frame.getByText('View pending Markdown', { exact: true }).click()
-    await expect(frame.getByRole('textbox', { name: 'Pending Markdown' })).toHaveValue(large.replace('# Shared', '# Shared Folio draft').replace(/\r\n/g, '\n'))
+    await expect(frame.getByRole('textbox', { name: 'Pending Markdown' })).toHaveValue(draft.replace(/\r\n/g, '\n'))
+    await frame.getByRole('button', { name: 'Copy pending draft' }).click()
+    const body = frame.locator('body')
+    await expect(body).toHaveAttribute('data-folio-test-copy-result', 'true')
+    const copied = JSON.parse((await body.getAttribute('data-folio-test-copied')) ?? 'null') as string | null
+    expect(copied).not.toBeNull()
+    const digest = (text: string) => createHash('sha256').update(text).digest('hex')
+    expect(digest(copied ?? '')).toBe(digest(bom + draft))
     expect((await read(file)).text).toBe(large)
+    expect(await readFile(path, 'utf8')).toBe(bom + large)
+  })
+
+  test('keeps the newest host backup when an earlier checkpoint and dismissal arrive late', async ({ desktop }) => {
+    const { page, workspace, command, read, restart } = desktop
+    const file = 'stale-checkpoint.md'
+    await writeFile(join(workspace, file), original)
+    await command('open', { file, editor: 'folio' })
+    const body = folio(page).locator('body')
+    await body.evaluate(() => dispatchEvent(new Event('folio-test-capture-checkpoint')))
+    await editWhileHeld(page, 'folio-test-hold-edits', false)
+    await expect(body).toHaveAttribute('data-folio-test-stored', '2')
+    await body.evaluate(() => dispatchEvent(new Event('folio-test-replay-stale-checkpoint')))
+    await expect(body).toHaveAttribute('data-folio-test-stale-dismissed', 'false')
+
+    await restart('host')
+    await command('close')
+    await command('open', { file, editor: 'folio' })
+    const recovered = folio(page)
+    await expect(recovered.getByRole('heading', { name: 'Shared', exact: true })).toBeVisible()
+    await recovered.getByText('View pending Markdown', { exact: true }).click()
+    await expect(recovered.getByRole('textbox', { name: 'Pending Markdown' })).toHaveValue('# Shared Folio draft\n\n  **Keep**\n')
+    expect((await read(file)).text).toBe(original)
+  })
+
+  test('recovers both views after a host crash when each used a different backup', async ({ desktop }) => {
+    const { page, workspace, command, read, restart } = desktop
+    const file = 'host-restart-split.md'
+    const path = join(workspace, file)
+    await writeFile(path, original)
+    await command('open', { file, editor: 'folio', column: 1 })
+    await editWhileHeld(page, 'folio-test-hold-edits', false)
+    await expect(folio(page).locator('body')).toHaveAttribute('data-folio-test-stored', '2')
+
+    await command('open', { file, editor: 'folio', column: 2 })
+    const second = folio(page, 1).getByRole('heading', { name: 'Shared', exact: true })
+    await second.evaluate(() => dispatchEvent(new Event('folio-test-hold-all')))
+    await second.click()
+    await page.keyboard.press(end)
+    await page.keyboard.insertText(' local draft')
+    expect((await read(file)).text).toBe(original)
+
+    await restart('host')
+    await command('closeFolio', { file })
+    await command('open', { file, editor: 'native' })
+    await command('insert', { file, offset: '# Shared'.length, text: ' native' })
+    await command('save')
+    await command('open', { file, editor: 'folio' })
+    const recovered = folio(page)
+    await expect(recovered.getByRole('heading', { name: 'Shared native' })).toBeVisible()
+    const previews = recovered.getByText('View pending Markdown', { exact: true })
+    await expect(previews).toHaveCount(2)
+    for (const preview of await previews.all()) await preview.click()
+    const drafts = await recovered.getByRole('textbox', { name: 'Pending Markdown' }).evaluateAll(areas =>
+      areas.map(area => (area as HTMLTextAreaElement).value))
+    expect(drafts.sort()).toEqual(['# Shared Folio draft\n\n  **Keep**\n', '# Shared local draft\n\n  **Keep**\n'])
+    const native = '# Shared native\r\n\r\n  **Keep**\r\n'
+    expect((await read(file)).text).toBe(native)
+    expect(await readFile(path, 'utf8')).toBe(native)
   })
 
   test('recovers from webview storage after reloading the VS Code window', async ({ desktop }) => {

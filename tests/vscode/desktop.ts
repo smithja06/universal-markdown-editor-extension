@@ -59,12 +59,24 @@ async function stageExtension(extensions: string, delayEdits: boolean) {
   const staged = join(extensions, 'smithja06.folio-markdown-editor-0.1.0')
   const dist = join(staged, 'dist')
   const webview = join(dist, 'webview')
+  const build = process.env.FOLIO_BENCHMARK === '1' && process.env.FOLIO_BENCHMARK_BUILD || 'extension/dist'
   await mkdir(dist, { recursive: true })
   await Promise.all([
     copyFile('extension/package.json', join(staged, 'package.json')),
-    copyFile('extension/dist/extension.cjs', join(dist, 'extension.cjs')),
-    cp('extension/dist/webview', webview, { recursive: true }),
+    copyFile(join(build, 'extension.cjs'), join(dist, 'extension.cjs')),
+    cp(join(build, 'webview'), webview, { recursive: true }),
   ])
+  if (process.env.FOLIO_BENCHMARK === '1') {
+    // Measure inside the staged extension so the host timing doesn't depend on cross-process clocks.
+    const bundle = join(dist, 'extension.cjs')
+    const source = await readFile(bundle, 'utf8')
+    const start = 'async checkpoint(session, view, client, draft) {'
+    const finish = 'generation, stored }, client)'
+    if (!source.includes(start) || !source.includes(finish)) throw new Error('The benchmark checkpoint probe did not match the built extension.')
+    await writeFile(bundle, source
+      .replace(start, start + '\nconst hostCheckpointStarted = performance.now(); const hostReceivedAt = Date.now();')
+      .replace(finish, 'generation, stored, hostReceivedAt, hostRepliedAt: Date.now(), hostWriteMs: performance.now() - hostCheckpointStarted }, client)'))
+  }
   if (!delayEdits) return
   const index = join(webview, 'index.html')
   const html = await readFile(index, 'utf8')

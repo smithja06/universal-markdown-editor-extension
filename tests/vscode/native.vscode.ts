@@ -87,4 +87,57 @@ test.describe('provider-native resources', () => {
     const document = await command<{ text: string }>('read', { file: 'source.md', virtual: 1 })
     expect(document.text).toBe(original)
   })
+
+  test('resolves root-relative paths against the document folder in a multi-root workspace', async ({ desktop }) => {
+    const { page, workspace, command } = desktop
+    const file = 'source.md'
+    const original = '# Provider document\n\n![Provider pixel](/media/pixel.png)\n\n[Provider target](/target.md#L2)\n\n![Across boundary](../../workspace/pixel.png)\n'
+    await mkdir(join(workspace, 'media'))
+    await writeFile(join(workspace, 'media', 'pixel.png'), 'Local decoy')
+    await writeFile(join(workspace, 'target.md'), '# Local decoy\n')
+    await command('addVirtualWorkspace', { markdown: original, pixel })
+    await command('open', { file, editor: 'folio', virtual: 1 })
+    const frame = folio(page)
+    const providerImage = frame.getByRole('img', { name: 'Provider pixel' })
+    await expect(providerImage).toHaveAttribute('src', /^data:image\/png;base64,/)
+    await expect.poll(() => providerImage.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1)
+    const boundaryImage = frame.getByRole('img', { name: 'Across boundary' })
+    await expect(boundaryImage).toBeVisible()
+    expect(await boundaryImage.getAttribute('src')).toBeNull()
+    expect(await command('boundaryReads')).toBe(0)
+    await frame.getByRole('link', { name: 'Provider target' }).click({ modifiers: [modifier as 'Meta' | 'Control'] })
+    await expect.poll(() => command('activeNativeUri')).toBe('folio-test-remote://test-server/project/target.md')
+    await expect.poll(() => command('activeNativeLine')).toBe(1)
+
+    await command('open', { file, editor: 'folio', virtual: 1 })
+    await frame.getByRole('heading', { name: 'Provider document' }).click()
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowRight' : 'End')
+    await page.keyboard.insertText(' edited')
+    const edited = original.replace('Provider document', 'Provider document edited')
+    await expect.poll(async () => (await command<{ text: string }>('read', { file, virtual: 1 })).text).toBe(edited)
+    await command('saveDocument', { file, virtual: 1 })
+    expect(await command('readProviderFile', { file })).toBe(edited)
+  })
+
+  test('reopens a renamed provider document and stops editing its deleted URI', async ({ desktop }) => {
+    const { page, command } = desktop
+    const file = 'source.md'
+    const renamed = 'renamed.md'
+    const original = '# Provider lifecycle\n\n![Provider pixel](../media/pixel.png)\n'
+    await command('addVirtualWorkspace', { markdown: original, pixel })
+    await command('open', { file, editor: 'folio', virtual: 1 })
+    const frame = folio(page)
+    await expect(frame.getByRole('heading', { name: 'Provider lifecycle' })).toBeVisible()
+    await command('rename', { file, to: renamed, virtual: 1 })
+    expect(await command('readProviderFile', { file })).toBe(null)
+    expect(await command('readProviderFile', { file: renamed })).toBe(original)
+    await command('open', { file: renamed, editor: 'folio', virtual: 1 })
+    await expect(frame.getByRole('heading', { name: 'Provider lifecycle' })).toBeVisible()
+    await expect.poll(() => frame.getByRole('img', { name: 'Provider pixel' }).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1)
+
+    await command('deleteFile', { file: renamed, virtual: 1 })
+    expect(await command('readProviderFile', { file: renamed })).toBe(null)
+    await expect.poll(async () => await page.locator('iframe.webview:visible').count() === 0 ||
+      await frame.getByText('File unavailable', { exact: true }).isVisible()).toBe(true)
+  })
 })

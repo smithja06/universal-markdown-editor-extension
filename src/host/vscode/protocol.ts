@@ -1,15 +1,18 @@
 import { isGeneration, isId, isRecord, isRecoveryDraft, isUri, type RecoveryDraft } from './recovery'
 import { isNativeAction, type NativeAction } from './nativeCommands'
 
-export interface DocumentState {
+interface DocumentMetadata {
   uri: string
   title: string
   revision: number
-  source: string
   dirty: boolean
   eol: '\n' | '\r\n'
   bom?: boolean
   available: boolean
+}
+
+export interface DocumentState extends DocumentMetadata {
+  source: string
 }
 
 /** A replacement in LF-normalized text using UTF-16 offsets. */
@@ -34,6 +37,7 @@ export type ClientMessage =
 
 export type HostMessage =
   | { type: 'state'; state: DocumentState; edit?: { id: number; accepted: boolean; message?: string } }
+  | { type: 'accepted'; state: DocumentMetadata; edit: { id: number } }
   | { type: 'error'; message: string }
   | { type: 'recovery'; scope: string; id: string; active: string[]; drafts: RecoveryDraft[]; baseRevision?: number }
   | { type: 'stored'; id: string; generation: number; stored: boolean }
@@ -70,11 +74,15 @@ export function isClientMessage(value: unknown): value is ClientMessage {
   return value.type === 'command' && (value.command === 'save' || value.command === 'undo' || value.command === 'redo')
 }
 
-function isDocumentState(value: unknown): value is DocumentState {
+function isDocumentMetadata(value: unknown): value is DocumentMetadata {
   return record(value) && isUri(value.uri) &&
-    typeof value.title === 'string' && integer(value.revision) && normalized(value.source) &&
+    typeof value.title === 'string' && integer(value.revision) &&
     (value.bom === undefined || typeof value.bom === 'boolean') &&
     typeof value.dirty === 'boolean' && typeof value.available === 'boolean' && (value.eol === '\n' || value.eol === '\r\n')
+}
+
+function isDocumentState(value: unknown): value is DocumentState {
+  return record(value) && normalized(value.source) && isDocumentMetadata(value)
 }
 
 export function isHostMessage(value: unknown): value is HostMessage {
@@ -87,6 +95,8 @@ export function isHostMessage(value: unknown): value is HostMessage {
   if (value.type === 'stored') return isId(value.id) && isGeneration(value.generation) && typeof value.stored === 'boolean'
   if (value.type === 'dismissed') return isId(value.id) && isGeneration(value.generation) && typeof value.dismissed === 'boolean'
   if (value.type === 'copied') return isGeneration(value.id) && typeof value.copied === 'boolean'
+  if (value.type === 'accepted') return record(value.state) && !('source' in value.state) &&
+    isDocumentMetadata(value.state) && value.state.available && record(value.edit) && isGeneration(value.edit.id)
   if (value.type === 'action') return isNativeAction(value.action)
   if (value.type === 'resourceResult') return isGeneration(value.id) && typeof value.ok === 'boolean' &&
     (value.image === undefined || (typeof value.image === 'string' && /^data:image\/(?:png|jpeg|gif|webp|avif|bmp|x-icon);base64,/.test(value.image)))

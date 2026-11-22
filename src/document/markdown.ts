@@ -458,8 +458,44 @@ function writeBlock(node: ProseMirrorNode, references: string): string {
 
 export interface MarkdownWrite { source: string; protectedBoundaries: boolean }
 
+function writeIsolatedText(session: MarkdownSession, document: ProseMirrorNode): string | undefined {
+  const { blocks, source } = session
+  if (blocks.length !== document.childCount || !document.sameMarkup(session.document)) return
+  const index = blocks.findIndex((block, position) => block.node !== document.child(position))
+  if (index < 0) return
+  const block = blocks[index]
+  const node = document.child(index)
+  const before = block.node.firstChild
+  const after = node.firstChild
+  if (!block.node.sameMarkup(node) || block.node.childCount !== 1 || node.childCount !== 1 ||
+    !before?.text || !after?.text || before.marks.length || after.marks.length) return
+
+  const heading = node.type.name === 'heading'
+  if (!heading && node.type.name !== 'paragraph') return
+  // Plain words cannot introduce inline delimiters, a reference definition or a list marker.
+  const plain = heading ? /^[a-z0-9]+(?: +[a-z0-9]+)*[.!?]?$/i : /^[a-z][a-z0-9]*(?: +[a-z0-9]+)*[.!?]?$/i
+  if (!plain.test(before.text) || !plain.test(after.text) ||
+    before.text.trim() !== before.text || after.text.trim() !== after.text) return
+  const prefix = (heading ? /^ {0,3}#{1,6}[ \t]+/ : /^ {0,3}/).exec(block.raw)?.[0]
+  if (prefix === undefined || !block.raw.startsWith(prefix + before.text)) return
+  const suffix = block.raw.slice(prefix.length + before.text.length)
+  if (!(heading ? /^(?:[ \t]+#+)?[ \t]*$/ : /^[ \t]*$/).test(suffix) || /[\r\n]/.test(suffix)) return
+
+  // A blank line keeps the edit independent of surrounding block grammar.
+  const previous = blocks[index - 1] ?? session.frontMatter
+  const next = blocks[index + 1]
+  if (previous && !/\r?\n[ \t]*\r?\n$/.test(source.slice(previous.end, block.start))) return
+  if (next && !/^\r?\n[ \t]*\r?\n/.test(source.slice(block.end, next.start))) return
+  for (let i = index + 1; i < blocks.length; i++) {
+    if (blocks[i].node !== document.child(i)) return
+  }
+  return source.slice(0, block.start) + prefix + after.text + suffix + source.slice(block.end)
+}
+
 export function writeMarkdown(session: MarkdownSession, document: ProseMirrorNode): MarkdownWrite {
   if (document.eq(session.document)) return { source: session.source, protectedBoundaries: false }
+  const localEdit = writeIsolatedText(session, document)
+  if (localEdit !== undefined) return { source: localEdit, protectedBoundaries: false }
   const frontMatter: string = document.attrs.frontMatter ?? ''
   const frontChanged = frontMatter !== session.document.attrs.frontMatter
   if (frontChanged && document.content.eq(session.document.content)) {
