@@ -70,6 +70,31 @@ it('serializes optimistic changes and sends queued native commands after the lat
   expect(client.read().dirty).toBe(false)
 })
 
+it('uses only the matching proposal for source-free acknowledgements during a large typing burst', () => {
+  const { client, sent, state, receive, recover } = connection(createRecoveryJournal(() => localStorage))
+  const large = 'Markdown with **formatting**.\n\n'.repeat(17_000)
+  const first = large + 'a'
+  const suffix = 'abcdefghijklmnopqrstuvwxyz0123456789'.repeat(2)
+  const { uri, title, eol, available } = base
+  recover()
+  state({ source: large })
+  for (let i = 1; i <= suffix.length; i++) client.edit(large + suffix.slice(0, i))
+  expect(sent.filter(message => message.type === 'edit')).toHaveLength(1)
+  const ack = (id: number, revision: number) => receive({ type: 'accepted', state: { uri, title, eol, available, revision, dirty: true }, edit: { id } })
+  ack(2, 2)
+  ack(1, 1)
+  expect(client.read().pending).toBe(true)
+  expect(createRecoveryJournal(() => localStorage).read(scope).map(item => item.source)).toEqual([large + suffix])
+  ack(1, 2)
+  expect(sent.at(-1)).toMatchObject({ type: 'edit', id: 2, revision: 2, change: { from: first.length, to: first.length, text: suffix.slice(1) } })
+  ack(1, 4)
+  expect(client.read().pending).toBe(true)
+  expect(createRecoveryJournal(() => localStorage).read(scope)[0]?.source).toBe(large + suffix)
+  ack(2, 3)
+  expect(client.read()).toMatchObject({ source: large + suffix, dirty: true, pending: false })
+  expect(createRecoveryJournal(() => localStorage).read(scope)).toEqual([])
+})
+
 it('retries a stale proposal against a newer disjoint native edit', () => {
   const { client, sent, state } = connection()
   state()
@@ -91,6 +116,21 @@ it('rebases unsent input when a newer native snapshot arrives before an earlier 
   state({ revision: 2, source: 'ALPHABET\nmiddle\nomega', dirty: true }, { id: 1, accepted: true })
   expect(sent.at(-1)).toEqual({ type: 'edit', id: 2, revision: 3, change: { from: 9, to: 15, text: 'CENTER' } })
   expect(client.read().source).toBe('ALPHABET\nCENTER\nΩ')
+})
+
+it('keeps the deferred native snapshot and the full overlapping draft after a source-free acknowledgement', () => {
+  const { client, state, receive, recover } = connection(createRecoveryJournal(() => localStorage))
+  const { uri, title, eol, available } = base
+  recover()
+  state()
+  client.edit('ALPHA\nmiddle\nomega')
+  const draft = 'ALPHA\nFolio middle\nomega'
+  const native = 'ALPHA\nNative middle\nomega'
+  client.edit(draft)
+  state({ revision: 3, source: native, dirty: true })
+  receive({ type: 'accepted', state: { uri, title, eol, available, revision: 2, dirty: true }, edit: { id: 1 } })
+  expect(client.read()).toMatchObject({ source: native, conflict: draft })
+  expect(createRecoveryJournal(() => localStorage).read(scope)).toMatchObject([{ source: draft, reason: 'conflict', native: { source: native } }])
 })
 
 it('recovers the complete optimistic draft on overlap and requires an explicit discard before editing', () => {
@@ -258,6 +298,24 @@ it('clears an acknowledged host copy even when browser storage is inaccessible',
     state({ revision: 2, source: base.source + ' saved' }, { id: 1, accepted: true })
     expect(sent).toContainEqual({ type: 'dismiss', id: journalId, generation: 1 })
     expect(client.read().recoveryWarning).toBeUndefined()
+  } finally { client.dispose() }
+})
+
+it('keeps a newer unbacked draft pending when an older storage acknowledgement arrives', () => {
+  const journal = createRecoveryJournal(() => { throw new Error('Storage unavailable') })
+  const { client, state, recover, receive } = connection(journal)
+  try {
+    recover()
+    state()
+    client.edit(base.source + ' first')
+    client.edit(base.source + ' first second')
+    receive({ type: 'stored', id: journalId, generation: 1, stored: true })
+    receive({ type: 'stored', id: journalId, generation: 2, stored: false })
+    expect(client.read().recoveryWarning).toBeDefined()
+    expect(client.read()).toMatchObject({ source: base.source + ' first second', pending: true })
+    receive({ type: 'stored', id: journalId, generation: 2, stored: true })
+    expect(client.read().recoveryWarning).toBeUndefined()
+    expect(client.read().pending).toBe(true)
   } finally { client.dispose() }
 })
 

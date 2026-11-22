@@ -26,6 +26,16 @@ it('validates message directions and requires safe revisions and normalized LF s
   expect(isClientMessage({ type: 'edit', id: 1, revision: 2, change: { from: 2, to: Infinity, text: 'text' } })).toBe(false)
 })
 
+it('accepts a source-free acknowledgement only with valid document metadata and an edit ID', () => {
+  const state = { uri: 'file:///notes.md', title: 'notes.md', revision: 2, dirty: true, available: true, eol: '\r\n' }
+  const reply = { type: 'accepted', state, edit: { id: 1 } }
+  expect(isHostMessage(reply)).toBe(true)
+  expect(isHostMessage({ ...reply, edit: { id: 0 } })).toBe(false)
+  expect(isHostMessage({ ...reply, state: { ...state, available: false } })).toBe(false)
+  expect(isHostMessage({ ...reply, state: { ...state, source: 'different text' } })).toBe(false)
+  expect(isHostMessage({ ...reply, type: 'state' })).toBe(false)
+})
+
 it('creates minimal changes in UTF-16 without splitting emoji', () => {
   const before = 'A😀B'
   const after = 'A😃B'
