@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { setTimeout as delay } from 'node:timers/promises'
 import * as vscode from 'vscode'
 import { concurrentWorkspaceImages, connectionMessage, isClientMessage, spliceSource, type ClientMessage, type DocumentState, type HostMessage, type PendingCheckpoint } from '../../src/host/vscode/protocol'
 import { isId, recoveryPrefix, type RecoveryDraft } from '../../src/host/vscode/recovery'
@@ -9,7 +10,10 @@ import { openWorkspaceMarkdown, workspaceImage } from './resources'
 
 const viewType = 'folio.markdown'
 const unavailable = 'This document was moved, deleted, or closed. Reopen it from VS Code to continue.'
+const providerUnavailable = 'The workspace filesystem is temporarily unavailable. Review your pending draft before continuing.'
 const stale = 'The document changed in VS Code before this edit could be applied.'
+const fileVerificationRetryMs = 3_000
+const fileVerificationIntervalMs = 250
 
 type Acknowledgement = Extract<HostMessage, { type: 'state' | 'accepted' }>
 type EditMessage = Extract<ClientMessage, { type: 'edit' }>
@@ -36,6 +40,7 @@ interface Client {
 
 interface Session {
   document: vscode.TextDocument
+  fileBacked: boolean
   state: DocumentState
   views: Set<View>
   operations: Promise<void>
@@ -206,9 +211,10 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
   }
 
   private createSession(document: vscode.TextDocument): Session {
-    const session: Session = { document, state: documentState(document, !document.isClosed), views: new Set(), operations: Promise.resolve(), queued: 0 }
+    const fileBacked = !document.isUntitled && vscode.workspace.fs.isWritableFileSystem(document.uri.scheme) !== undefined
+    const session: Session = { document, fileBacked, state: documentState(document, !document.isClosed), views: new Set(), operations: Promise.resolve(), queued: 0 }
     this.sessions.set(document, session)
-    if (!document.isUntitled && vscode.workspace.fs.isWritableFileSystem(document.uri.scheme) !== undefined) {
+    if (fileBacked) {
       const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.joinPath(document.uri, '..'), '*'))
       const verify = (uri: vscode.Uri) => {
         if (within(document.uri, uri)) void this.verifyFile(session).catch(() => undefined)
@@ -233,22 +239,33 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
     this.sessions.delete(session.document)
   }
 
-  private async verifyFile(session: Session) {
+  private async verifyFile(session: Session, retryWhile?: () => boolean) {
     const { document } = session
-    if (!session.state.available) return false
-    if (document.isClosed) {
-      this.invalidate(session)
-      return false
+    const deadline = retryWhile ? Date.now() + fileVerificationRetryMs : 0
+    while (session.state.available) {
+      if (document.isClosed) {
+        this.invalidate(session)
+        return false
+      }
+      // A provider can temporarily unregister. Keep verifying URIs already known to be file-backed.
+      if (document.isUntitled || (!session.fileBacked && vscode.workspace.fs.isWritableFileSystem(document.uri.scheme) === undefined)) return true
+      try {
+        const file = await vscode.workspace.fs.stat(document.uri)
+        if (!(file.type & vscode.FileType.File)) this.invalidate(session)
+        return session.state.available
+      } catch (error) {
+        if (!(error instanceof vscode.FileSystemError)) throw error
+        if (error.code === 'FileNotFound') {
+          this.invalidate(session)
+          return false
+        }
+        const remaining = deadline - Date.now()
+        if (error.code !== 'Unavailable' || remaining <= 0 || !retryWhile?.()) throw error
+        await delay(Math.min(fileVerificationIntervalMs, remaining))
+        if (!retryWhile() || Date.now() >= deadline) throw error
+      }
     }
-    if (document.isUntitled || vscode.workspace.fs.isWritableFileSystem(document.uri.scheme) === undefined) return true
-    try {
-      const file = await vscode.workspace.fs.stat(document.uri)
-      if (!(file.type & vscode.FileType.File)) this.invalidate(session)
-    } catch (error) {
-      if (!(error instanceof vscode.FileSystemError) || error.code !== 'FileNotFound') throw error
-      this.invalidate(session)
-    }
-    return session.state.available
+    return false
   }
 
   private invalidateResources(resources: readonly vscode.Uri[]) {
@@ -355,7 +372,12 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
     }
     client.lastEdit = id
     if (id <= client.abandoned) return reject('This Folio edit expired before it reached VS Code.')
-    if (!await this.verifyFile(session)) return reject(unavailable)
+    try {
+      if (!await this.verifyFile(session, () => !view.disposed && view.client === client && id > client.abandoned)) return reject(unavailable)
+    } catch (error) {
+      if (error instanceof vscode.FileSystemError && error.code === 'Unavailable') return reject(providerUnavailable)
+      throw error
+    }
     if (id <= client.abandoned || view.client !== client) return reject('This Folio edit expired before it reached VS Code.')
     const { document } = session
     if (!session.state.available || document.isClosed) return reject(unavailable)

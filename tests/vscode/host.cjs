@@ -43,8 +43,8 @@ const operations = {
     const document = await vscode.workspace.openTextDocument(uri(file, virtual))
     return { uri: document.uri.toString(), text: document.getText(), dirty: document.isDirty, version: document.version }
   },
-  async insert({ file, offset, text }) {
-    const document = await vscode.workspace.openTextDocument(uri(file))
+  async insert({ file, offset, text, virtual }) {
+    const document = await vscode.workspace.openTextDocument(uri(file, virtual))
     const edit = new vscode.WorkspaceEdit()
     edit.insert(document.uri, document.positionAt(offset), text)
     if (!await vscode.workspace.applyEdit(edit)) throw new Error('VS Code refused the native test edit.')
@@ -66,6 +66,8 @@ const operations = {
   pixelReads: () => pixelReads,
   unsafeReads: () => unsafeReads,
   boundaryReads: () => boundaryReads,
+  setProviderUnavailable({ unavailable }) { providerUnavailable = !!unavailable },
+  providerStatFailures: () => providerStatFailures,
   async readProviderFile({ file }) {
     try { return Buffer.from(await vscode.workspace.fs.readFile(uri(file, true))).toString('utf8') }
     catch (error) {
@@ -140,12 +142,18 @@ async function run() {
 let pixelReads = 0
 let unsafeReads = 0
 let boundaryReads = 0
+let providerUnavailable = false
+let providerStatFailures = 0
 exports.activate = context => {
   context.subscriptions.push(virtualChanges, vscode.workspace.registerFileSystemProvider(virtualRoot.scheme, {
     onDidChangeFile: virtualChanges.event,
     watch() { return new vscode.Disposable(() => undefined) },
     stat(uri) {
       const entry = virtualFile(uri)
+      if (providerUnavailable) {
+        if (uri.path === '/project/docs/source.md') providerStatFailures++
+        throw vscode.FileSystemError.Unavailable(uri)
+      }
       if (entry === null) return fileStat(vscode.FileType.Directory)
       if (entry === 'symlink') return fileStat(vscode.FileType.File | vscode.FileType.SymbolicLink)
       return fileStat(vscode.FileType.File, entry.length)
@@ -159,6 +167,7 @@ exports.activate = context => {
     },
     readFile(uri) {
       const entry = virtualFile(uri)
+      if (providerUnavailable) throw vscode.FileSystemError.Unavailable(uri)
       if (!entry) throw vscode.FileSystemError.FileIsADirectory(uri)
       if (entry === 'symlink') { unsafeReads++; throw new Error('Folio must never read through this symlink.') }
       if (uri.path.endsWith('/pixel.png')) pixelReads++
@@ -168,6 +177,7 @@ exports.activate = context => {
     },
     writeFile(uri, content) {
       virtualFile(uri)
+      if (providerUnavailable) throw vscode.FileSystemError.Unavailable(uri)
       virtualFiles.set(uri.path, Buffer.from(content))
       virtualChanges.fire([{ type: vscode.FileChangeType.Changed, uri }])
     },

@@ -27,9 +27,9 @@ interface Props {
 export interface SourceRuntime { view: EditorView; apply(value: string | EditorState): void }
 
 export function replaceSource(view: EditorView | null, source: string, origin: 'visual' | 'metadata' | 'search' | 'host', recordHistory = true) {
-  if (!view) return
+  if (!view) return false
   const previous = view.state.doc.toString()
-  if (previous === source) return
+  if (previous === source) return false
   let start = 0
   while (start < previous.length && start < source.length && previous[start] === source[start]) start++
   let beforeEnd = previous.length
@@ -46,6 +46,7 @@ export function replaceSource(view: EditorView | null, source: string, origin: '
       Transaction.userEvent.of('folio.' + origin),
     ],
   })
+  return true
 }
 
 export function SourceEditor(props: Props) {

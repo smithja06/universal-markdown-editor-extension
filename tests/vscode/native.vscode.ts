@@ -64,7 +64,7 @@ test('previews workspace images and opens Markdown links without rewriting relat
 })
 
 test.describe('provider-native resources', () => {
-  test.use({ virtualWorkspace: true })
+  test.use({ virtualWorkspace: true, delayEdits: true })
 
   test('resolves images and Markdown links through a non-file workspace provider', async ({ desktop }) => {
     const { page, command } = desktop
@@ -139,5 +139,84 @@ test.describe('provider-native resources', () => {
     expect(await command('readProviderFile', { file: renamed })).toBe(null)
     await expect.poll(async () => await page.locator('iframe.webview:visible').count() === 0 ||
       await frame.getByText('File unavailable', { exact: true }).isVisible()).toBe(true)
+  })
+
+  test('keeps an edit pending through provider unavailability and saves it after recovery', async ({ desktop }) => {
+    const { page, command } = desktop
+    const file = 'source.md'
+    const virtual = 1
+    const original = '# Provider recovery\r\n\r\n[Next](./target.md)\r\n'
+    await command('addVirtualWorkspace', { markdown: '\uFEFF' + original, pixel })
+    await command('open', { file, editor: 'folio', virtual })
+    const frame = folio(page)
+    const heading = frame.getByRole('heading', { name: 'Provider recovery', exact: true })
+    await heading.click()
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowRight' : 'End')
+    await command('setProviderUnavailable', { unavailable: 1 })
+    await page.keyboard.insertText(' restored')
+    await expect(frame.locator('body')).toHaveAttribute('data-folio-test-stored', '1')
+    await expect.poll(() => command('providerStatFailures')).toBeGreaterThanOrEqual(2)
+    expect(await command<{ text: string }>('read', { file, virtual })).toMatchObject({ text: original, dirty: false })
+    await page.keyboard.press(`${modifier}+s`)
+    await command('setProviderUnavailable', { unavailable: 0 })
+    const expected = original.replace('Provider recovery', 'Provider recovery restored')
+    await expect.poll(() => command('readProviderFile', { file })).toBe('\uFEFF' + expected)
+    await expect(frame.getByText('View pending Markdown', { exact: true })).toHaveCount(0)
+    await frame.getByRole('link', { name: 'Next' }).click({ modifiers: [modifier as 'Meta' | 'Control'] })
+    await expect.poll(() => command('activeNativeUri')).toBe('folio-test-remote://test-server/project/docs/target.md')
+  })
+
+  test('preserves overlapping native and Folio edits during a provider outage', async ({ desktop }) => {
+    const { page, command } = desktop
+    const file = 'source.md'
+    const virtual = 1
+    const original = '# Provider conflict\n'
+    await command('addVirtualWorkspace', { markdown: original, pixel })
+    await command('open', { file, editor: 'folio', virtual, column: 1 })
+    const frame = folio(page)
+    const heading = frame.getByRole('heading', { name: 'Provider conflict', exact: true })
+    await expect(heading).toBeVisible()
+    await command('open', { file, editor: 'native', virtual, column: 2 })
+    await heading.click()
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowRight' : 'End')
+    await command('setProviderUnavailable', { unavailable: 1 })
+    await page.keyboard.insertText(' Folio')
+    await expect.poll(() => command('providerStatFailures')).toBeGreaterThanOrEqual(2)
+    await command('insert', { file, virtual, offset: original.length - 1, text: ' native' })
+    await command('setProviderUnavailable', { unavailable: 0 })
+
+    await frame.getByText('View pending Markdown', { exact: true }).click()
+    await frame.getByText('View VS Code Markdown at recovery', { exact: true }).click()
+    await expect(frame.getByRole('textbox', { name: 'Pending Markdown' })).toHaveValue('# Provider conflict Folio\n')
+    await expect(frame.getByRole('textbox', { name: 'VS Code Markdown at recovery' })).toHaveValue('# Provider conflict native\n')
+    await expect(frame.getByRole('heading', { name: 'Provider conflict native', exact: true })).toBeVisible()
+    const native = await command<{ text: string }>('read', { file, virtual })
+    expect(native.text).toBe('# Provider conflict native\n')
+    expect(await command('readProviderFile', { file })).toBe(original)
+  })
+
+  test('keeps a host-backed draft for review when a provider outage outlasts retries', async ({ desktop }) => {
+    const { page, command } = desktop
+    const file = 'source.md'
+    const virtual = 1
+    const original = '# Provider unavailable\n'
+    await command('addVirtualWorkspace', { markdown: original, pixel })
+    await command('open', { file, editor: 'folio', virtual })
+    const frame = folio(page)
+    const heading = frame.getByRole('heading', { name: 'Provider unavailable', exact: true })
+    await heading.evaluate(() => dispatchEvent(new Event('folio-test-disable-local-storage')))
+    await heading.click()
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowRight' : 'End')
+    await command('setProviderUnavailable', { unavailable: 1 })
+    await page.keyboard.insertText(' draft')
+    await expect(frame.getByText('View pending Markdown', { exact: true })).toBeVisible()
+    await expect(frame.locator('body')).toHaveAttribute('data-folio-test-stored', '2')
+    await command('setProviderUnavailable', { unavailable: 0 })
+    await command('close')
+    await command('open', { file, editor: 'folio', virtual })
+    await expect(heading).toBeVisible()
+    await frame.getByText('View pending Markdown', { exact: true }).click()
+    await expect(frame.getByRole('textbox', { name: 'Pending Markdown' })).toHaveValue('# Provider unavailable draft\n')
+    expect(await command('readProviderFile', { file })).toBe(original)
   })
 })

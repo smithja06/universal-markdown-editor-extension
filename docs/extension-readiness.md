@@ -1,6 +1,6 @@
 # Folio in VS Code
 
-## Phase 6 through Milestone 2.1
+## Phase 6 through Milestone 2.2
 
 The extension registers `folio.markdown` as an optional `CustomTextEditorProvider` for `.md` and `.markdown`. VS Code continues to open Markdown in the native Text Editor by default. **Reopen Editor With → Folio Markdown Editor** opens the shared Folio interface with Visual, Markdown, and Split views. [Custom Editor API](https://code.visualstudio.com/api/extension-guides/custom-editors)
 
@@ -36,13 +36,15 @@ On reopen, Folio displays the current VS Code document alongside any unresolved 
 
 Folio's Save, Undo, and Redo wait for its pending edits to settle. A native save can only save the text VS Code has received. An edit that arrives afterward can make the document dirty again. Undo grouping follows the submitted workspace edits. Coalesced edits that span a wide range can require manual reconciliation even when a finer merge could resolve them.
 
+Milestone 2.2 retries an explicit `FileSystemError.Unavailable` from the pre-edit `workspace.fs.stat` for up to three seconds while the request and connection are still active. A session that opened on a known filesystem still verifies the URI if the provider unregisters. Each retry is a stat, so the host still checks the current document revision immediately before any edit. A missing file invalidates the session. A prolonged outage leaves the draft in recovery for manual reconciliation. Checkpoints continue as input arrives, including during the verification wait. A provider RPC that never returns is subject to the existing client timeout and abandon flow. The public `stat` API provides no cancellation token. [VS Code FileSystem API](https://code.visualstudio.com/api/references/vscode-api#FileSystem)
+
 The synchronous webview journal still serializes each changed snapshot. Storage quotas and unusually large documents can affect typing latency or leave only one recovery copy. Folio warns when the current draft has no confirmed recovery copy. A renderer or system crash before either store records or flushes the draft, simultaneous storage failure, profile-data removal, and input still held by an IME can lose changes. Losing an acknowledgement or interrupting cleanup can leave a recovery copy for text that reached VS Code.
 
 For Visual edits, the shared serializer can replace an isolated plain-text Markdown block while keeping the authored prefix, suffix, and surrounding bytes. It requires a single same-markup block with an unchanged surrounding document and safe blank-line boundaries. Structural changes, markup, and ambiguous cases still use the full round-trip validation. CodeMirror source edits continue to use their exact text. The extension host also reuses normalized native text for repeated operations on the same document version.
 
 ## Typing and checkpoint benchmark
 
-See the [Milestone 2.1 benchmark](extension-benchmarks.md) for sustained Source, Visual, and Split runs, queue timing, and the current compatibility results. The original Milestone 2 figures below retain their burst workload and comparison baseline.
+See the [extension benchmarks](extension-benchmarks.md) for sustained Source, Visual, and Split runs, queue timing, and the Milestone 2.2 comparison. The original Milestone 2 figures below retain their burst workload and comparison baseline.
 
 The benchmark ran on Windows 11 with desktop VS Code 1.147.0 and one worker on an AMD Ryzen AI 9 HX 370. Each size opened in an isolated VS Code profile, warmed up the Markdown Source pane, then issued 64 individual keystrokes without waiting for the preceding edit to be acknowledged. The baseline was the approved Milestone 1.1 tree. The final measurements use the compact host backup.
 
@@ -65,6 +67,28 @@ The provider rewrites trusted, built assets with `asWebviewUri`, restricts `loca
 
 Run `npm run test:extension` with desktop VS Code installed. `FOLIO_VSCODE_EXECUTABLE` can point to the application binary. The harness installs the production build into an isolated desktop profile and uses real buffer, panel, file, window, and extension-host operations. Its recovery fixtures can independently hold edit messages, block host checkpoints, or disable webview storage writes. The standalone commands remain `npm test`, `npm run build`, and `npm run test:e2e`.
 
-Windows desktop coverage uses a real VS Code window. The multi-root fixture combines a local workspace folder with a synthetic non-file provider with its own authority and root. macOS, Linux, and real VS Code Remote remain unverified. Milestone 2 fixed an invalid-regex worker startup timeout reproduced in parallel Chromium. Syntax validation happens before spawning the worker, and the matching timer starts once the worker is ready.
+Windows desktop coverage uses a real VS Code window. The multi-root fixture combines a local workspace folder with a synthetic non-file provider with its own authority and root. It exercises provider-native resource reads, exact saves, rename and deletion, and temporary and prolonged `Unavailable` failures. It verifies that a short outage preserves a pending edit and its queued Save, an overlapping native edit preserves both versions, and a prolonged outage leaves a host-backed draft on reopen. The separate restart cases kill the actual Windows extension host in a local workspace. Native macOS, native Linux, and real VS Code Remote remain unverified.
 
-Before workspace attachment insertion, validate the write and recovery lifecycle in at least one real VS Code Remote workspace and confirm native keyboard and resource behavior on macOS and Linux. The synthetic provider exercises URI and filesystem APIs on Windows and cannot establish remote transport, reconnect, or authority lifecycle behavior.
+### Milestone 2.2 verification
+
+Windows 11 Pro 25H2 x64 (26200.9974) ran desktop VS Code 1.147.0 (`8a14f0cc1b08d531eb83255ea3764ae22aa932b5`) and standalone Chromium 159.0.8154.6 with Node 24.13.0 and npm 11.21.0. WSL was absent, no Docker runtime or SSH host was configured, and no native macOS or Linux desktop was available.
+
+| Check | Result |
+| --- | --- |
+| `npm run lint` | Passed |
+| `npm test` | 100 passed across 13 files |
+| `npm run build` | Standalone TypeScript and production build passed |
+| `npm run test:extension` | Extension TypeScript and production build passed. All 26 desktop tests passed, including three new provider outage cases. |
+| `npm run test:e2e -- --workers=12` | All 60 standalone Chromium tests passed |
+| `npm run package:extension` | Passed. The 181-entry VSIX contains the opt-in manifest, extension host, webview entry, and referenced assets. |
+| Benchmark suite | Both revisions passed 19 standard and four longer cases. Measurements and thresholds are in the [benchmark report](extension-benchmarks.md). |
+
+### Native and Remote validation runbook
+
+On a native macOS or Linux desktop, run `npm ci` and `npm run test:extension` against a desktop VS Code installation. Set `FOLIO_VSCODE_EXECUTABLE` if the executable is outside the harness's default locations. Record the operating system version, architecture, VS Code build and client keyboard layout. On that same desktop, use **Reopen Editor With** to check both `.md` and `.markdown`, reopen to the native editor, and exercise the mode shortcuts with focus in each pane. Verify light, dark and high-contrast themes, UTF-8 BOM/CRLF bytes after a Save, links and images, a second Folio view, and rename and deletion. The automated suite covers the buffer, save, recovery and host-restart behavior.
+
+For a real Remote run, install the packaged VSIX in the Remote workspace and use **Developer: Show Running Extensions** to record its extension host alongside the local client and server versions. Open a two-root Remote workspace with the same filenames in each root, a nested Markdown file, an image in its root, and a duplicate image in the other root. Open Folio, follow a relative and a root-relative link, check that the image and root stay isolated, and compare bytes on the remote filesystem after a Folio edit and native Save. Open a second Folio view and a native view, then repeat with disjoint and overlapping changes. Rename and delete the document while Folio is open and check that any recovery draft retains the original URI.
+
+On a disposable remote fixture, interrupt the real connection with an edit awaiting acknowledgement, reconnect, then separately restart the remote extension host. Record whether the original client survived and which copy recovered each pending generation. Confirm that committed content matches VS Code and the saved bytes, that unresolved drafts are offered for manual recovery, and that a recreated file at the same URI receives no automatic edits. Repeat provider-backed reads and saves after reconnect. Synthetic provider fault injection is useful for reproducing filesystem errors while the desktop extension host stays alive. Real Remote validation exercises the transport and extension-host lifecycle.
+
+Review the [workspace image insertion design and test plan](extension-attachments.md) before starting attachment work. The remaining qualification work is native macOS and Linux and at least one real Remote workspace, including its write and recovery lifecycle.

@@ -18,6 +18,7 @@ function stats(samples: number[]) {
 }
 
 interface HostMetrics { rss: number; heapUsed: number; cpu: number }
+interface MemorySample { keys: number; hostRssMiB: number; hostHeapMiB: number; webHeapMiB: number | null }
 interface Samples {
   local: number[]; creation: number[]; host: number[]; edit: number[]; checkpointIpc: number[]; hostWrite: number[]
   hostIngress: number[]; hostDelivery: number[]; hostFailures: number; localFailures: number; pending: number
@@ -33,7 +34,8 @@ for (const size of sizes) {
       const file = 'sustained.md'
       const path = join(workspace, file)
       const defaultCount = mode === 'Markdown Source' || size === 100_000 ? keystrokes.length : size <= 500_000 ? 48 : size <= 2_000_000 ? 32 : 16
-      const input = process.env.FOLIO_BENCHMARK_LONG === '1' ? keystrokes.repeat(3) : keystrokes.slice(0, defaultCount)
+      const long = process.env.FOLIO_BENCHMARK_LONG === '1'
+      const input = long ? keystrokes.repeat(3) : keystrokes.slice(0, defaultCount)
       const header = '# Benchmark'
       const ending = '\n'
       const bodyBytes = size - header.length - ending.length - 2
@@ -68,11 +70,18 @@ for (const size of sizes) {
       const before = await command<HostMetrics>('hostMetrics')
       await editor.evaluate(() => dispatchEvent(new Event('folio-benchmark-start')))
       const time: number[] = []
+      const memorySamples: MemorySample[] = []
       const started = performance.now()
       for (const character of input) {
         const start = performance.now()
         await page.keyboard.insertText(character)
         time.push(performance.now() - start)
+        if (long && time.length % keystrokes.length === 0 && time.length < input.length) {
+          const webHeap = await memory()
+          const { rss, heapUsed } = await command<HostMetrics>('hostMetrics')
+          memorySamples.push({ keys: time.length, hostRssMiB: rss / 1024 ** 2, hostHeapMiB: heapUsed / 1024 ** 2,
+            webHeapMiB: webHeap === null ? null : webHeap / 1024 ** 2 })
+        }
         const remaining = interval - (performance.now() - start)
         if (remaining > 0) await delay(remaining)
       }
@@ -109,10 +118,14 @@ for (const size of sizes) {
         hostHeapBeforeMiB: before.heapUsed / 1024 ** 2, hostHeapAfterMiB: after.heapUsed / 1024 ** 2,
         webHeapBeforeMiB: webHeapBefore === null ? null : webHeapBefore / 1024 ** 2,
         webHeapAfterMiB: webHeapAfter === null ? null : webHeapAfter / 1024 ** 2,
+        ...(long ? { memorySamples } : {}),
       }
       console.log('FOLIO_SUSTAINED ' + JSON.stringify(result))
       expect(samples.edit.length).toBeGreaterThan(0)
       expect(samples.hostFailures).toBe(0)
+      expect(samples.localFailures).toBe(0)
+      expect(samples.local).toHaveLength(input.length)
+      expect(samples.host).toHaveLength(input.length)
       expect(saved, 'autosave writes the exact accumulated Markdown').toBe(true)
     })
   }
