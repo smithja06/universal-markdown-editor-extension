@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, type Page } from '@playwright/test'
 import { test } from './desktop'
@@ -68,6 +68,67 @@ test('previews workspace images and opens Markdown links without rewriting relat
   await frame.locator('.md-link').filter({ hasText: '/target.md#detail-1' }).click({ modifiers: [modifier as 'Meta' | 'Control'] })
   await expect.poll(() => command('activeNativeUri')).toBe(uri)
 })
+
+for (const mode of ['Visual Editor', 'Markdown Source', 'Split Editor']) {
+  test(`inserts a reference to an existing workspace image in ${mode}`, async ({ desktop }) => {
+    const { page, workspace, command, read } = desktop
+    const file = 'image-reference.markdown'
+    const assetDirectory = join(workspace, 'media')
+    const assetName = 'café #%(draft).png'
+    const assetPath = join(assetDirectory, assetName)
+    const assetBytes = Buffer.from(pixel, 'base64')
+    const reference = './media/caf%C3%A9%20%23%25%28draft%29.png'
+    const image = `![Workspace illustration](${reference})`
+    const original = '# Image reference\r\n\r\nA  *word* stays.\r\n\r\nFigure:\r\n'
+    const edited = original.replace('Figure:', 'Figure:' + image)
+    await mkdir(assetDirectory)
+    await writeFile(assetPath, assetBytes)
+    await writeFile(join(workspace, file), '\uFEFF' + original)
+    await command('open', { file, editor: 'folio' })
+    const frame = folio(page)
+    const visual = frame.getByRole('textbox', { name: 'Visual document editor' })
+    const source = frame.getByRole('textbox', { name: 'Markdown source editor' })
+    const modeButton = (name: string) => frame.getByRole('button', { name, exact: true })
+    const endOfLine = process.platform === 'darwin' ? 'Meta+ArrowRight' : 'End'
+    await expect(visual.getByRole('heading', { name: 'Image reference' })).toBeVisible()
+    if (mode !== 'Visual Editor') await modeButton(mode).click()
+
+    if (mode === 'Markdown Source') {
+      await source.getByText('Figure:', { exact: true }).click()
+      await page.keyboard.press(endOfLine)
+      await page.keyboard.insertText(image)
+    } else {
+      await visual.getByText('Figure:', { exact: true }).click()
+      await page.keyboard.press(endOfLine)
+      await frame.getByRole('button', { name: 'Insert content', exact: true }).click()
+      await frame.getByRole('menuitem', { name: 'Image or image caption' }).click()
+      const dialog = frame.getByRole('dialog', { name: 'Insert image' })
+      await dialog.getByLabel('Image URL').fill(reference)
+      await dialog.getByLabel('Alternative text').fill('Workspace illustration')
+      await expect(dialog.getByRole('button', { name: 'Choose a local image' })).toHaveCount(0)
+      if (mode === 'Split Editor') await dialog.getByLabel('Alternative text').press('Enter')
+      else await dialog.getByRole('button', { name: 'Insert', exact: true }).click()
+      await expect(dialog).toBeHidden()
+    }
+
+    await expect.poll(async () => (await read(file)).text).toBe(edited)
+    if (mode === 'Split Editor') await expect(source).toContainText(reference)
+    if (mode === 'Markdown Source') await modeButton('Split Editor').click()
+    const preview = visual.getByRole('img', { name: 'Workspace illustration' })
+    await expect(preview).toHaveAttribute('src', `data:image/png;base64,${pixel}`)
+    await expect.poll(() => preview.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1)
+
+    await command('undo')
+    await expect.poll(async () => (await read(file)).text).toBe(original)
+    expect(await readFile(assetPath)).toEqual(assetBytes)
+    await command('redo')
+    await expect.poll(async () => (await read(file)).text).toBe(edited)
+    await command('saveDocument', { file })
+    expect(await readFile(join(workspace, file))).toEqual(Buffer.from('\uFEFF' + edited))
+    expect(await readFile(assetPath)).toEqual(assetBytes)
+    expect(await readdir(assetDirectory)).toEqual([assetName])
+  })
+}
 
 test.describe('provider-native resources', () => {
   test.use({ virtualWorkspace: true, delayEdits: true })

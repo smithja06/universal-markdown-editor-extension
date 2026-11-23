@@ -11,6 +11,20 @@
 
 Use [the attachment qualification decision](extension-attachments.md#milestone-23-qualification-decision) for filesystem guarantees and [the benchmarks](extension-benchmarks.md) for performance. Report results per OS, VS Code build, transport, and backing filesystem.
 
+## Milestone 2.4 continuation coverage
+
+| Environment | Existing image references | Automatic attachment writes |
+| --- | --- | --- |
+| Windows 11 Pro x64, local NTFS | Desktop coverage exercises a local raster placed in the workspace and the normal Markdown save path. | Disabled. The strict Node and native probes reproduce disqualifying cases. |
+| Synthetic non-file provider on Windows | Desktop coverage exercises preview, encoded paths, exact saves, and root and authority boundaries. | Disabled. Its injected faults demonstrate API limitations and ambiguous outcomes. |
+| Other Windows filesystems, UNC and network shares | No separate qualification on these volumes. | Disabled. |
+| Native macOS and Linux | Desktop and platform-specific read behavior remain unverified. | Disabled. |
+| Generic and virtual providers, real VS Code Remote | Actual provider and transport behavior require qualification. | Disabled. |
+
+Existing workspace image preview is subject to the resolver's read boundary and the provider's behavior. A successful preview, a writable `file:` workspace, and VS Code Workspace Trust do not qualify an attachment destination. See the [architecture decision](extension-attachments.md#milestone-24-architecture-decision).
+
+All 32 desktop cases passed on VS Code 1.147.0. Three new local cases checked the actual image reference insertion flow in Visual, Source, and Split, including sandboxed dialog submission, preview bytes, native Save and Undo/Redo, and exact BOM/CRLF Markdown. The user-placed asset bytes and asset directory entries stayed intact. These cases exercise Markdown editing and resource reads.
+
 ## Milestone 2.4 local filesystem probes
 
 The native probe was run on Windows 11 Pro 25H2 x64 (26200.9974), NTFS, with Node 24.13.0 for the Node probes. Use the original checkout and keep the test directories disposable. The fixture deliberately tests behaviors that disqualify an attachment backend. A passing probe reproduces the recorded behavior.
@@ -24,6 +38,8 @@ powershell.exe -NoProfile -File tests/vscode/attachment-ntfs.ps1
 ```
 
 The native PowerShell probe requires Windows x64 and an NTFS checkout. It writes only inside a disposable test fixture. It checks ordinary directory rename denial while handles are held, a junction opened without traversal, file identity, non-replacement of exact and case-equivalent names, and cleanup by the live stage handle. It also tests that the same native no-overwrite operation permits a canonically equivalent spelling. See the [Milestone 2.4 decision](extension-attachments.md#milestone-24-qualification-result) before adopting any of these primitives in a production backend.
+
+The continuation passed all 44 lexical and strict filesystem cases and the native script. The Node cases reproduced redirected staging and publication after parent replacement, deletion of a replacement after an earlier identity check, and publication beside a normalization-equivalent late arrival. The native script checked a pre-existing NFD name against an NFC candidate and also admitted both. The run did not qualify a full ancestor chain, in-place reparse mutation protection, or ownership after handle loss.
 
 ## Disposable fixture
 

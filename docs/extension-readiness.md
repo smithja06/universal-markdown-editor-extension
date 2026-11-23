@@ -1,6 +1,6 @@
 # Folio in VS Code
 
-## Phase 6 through Milestone 2.4 preparation
+## Phase 6 through the Milestone 2.4 decision
 
 The extension registers `folio.markdown` as an optional `CustomTextEditorProvider` for `.md` and `.markdown`. VS Code continues to open Markdown in the native Text Editor by default. **Reopen Editor With → Folio Markdown Editor** opens the shared Folio interface with Visual, Markdown, and Split views. [Custom Editor API](https://code.visualstudio.com/api/extension-guides/custom-editors)
 
@@ -87,8 +87,8 @@ Windows 11 Pro 25H2 x64 (26200.9974) ran desktop VS Code 1.147.0 (`8a14f0cc1b08d
 
 The Windows desktop suite covers extension activation, native commands, editing modes, theme integration, exact saves, rename and delete, pending-edit recovery, and a real local extension-host restart. The added synthetic-provider cases pin down the `WorkspaceEdit.createFile` race boundary, concurrent no-overwrite rename behavior for the test provider, and failures after partial writes or publication. A provider-backed `.markdown` case verifies image loading with an encoded Unicode name and an exact BOM/CRLF save. See the [platform coverage and runbooks](extension-qualification.md).
 
-### Milestone 2.4 preparation
+### Milestone 2.4 attachment status
 
-VS Code hides **Image from file** and does not render the local upload input. The existing image reference dialog, workspace previews, and the standalone file picker remain available. Native synchronization, BOM and line-ending fidelity, Save, Undo/Redo, and the two draft recovery channels continue to use the existing paths.
+VS Code supports references to existing workspace images. Place the raster file in the workspace, then use **Insert content → Image or image caption** in Visual or the Visual pane of Split, or write the relative Markdown reference in Source. The dialog now applies by button click or Enter inside the existing webview sandbox, where native form submission is blocked. Visual and Split preview supported images. Native Save persists the Markdown, and Undo/Redo affects the reference without touching the image. Standalone Folio still offers **Image from file** and embeds the bytes.
 
-Local insertion remains disabled. Filesystem probes show that path-based publication and unlink can act on a replaced entry. The native NTFS probe demonstrates handle-relative staging and publication in a disposable fixture, but the filesystem admits normalization-equivalent names and the production containment and recovery requirements remain open. Generic, virtual, and real Remote providers have no qualified write backend. The [attachment design](extension-attachments.md#milestone-24-qualification-result) records the evidence and outstanding work. The [project handoff](PROJECT_HANDOFF.md) records final verification and the next implementation stage.
+Milestone 2.4 remains incomplete. Automatic image placement and its upload picker are disabled for every filesystem and provider. The continuation selected reference-only insertion after comparing the handle-anchored NTFS probe, an independently enforced destination, and the existing reference flow. NTFS still admits normalization-equivalent names, and containment from a trusted volume root and post-restart ownership remain unqualified. The existing two Markdown recovery channels cover reference edits. There is no asset-operation recovery because Folio does not stage or publish assets. [Architecture and next milestone](extension-attachments.md#milestone-24-architecture-decision) [Verification and handoff](PROJECT_HANDOFF.md)
