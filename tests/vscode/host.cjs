@@ -23,7 +23,7 @@ function virtualFile(uri) {
 }
 
 function uri(file, virtual = false) {
-  if (typeof file !== 'string' || !/^[a-z0-9-]+\.(md|markdown)$/.test(file)) throw new Error('Invalid test document name.')
+  if (typeof file !== 'string' || !/^(?:[a-z0-9-]+\/)*[a-z0-9-]+\.(md|markdown)$/.test(file)) throw new Error('Invalid test document name.')
   return vscode.Uri.joinPath(virtual ? vscode.Uri.joinPath(virtualRoot, 'docs') : vscode.workspace.workspaceFolders[0].uri, file)
 }
 

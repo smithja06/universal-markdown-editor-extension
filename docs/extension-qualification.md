@@ -25,6 +25,16 @@ Existing workspace image preview is subject to the resolver's read boundary and 
 
 All 32 desktop cases passed on VS Code 1.147.0. Three new local cases checked the actual image reference insertion flow in Visual, Source, and Split, including sandboxed dialog submission, preview bytes, native Save and Undo/Redo, and exact BOM/CRLF Markdown. The user-placed asset bytes and asset directory entries stayed intact. These cases exercise Markdown editing and resource reads.
 
+## Milestone 2.5 picker coverage
+
+| Workspace | Picker coverage |
+| --- | --- |
+| Local Windows drive-letter `file:` workspace on fixed NTFS | Supported. Verified on Windows 11 Pro 25H2 x64 (26200.9974) and VS Code 1.147.0, with the real extension host and VS Code's built-in Simple File Dialog. An image can be chosen from the originating folder in a multi-root window. |
+| Other Windows volume types, UNC and mapped network drives, virtual and non-file providers | Browse is unavailable. The synthetic provider fixture verifies the browse gate and existing manual-reference preview. |
+| macOS, Linux, and real VS Code Remote | Browse is unavailable. These hosts have no Milestone 2.5 picker qualification. |
+
+All 43 Windows desktop tests passed, including 11 picker cases. They drive the real picker callback in Visual, Source, and both Split panes, then check exact BOM/CRLF Markdown and authored list markers, native Save and Undo/Redo, decoded previews, unchanged asset bytes and directory entries, cancellation, and two Folio views. Rejection cases include outside paths, a separate local workspace root, a junction into that root, SVG, invalid or truncated raster content, oversized raster content, operating-system read-only Markdown, a file changed or removed after selection, and stale native revisions even after Undo restores identical text. The workbench variant of the file dialog is automated. The OS-native dialog presentation has no separate automation coverage. [Implementation and read boundary](extension-attachments.md#milestone-25-reference-only-picker)
+
 ## Milestone 2.4 local filesystem probes
 
 The native probe was run on Windows 11 Pro 25H2 x64 (26200.9974), NTFS, with Node 24.13.0 for the Node probes. Use the original checkout and keep the test directories disposable. The fixture deliberately tests behaviors that disqualify an attachment backend. A passing probe reproduces the recorded behavior.

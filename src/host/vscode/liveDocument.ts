@@ -51,7 +51,7 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
     const optimistic = available && conflict === undefined
     const source = optimistic ? desired : nativeSource
     const next: LiveDocumentSnapshot = {
-      id: authoritative?.uri ?? '', title: authoritative?.title ?? '', source, lineEnding: authoritative?.eol ?? '\n',
+      id: authoritative?.uri ?? '', title: authoritative?.title ?? '', source, revision: authoritative?.revision, lineEnding: authoritative?.eol ?? '\n',
       available, dirty: !!authoritative?.dirty || source !== nativeSource,
       pending: authoritative ? optimistic && (!!inFlight || source !== nativeSource) : message === undefined,
       conflict, message, recovery: archived, recoveryWarning,
