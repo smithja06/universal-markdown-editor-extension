@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState } from 'react'
 import type { Editor } from '@tiptap/core'
 import { NodeSelection } from '@tiptap/pm/state'
 import { DiagramPreview } from '../editor/nodeViews'
@@ -41,8 +41,8 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
   const [header, setHeader] = useState(true)
   const [error, setError] = useState('')
 
-  function submit(event: FormEvent) {
-    event.preventDefault()
+  function submit(form: HTMLFormElement | null) {
+    if (!form?.reportValidity()) return
     const input = value.trim()
     const command = editor.chain().focus()
     if (request.position !== undefined) command.setNodeSelection(request.position)
@@ -84,7 +84,13 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
 
   const setBounded = (value: string, update: (n: number) => void) => update(Math.min(20, Math.max(1, Number(value) || 1)))
   return <Modal title={labels[name]} close={close} wide={name === 'mermaid'}>
-    <form onSubmit={submit} className="dialog-form">
+    <form className="dialog-form" onSubmit={event => event.preventDefault()} onKeyDown={event => {
+      // VS Code's webview sandbox can block the native submit event.
+      if (event.key !== 'Enter' || event.nativeEvent.isComposing ||
+          !(event.target instanceof HTMLInputElement) || event.target.type === 'checkbox') return
+      event.preventDefault()
+      submit(event.currentTarget)
+    }}>
       {name === 'table' && <>
         <div className="table-picker" role="group" aria-label="Table size grid">{Array.from({ length: 6 }, (_, row) => Array.from({ length: 8 }, (_, column) =>
           <button key={row + '-' + column} type="button" tabIndex={-1} className={row < rows && column < columns ? 'selected' : ''} title={(row + 1) + ' rows by ' + (column + 1) + ' columns'} aria-label={(row + 1) + ' rows by ' + (column + 1) + ' columns'} onMouseEnter={() => { setRows(row + 1); setColumns(column + 1) }} onClick={() => { setRows(row + 1); setColumns(column + 1) }} />
@@ -118,7 +124,7 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
       <div className="dialog-actions">
         {name === 'link' && wasLink && <button type="button" className="danger-button" onClick={() => { editor.chain().focus().extendMarkRange('link').unsetLink().run(); close() }}>Remove link</button>}
         <button type="button" className="secondary-button" onClick={close}>Cancel</button>
-        <button type="submit" className="primary-button">{request.position !== undefined || isImage && name === 'image' || wasLink && name === 'link' ? 'Apply' : 'Insert'}</button>
+        <button type="button" className="primary-button" onClick={event => submit(event.currentTarget.form)}>{request.position !== undefined || isImage && name === 'image' || wasLink && name === 'link' ? 'Apply' : 'Insert'}</button>
       </div>
     </form>
   </Modal>

@@ -202,7 +202,7 @@ export default function App({ host }: { host: FolioHost }) {
     })),
     { label: '', divider: true },
     { label: 'Image or image caption', icon: <ImagePlus size={16} />, run: insert('image') },
-    { label: 'Image from file', icon: <Upload size={16} />, run: () => imageInput.current?.click() },
+    ...(!liveDocument ? [{ label: 'Image from file', icon: <Upload size={16} />, run: () => imageInput.current?.click() }] : []),
     { label: 'Emoji', icon: <Smile size={16} />, run: () => setDialog('emoji') },
     { label: 'Hyperlink', icon: <Link2 size={16} />, run: () => openLink() },
     { label: 'Media link', icon: <ArrowUpRight size={16} />, run: () => openLink('https://') },
@@ -616,7 +616,7 @@ export default function App({ host }: { host: FolioHost }) {
       </div>
     </footer>
     <input ref={fileInput} type="file" accept=".md,.markdown,text/markdown" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void doc.importFile(file); event.target.value = '' }} />
-    <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/avif,image/bmp,image/x-icon" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void addImage(file); event.target.value = '' }} />
+    {!liveDocument && <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/avif,image/bmp,image/x-icon" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void addImage(file); event.target.value = '' }} />}
     {request && editor && <InsertDialog request={request} editor={editor} anchors={doc.info.outline} close={() => setRequest(null)} chooseLocalImage={liveDocument ? undefined : () => imageInput.current?.click()} />}
     {palette && <CommandPalette key={palette} entries={paletteEntries()} recent={recentCommands} scope={palette} run={runPalette} close={() => setPalette(null)} />}
     {dialog === 'shortcuts' && <Modal title="Keyboard shortcuts" close={() => setDialog(null)}><dl className="shortcuts">{shortcutRows.map(([label, keys]) => <div key={label}><dt>{label}</dt><dd><kbd>{keys}</kbd></dd></div>)}</dl></Modal>}

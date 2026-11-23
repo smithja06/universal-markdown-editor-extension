@@ -1,5 +1,55 @@
 # Folio Phase 6 extension benchmarks
 
+## Milestone 2.4 continuation
+
+The continuation reran the preparation workload on Windows 11 Pro 25H2 x64 (26200.9974), VS Code 1.147.0, and Node 24.13.0. Each of the three fresh profiles opened a 5,000,000-byte document in Source and typed 384 keys at a target cadence of 75 ms. Each run recorded 384 browser journals and 384 host checkpoint replies, zero storage failures, and byte-exact autosave.
+
+| 5 MB Source measurement | 2.3 median | 2.4 preparation median | 2.4 continuation median | Continuation runs |
+| --- | ---: | ---: | ---: | ---: |
+| Typing p95 (ms) | 40.88 | 42.13 | 47.10 | 47.10 / 45.43 / 93.10 |
+| Checkpoint creation p95 (ms) | 25.10 | 26.00 | 29.40 | 29.40 / 28.00 / 66.20 |
+| Host checkpoint acknowledgement p95 (ms) | 19.50 | 20.20 | 22.30 | 22.30 / 21.90 / 2,864.80 |
+| Initial Visual ready (s) | 3.11 | 3.60 | 3.35 | 3.33 / 3.35 / 3.48 |
+| Switch to Source (s) | 0.68 | 0.17 | 0.78 | 0.78 / 0.72 / 1.42 |
+| Exact autosave (s) | 1.17 | 1.18 | 1.22 | 1.19 / 1.22 / 1.25 |
+
+The third run exceeded the 2 s checkpoint acknowledgement threshold. Host handling reached 17.39 ms p95 and reply delivery reached 2,859 ms p95 in that run. The median of the three runs stayed below every investigation threshold. The comparison uses historical sessions from the same benchmark and does not isolate the cause of timing differences. It measures typing and draft recovery, with the image dialog closed and automatic uploads disabled.
+
+The disposal run passed all 16 two-view cycles and found zero remaining webview iframes after each close. The workbench and extension-host JS heap samples were collected after garbage collection.
+
+| Measurement (MiB) | 2.4 preparation warm → 16 cycles | Continuation warm | Cycle 4 | Cycle 8 | Cycle 12 | Cycle 16 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Extension-host JS heap | 49.84 → 50.45 | 49.63 | 50.14 | 50.22 | 50.24 | 50.25 |
+| Extension-host RSS | 223.63 → 225.32 | 223.79 | 224.49 | 225.02 | 224.97 | 223.52 |
+| Workbench renderer JS heap | 67.52 → 70.59 | 67.15 | 69.29 | 69.98 | 70.37 | 70.59 |
+
+From cycle 12 to 16, extension-host JS heap grew by 0.01 MiB and workbench JS heap grew by 0.22 MiB. The probe samples short-lived view disposal, with long-running retention and separate webview renderer heaps outside its coverage. Reproduce both workloads using the [handoff commands](PROJECT_HANDOFF.md#verification).
+
+## Milestone 2.4 preparation
+
+The Windows 11 Pro 25H2 x64 (26200.9974) run used VS Code 1.147.0 and Node 24.13.0. It reused the harness below with three fresh profiles, 5,000,000-byte Markdown Source documents, 384 keys per run, and a 75 ms target cadence. Each run recorded 384 browser journals and 384 host replies, zero storage failures, and byte-exact autosave. The 2.3 column uses the earlier recorded runs. This is a cross-session comparison against historical results.
+
+| 5 MB Source measurement | 2.3 median of three | 2.4 median of three |
+| --- | ---: | ---: |
+| Typing p95 | 40.88 ms | 42.13 ms |
+| Checkpoint creation p95 | 25.10 ms | 26.00 ms |
+| Host checkpoint acknowledgement p95 | 19.50 ms | 20.20 ms |
+| Initial Visual ready | 3.11 s | 3.60 s |
+| Switch to Source | 0.68 s | 0.17 s |
+| Exact autosave | 1.17 s | 1.18 s |
+
+The 2.4 range was 41.15–54.22 ms for typing p95, 25.30–32.50 ms for checkpoint creation p95, and 19.90–26.90 ms for acknowledgement p95. All observations stayed below the investigation thresholds. This workload measures the editor and draft recovery. The upload feature is disabled.
+
+The repeated-view run passed all 16 disposal cycles with zero remaining webview iframes after each close. Each cycle opened a roughly 1 MB document in two views. The host JS heap and workbench heap were sampled after garbage collection, and RSS was recorded separately.
+
+| Measurement (MiB) | 2.3 warm → 16 cycles | 2.4 warm → 16 cycles |
+| --- | ---: | ---: |
+| Extension-host JS heap | 49.63 → 50.21 | 49.84 → 50.45 |
+| Extension-host RSS | 221.16 → 222.34 | 223.63 → 225.32 |
+| Workbench renderer JS heap | 68.06 → 70.62 | 67.52 → 70.59 |
+
+From cycle 12 to 16, the 2.4 host JS heap grew by 0.04 MiB and the workbench JS heap grew by 0.16 MiB. This run samples short-lived view disposal. Long-running retention and separate webview renderer heaps remain unmeasured.
+
 ## Milestone 2.3 qualification
 
 Windows 11 Pro 25H2 x64 (26200.9974), VS Code 1.147.0, AMD Ryzen AI 9 HX 370, and Node 24.13.0. The latest Milestone 2.2 checkpoint (`95018b5`) and the 2.3 build each ran three fresh profiles in the existing 384-key, 75 ms, 5 MB Markdown Source workload. Each run recorded 384 browser journals, 384 host replies, zero failures in both stores, and exact autosave. The product source and lockfile were unchanged. The Windows worktrees differed in checkout line endings, which changed some generated bundle hashes. Baseline dependency setup overlapped early baseline samples, so use the medians and ranges as regression evidence rather than attributing the timing differences to product changes.
