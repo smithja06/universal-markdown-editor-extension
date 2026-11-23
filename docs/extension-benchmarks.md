@@ -1,5 +1,46 @@
 # Folio Phase 6 extension benchmarks
 
+## Milestone 2.5 workspace image picker
+
+Windows 11 Pro 25H2 x64 (26200.9974), VS Code 1.147.0, and Node 24.13.0 ran three fresh 5 MB Source sessions against the Milestone 2.5 build before the final review refinements. Each session typed 384 keys at a target cadence of 75 ms, recorded 384 browser journals and 384 host checkpoint replies, and autosaved byte-exact Markdown. Both stores recorded zero failures.
+
+| 5 MB Source measurement | 2.4 continuation median | 2.5 median | 2.5 runs |
+| --- | ---: | ---: | ---: |
+| Typing p95 (ms) | 47.10 | 43.73 | 72.53 / 43.73 / 40.76 |
+| Checkpoint creation p95 (ms) | 29.40 | 26.70 | 47.20 / 26.70 / 25.30 |
+| Host checkpoint acknowledgement p95 (ms) | 22.30 | 20.90 | 156.10 / 20.90 / 19.90 |
+| Initial Visual ready (s) | 3.35 | 3.67 | 3.70 / 3.17 / 3.67 |
+| Switch to Source (s) | 0.78 | 0.20 | 0.18 / 0.73 / 0.20 |
+| Exact autosave (s) | 1.22 | 1.17 | 1.22 / 1.16 / 1.17 |
+
+Every run stayed below the documented Source investigation thresholds. In the slower first run, the 156.10 ms checkpoint acknowledgement p95 coincided with 151 ms reply delivery p95 and 14.41 ms host handler p95. The measurements use historical comparison runs and include scheduling variation. The dialog was closed for the typing workload. The chooser itself performs on-demand directory navigation and reads only the selected asset.
+
+The final build repeated the 384-key Source workload. Typing, checkpoint creation, and host checkpoint acknowledgement p95 were 77.20, 49.10, and 180.80 ms. Startup, Source switch, and exact autosave took 3.21, 1.73, and 1.23 s. All 384 checkpoints reached both stores with zero failures. The run stayed below all Source investigation thresholds, with 170 ms reply delivery p95 and 16.70 ms host handler p95.
+
+Three initial 16-key Visual sessions recorded 142.50–158.57 ms typing p95. That exceeded the historical 2.2 comparison of 87.12 ms, so the same harness ran three fresh profiles for each of the Milestone 2.4 checkpoint and the final build. The checkpoint runtime was rebuilt from the `c4f4f3e` source in the original checkout, using the installed build dependencies and the same fixture. No checkout switch was needed. All six cases acknowledged all 16 checkpoints with zero storage failures and saved exact Markdown.
+
+| 5 MB Visual measurement | `c4f4f3e` median | 2.5 final median | 2.5 final runs |
+| --- | ---: | ---: | ---: |
+| Typing p95 (ms) | 150.66 | 146.17 | 146.17 / 142.41 / 150.69 |
+| Checkpoint creation p95 (ms) | 103.70 | 91.30 | 97.60 / 89.50 / 91.30 |
+| Host checkpoint acknowledgement p95 (ms) | 1,726.80 | 1,457.20 | 1,537.60 / 1,233.20 / 1,457.20 |
+| Initial Visual ready (s) | 3.27 | 3.29 | 3.32 / 3.27 / 3.29 |
+| Exact autosave (s) | 1.28 | 1.27 | 1.27 / 1.27 / 1.25 |
+
+The comparison did not reproduce a slowdown relative to the starting checkpoint. Large Visual edits still have a noticeable reply tail. In the final runs, host handling p95 was 16.94–19.19 ms and reply delivery p95 was 1,213–1,532 ms.
+
+A 16-key, 5 MB Split smoke test recorded 100.66 ms typing p95, 56.20 ms checkpoint creation p95, and 439.80 ms acknowledgement p95. Visual startup took 3.16 s, the Split switch took 2.02 s, and exact autosave took 1.18 s. The historical 2.3 Split smoke recorded 101.11 ms typing p95, 900.40 ms acknowledgement p95, and a 1.48 s switch. Both stores recorded all 16 checkpoints.
+
+The view-disposal test completed 16 measured two-view cycles with zero remaining webview iframes after each close. The workbench and extension-host heap samples followed garbage collection.
+
+| Measurement (MiB) | Warm | Cycle 4 | Cycle 8 | Cycle 12 | Cycle 16 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Extension-host JS heap | 49.76 | 50.27 | 50.35 | 50.38 | 50.38 |
+| Extension-host RSS | 219.88 | 220.23 | 220.59 | 220.90 | 220.64 |
+| Workbench renderer JS heap | 67.58 | 69.54 | 70.22 | 70.51 | 70.75 |
+
+From cycles 12 to 16 the host JS heap stayed level and the workbench heap grew by 0.24 MiB. The short disposal run leaves long-session and separate webview renderer heap behavior unmeasured.
+
 ## Milestone 2.4 continuation
 
 The continuation reran the preparation workload on Windows 11 Pro 25H2 x64 (26200.9974), VS Code 1.147.0, and Node 24.13.0. Each of the three fresh profiles opened a 5,000,000-byte document in Source and typed 384 keys at a target cadence of 75 ms. Each run recorded 384 browser journals and 384 host checkpoint replies, zero storage failures, and byte-exact autosave.

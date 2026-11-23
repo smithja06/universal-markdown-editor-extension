@@ -1,12 +1,24 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/core'
 import { NodeSelection } from '@tiptap/pm/state'
 import { DiagramPreview } from '../editor/nodeViews'
 import { safeUrl } from '../editor/schema'
+import type { FolioHost } from '../host/contracts'
 import { Modal } from './controls'
 
 export type DialogName = 'link' | 'image' | 'table' | 'mermaid' | 'inlineMath' | 'blockMath' | 'wikiLink' | 'footnote' | 'reference'
-export interface InsertRequest { name: DialogName; position?: number; preset?: string }
+export interface InsertRequest {
+  name: DialogName
+  position?: number
+  preset?: string
+  imageTarget?: {
+    revision(): number
+    range?: { from: number; to: number }
+    insertSource?(url: string, alt: string): void
+  }
+}
+
+type WorkspacePicker = Pick<NonNullable<FolioHost['resources']>, 'pickWorkspaceImage' | 'confirmWorkspaceImage'>
 
 const labels: Record<DialogName, string> = {
   link: 'Insert link', image: 'Insert image', table: 'Insert table', mermaid: 'Mermaid diagram',
@@ -20,16 +32,17 @@ export const diagramPresets = {
   'State diagram': 'stateDiagram-v2\n  [*] --> Draft\n  Draft --> Published\n  Published --> [*]',
 }
 
-export function InsertDialog({ request, editor, anchors, close, chooseLocalImage }: {
-  request: InsertRequest; editor: Editor; anchors: { anchor: string; title: string }[]; close(): void; chooseLocalImage?(): void
+export function InsertDialog({ request, editor, anchors, close, chooseLocalImage, workspacePicker }: {
+  request: InsertRequest; editor: Editor; anchors: { anchor: string; title: string }[]; close(): void; chooseLocalImage?(): void; workspacePicker?: WorkspacePicker
 }) {
-  const name = request.name
+  const { name, imageTarget } = request
+  const sourceImage = !!imageTarget?.insertSource
   const selection = editor.state.selection
   const node = request.position !== undefined ? editor.state.doc.nodeAt(request.position) : selection instanceof NodeSelection ? selection.node : null
   const link = editor.getAttributes('link')
   const selectionText = editor.state.doc.textBetween(selection.from, selection.to, ' ')
   const wasLink = editor.isActive('link')
-  const isImage = node?.type.name === 'image'
+  const isImage = !sourceImage && !imageTarget?.range && node?.type.name === 'image'
   const isEquation = name === 'inlineMath' || name === 'blockMath'
   const [value, setValue] = useState<string>(name === 'link' ? link.href ?? request.preset ?? '' : name === 'image' ? isImage ? node.attrs.src : '' : node?.attrs.value ?? request.preset ?? '')
   const [label, setLabel] = useState<string>(name === 'link' ? selectionText : isImage ? node.attrs.alt : '')
@@ -40,10 +53,78 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
   const [columns, setColumns] = useState(3)
   const [header, setHeader] = useState(true)
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const picked = useRef<number | undefined>(undefined)
+  const pending = useRef<AbortController | undefined>(undefined)
+  const altField = useRef<HTMLInputElement>(null)
+  useEffect(() => () => pending.current?.abort(), [])
+
+  function closeDialog() {
+    pending.current?.abort()
+    close()
+  }
+
+  async function checkImage(perform: (revision: number, signal: AbortSignal) => Promise<void>) {
+    if (!imageTarget || pending.current) return
+    const controller = new AbortController()
+    pending.current = controller
+    setBusy(true)
+    setError('')
+    try { await perform(imageTarget.revision(), controller.signal) }
+    catch (error) {
+      if (!controller.signal.aborted) setError(error instanceof Error ? error.message : 'Folio could not validate this image.')
+    } finally {
+      pending.current = undefined
+      if (!controller.signal.aborted) setBusy(false)
+    }
+  }
+
+  function browse() {
+    if (!workspacePicker || !imageTarget) return
+    void checkImage(async (revision, signal) => {
+      const result = await workspacePicker.pickWorkspaceImage(revision, signal)
+      if (!result || signal.aborted) return
+      imageTarget.revision()
+      picked.current = result.id
+      setValue(result.reference)
+      requestAnimationFrame(() => altField.current?.focus())
+    })
+  }
+
+  function insertImage(input: string, alt: string) {
+    if (imageTarget?.insertSource) {
+      imageTarget.insertSource(input, alt)
+      close()
+      return
+    }
+    const command = editor.chain().focus()
+    if (request.position !== undefined) command.setNodeSelection(request.position)
+    const attrs = { src: input, alt, caption: caption.trim() || null, width: width || null, align: align || null, title: isImage ? node.attrs.title : null }
+    const image = { type: 'image', attrs }
+    const result = isImage ? command.updateAttributes('image', attrs).run()
+      : imageTarget?.range ? command.insertContentAt(imageTarget.range, image).run() : command.insertContent(image).run()
+    if (result) close()
+    else setError('Move the cursor to a part of the document that accepts this content.')
+  }
 
   function submit(form: HTMLFormElement | null) {
-    if (!form?.reportValidity()) return
+    if (pending.current || !form?.reportValidity()) return
     const input = value.trim()
+    if (name === 'image') {
+      if (!safeUrl(input, true)) {
+        setError(workspacePicker ? 'Enter an image URL or browse for a workspace image.' : 'Enter an image URL or select a local image.')
+        return
+      }
+      if (!imageTarget) { insertImage(input, label.trim()); return }
+      const selection = picked.current
+      void checkImage(async (revision, signal) => {
+        if (selection !== undefined) await workspacePicker?.confirmWorkspaceImage(selection, revision, signal)
+        if (signal.aborted) return
+        imageTarget.revision()
+        insertImage(input, label.trim())
+      })
+      return
+    }
     const command = editor.chain().focus()
     if (request.position !== undefined) command.setNodeSelection(request.position)
     let result: boolean
@@ -52,10 +133,6 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
       result = selection.empty && !wasLink
         ? command.insertContent({ type: 'text', text: label.trim() || input, marks: [{ type: 'link', attrs: { href: input } }] }).run()
         : command.extendMarkRange('link').setLink({ href: input }).run()
-    } else if (name === 'image') {
-      if (!safeUrl(input, true)) { setError('Enter an image URL or select a local image.'); return }
-      const attrs = { src: input, alt: label.trim(), caption: caption.trim() || null, width: width || null, align: align || null, title: isImage ? node.attrs.title : null }
-      result = isImage ? command.updateAttributes('image', attrs).run() : command.insertContent({ type: 'image', attrs }).run()
     } else if (name === 'table') {
       result = command.insertTable({ rows, cols: columns, withHeaderRow: header }).run()
     } else if (name === 'footnote' || name === 'reference') {
@@ -83,7 +160,7 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
   }
 
   const setBounded = (value: string, update: (n: number) => void) => update(Math.min(20, Math.max(1, Number(value) || 1)))
-  return <Modal title={labels[name]} close={close} wide={name === 'mermaid'}>
+  return <Modal title={labels[name]} close={closeDialog} wide={name === 'mermaid'}>
     <form className="dialog-form" onSubmit={event => event.preventDefault()} onKeyDown={event => {
       // VS Code's webview sandbox can block the native submit event.
       if (event.key !== 'Enter' || event.nativeEvent.isComposing ||
@@ -104,11 +181,14 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
         {anchors.length > 0 && <label className="field">Link to a heading<select value={value.startsWith('#') ? value : ''} onChange={event => setValue(event.target.value)}><option value="">Choose a heading</option>{anchors.map(item => <option key={item.anchor} value={'#' + item.anchor}>{item.title}</option>)}</select></label>}
       </>}
       {name === 'image' && <>
-        <label className="field">Image URL<input data-dialog-focus value={value} onChange={event => setValue(event.target.value)} placeholder="https://example.com/image.png" /></label>
+        <label className="field">Image URL<input data-dialog-focus disabled={busy} value={value} onChange={event => { picked.current = undefined; setValue(event.target.value) }} placeholder={workspacePicker ? './media/image.png' : 'https://example.com/image.png'} /></label>
+        {workspacePicker && <button className="secondary-button upload-button" type="button" disabled={busy} onClick={browse}>Browse workspace images</button>}
         {chooseLocalImage && <button className="secondary-button upload-button" type="button" onClick={() => { close(); chooseLocalImage() }}>Choose a local image</button>}
-        <label className="field">Alternative text<input value={label} onChange={event => setLabel(event.target.value)} placeholder="Describe the image" /></label>
-        <label className="field">Caption<input value={caption} onChange={event => setCaption(event.target.value)} placeholder="Optional caption" /></label>
-        <div className="field-row"><label className="field">Width in pixels<input type="number" min={24} max={2400} value={width} onChange={event => setWidth(event.target.value)} placeholder="Automatic" /></label><label className="field">Alignment<select value={align} onChange={event => setAlign(event.target.value)}><option value="">Inline</option><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div>
+        <label className="field">Alternative text<input ref={altField} disabled={busy} value={label} onChange={event => setLabel(event.target.value)} placeholder="Describe the image" /></label>
+        {!sourceImage && <>
+          <label className="field">Caption<input disabled={busy} value={caption} onChange={event => setCaption(event.target.value)} placeholder="Optional caption" /></label>
+          <div className="field-row"><label className="field">Width in pixels<input disabled={busy} type="number" min={24} max={2400} value={width} onChange={event => setWidth(event.target.value)} placeholder="Automatic" /></label><label className="field">Alignment<select disabled={busy} value={align} onChange={event => setAlign(event.target.value)}><option value="">Inline</option><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div>
+        </>}
       </>}
       {name === 'mermaid' && <>
         <label className="field">Diagram template<select value="" onChange={event => setValue(diagramPresets[event.target.value as keyof typeof diagramPresets])}><option value="">Choose a template</option>{Object.keys(diagramPresets).map(key => <option key={key}>{key}</option>)}</select></label>
@@ -123,8 +203,8 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
       {error && <p className="field-error" role="alert">{error}</p>}
       <div className="dialog-actions">
         {name === 'link' && wasLink && <button type="button" className="danger-button" onClick={() => { editor.chain().focus().extendMarkRange('link').unsetLink().run(); close() }}>Remove link</button>}
-        <button type="button" className="secondary-button" onClick={close}>Cancel</button>
-        <button type="button" className="primary-button" onClick={event => submit(event.currentTarget.form)}>{request.position !== undefined || isImage && name === 'image' || wasLink && name === 'link' ? 'Apply' : 'Insert'}</button>
+        <button type="button" className="secondary-button" onClick={closeDialog}>Cancel</button>
+        <button type="button" className="primary-button" disabled={busy} onClick={event => submit(event.currentTarget.form)}>{request.position !== undefined || isImage && name === 'image' || wasLink && name === 'link' ? 'Apply' : 'Insert'}</button>
       </div>
     </form>
   </Modal>

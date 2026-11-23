@@ -88,11 +88,14 @@ async function stageExtension(extensions: string, delayEdits: boolean) {
   ])
 }
 
-export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtualWorkspace: boolean }>({
+export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtualWorkspace: boolean; simpleFileDialog: boolean; secondWorkspace: boolean }>({
   delayEdits: [false, { option: true }],
   virtualWorkspace: [false, { option: true }],
-  desktop: async ({ delayEdits, virtualWorkspace }, use, testInfo) => {
-    const temp = resolve(tmpdir())
+  simpleFileDialog: [false, { option: true }],
+  secondWorkspace: [false, { option: true }],
+  desktop: async ({ delayEdits, virtualWorkspace, simpleFileDialog, secondWorkspace }, use, testInfo) => {
+    const temp = resolve(process.env.FOLIO_VSCODE_TEST_ROOT ?? tmpdir())
+    if (process.env.FOLIO_VSCODE_TEST_ROOT) await mkdir(temp, { recursive: true })
     const directory = await mkdtemp(join(temp, prefix))
     const workspace = join(directory, 'workspace')
     const profile = join(directory, 'profile')
@@ -126,13 +129,18 @@ export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtual
         'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': false,
         'extensions.autoCheckUpdates': false, 'chat.disableAIFeatures': true,
         'files.autoSave': 'off', 'files.hotExit': 'off',
+        'files.simpleDialog.enable': simpleFileDialog,
       }))])
       const env: NodeJS.ProcessEnv = { ...process.env }
       delete env.ELECTRON_RUN_AS_NODE
-      const windowWorkspace = virtualWorkspace ? join(directory, 'folio.code-workspace') : workspace
-      if (virtualWorkspace) await writeFile(windowWorkspace, JSON.stringify({
-        folders: [{ path: './workspace' }, { uri: 'folio-test-remote://test-server/project', name: 'Provider workspace' }],
-      }))
+      const windowWorkspace = virtualWorkspace || secondWorkspace ? join(directory, 'folio.code-workspace') : workspace
+      if (windowWorkspace !== workspace) {
+        if (secondWorkspace) await mkdir(join(directory, 'second-workspace'))
+        await writeFile(windowWorkspace, JSON.stringify({
+          folders: [{ path: './workspace' }, ...(secondWorkspace ? [{ path: './second-workspace' }] : []),
+            ...(virtualWorkspace ? [{ uri: 'folio-test-remote://test-server/project', name: 'Provider workspace' }] : [])],
+        }))
+      }
       child = spawn(executable(), [
         '--user-data-dir=' + profile, '--extensions-dir=' + extensions,
         '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', '--skip-welcome', '--new-window', windowWorkspace,

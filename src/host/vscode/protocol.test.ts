@@ -26,6 +26,16 @@ it('validates message directions and requires safe revisions and normalized LF s
   expect(isClientMessage({ type: 'edit', id: 1, revision: 2, change: { from: 2, to: Infinity, text: 'text' } })).toBe(false)
 })
 
+it('only accepts bounded picker results and valid revision-bound requests', () => {
+  expect(isClientMessage({ type: 'pickWorkspaceImage', id: 1, revision: 4 })).toBe(true)
+  expect(isClientMessage({ type: 'pickWorkspaceImage', id: 1, revision: -1 })).toBe(false)
+  expect(isClientMessage({ type: 'confirmWorkspaceImage', id: 2, selection: 1, revision: 4 })).toBe(true)
+  expect(isClientMessage({ type: 'confirmWorkspaceImage', id: 2, selection: 0, revision: 4 })).toBe(false)
+  expect(isHostMessage({ type: 'imagePickerResult', id: 1, reference: '../media/%23.png' })).toBe(true)
+  expect(isHostMessage({ type: 'imagePickerResult', id: 1, reference: 'file:///C:/media/image.png' })).toBe(false)
+  expect(isHostMessage({ type: 'imagePickerResult', id: 1, reference: './image.png', error: 'Unavailable' })).toBe(false)
+})
+
 it('accepts a source-free acknowledgement only with valid document metadata and an edit ID', () => {
   const state = { uri: 'file:///notes.md', title: 'notes.md', revision: 2, dirty: true, available: true, eol: '\r\n' }
   const reply = { type: 'accepted', state, edit: { id: 1 } }

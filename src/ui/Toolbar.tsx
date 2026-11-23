@@ -2,7 +2,7 @@ import type { Editor } from '@tiptap/core'
 import { useEditorState } from '@tiptap/react'
 import {
   AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, ChevronDown, Code2, Ellipsis, Highlighter,
-  IndentDecrease, IndentIncrease, Italic, Link2, List, ListOrdered, ListTodo, Pilcrow, Plus, Redo2,
+  ImagePlus, IndentDecrease, IndentIncrease, Italic, Link2, List, ListOrdered, ListTodo, Pilcrow, Plus, Redo2,
   Strikethrough, Underline, Undo2,
 } from 'lucide-react'
 import { IconButton, Menu, type Item } from './controls'
@@ -106,9 +106,9 @@ export function fullFormatItems(editor: Editor, openLink: () => void): Item[] {
   ]
 }
 
-export function Toolbar({ editor, state, source, ready, execute, shortcut, insertItems, extraFormats, styleItems, sourceCanUndo, sourceCanRedo, hostHistory }: {
+export function Toolbar({ editor, state, source, ready, execute, shortcut, insertItems, extraFormats, styleItems, sourceCanUndo, sourceCanRedo, sourceImageCommand, hostHistory }: {
   editor: Editor | null; source: boolean; ready: boolean; execute(id: string): void; shortcut(id: string): string | undefined;
-  state: ReturnType<typeof useFormatting>; insertItems: Item[]; extraFormats: Item[]; styleItems: Item[]; sourceCanUndo: boolean; sourceCanRedo: boolean; hostHistory?: boolean
+  state: ReturnType<typeof useFormatting>; insertItems: Item[]; extraFormats: Item[]; styleItems: Item[]; sourceCanUndo: boolean; sourceCanRedo: boolean; sourceImageCommand?: string; hostHistory?: boolean
 }) {
   const enabled = !!editor && !!state && ready && !source
   const active = (name: string) => state?.marks.includes(name) ?? false
@@ -157,7 +157,10 @@ export function Toolbar({ editor, state, source, ready, execute, shortcut, inser
       <IconButton label={label('Undo', 'edit.undo')} onClick={() => execute('edit.undo')} disabled={!(hostHistory ?? (ready && (source ? sourceCanUndo : state?.undo)))}><Undo2 size={17} /></IconButton>
       <IconButton label={label('Redo', 'edit.redo')} onClick={() => execute('edit.redo')} disabled={!(hostHistory ?? (ready && (source ? sourceCanRedo : state?.redo)))}><Redo2 size={17} /></IconButton>
     </div>
-    {source ? <div className="source-toolbar-label"><Code2 size={16} /> Markdown source <span>{shortcut('search.find')} to find</span></div> : <>
+    {source ? <>
+      {sourceImageCommand && <div className="toolbar-group"><IconButton label="Insert image" disabled={!ready} onClick={() => execute(sourceImageCommand)}><ImagePlus size={17} /></IconButton></div>}
+      <div className="source-toolbar-label"><Code2 size={16} /> Markdown source <span>{shortcut('search.find')} to find</span></div>
+    </> : <>
       <div className="toolbar-group style-tools">
         <Menu label="Paragraph style" value={paragraph} chevron disabled={!enabled} items={styleItems.map(item => ({ ...item, active: state?.style === item.label }))}>
           <Pilcrow size={15} /><span>{paragraph}</span>

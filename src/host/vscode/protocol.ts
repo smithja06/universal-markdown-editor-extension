@@ -34,6 +34,9 @@ export type ClientMessage =
   | { type: 'copy'; id: number; text: string }
   | { type: 'resource'; id: number; operation: 'image' | 'open'; reference: string }
   | { type: 'cancelResource'; id: number }
+  | { type: 'pickWorkspaceImage'; id: number; revision: number }
+  | { type: 'confirmWorkspaceImage'; id: number; revision: number; selection: number }
+  | { type: 'cancelWorkspaceImage'; id: number }
 
 export type HostMessage =
   | { type: 'state'; state: DocumentState; edit?: { id: number; accepted: boolean; message?: string } }
@@ -45,10 +48,12 @@ export type HostMessage =
   | { type: 'copied'; id: number; copied: boolean }
   | { type: 'action'; action: NativeAction }
   | { type: 'resourceResult'; id: number; ok: boolean; image?: string }
+  | { type: 'imagePickerResult'; id: number; reference?: string; preview?: string; error?: string }
 
 const record = isRecord
 const integer = (value: unknown, minimum = 0): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum
 const normalized = (value: unknown): value is string => typeof value === 'string' && !value.includes('\r')
+const rasterDataUrl = /^data:image\/(?:png|jpeg|gif|webp|avif|bmp|x-icon);base64,/
 
 function isSplice(value: unknown): value is Splice {
   return record(value) && integer(value.from) && integer(value.to) && value.from <= value.to && normalized(value.text)
@@ -71,6 +76,9 @@ export function isClientMessage(value: unknown): value is ClientMessage {
   if (value.type === 'resource') return isGeneration(value.id) && (value.operation === 'image' || value.operation === 'open') &&
     typeof value.reference === 'string' && value.reference.length > 0 && value.reference.length <= 4096
   if (value.type === 'cancelResource') return isGeneration(value.id)
+  if (value.type === 'pickWorkspaceImage') return isGeneration(value.id) && integer(value.revision)
+  if (value.type === 'confirmWorkspaceImage') return isGeneration(value.id) && integer(value.revision) && isGeneration(value.selection)
+  if (value.type === 'cancelWorkspaceImage') return isGeneration(value.id)
   return value.type === 'command' && (value.command === 'save' || value.command === 'undo' || value.command === 'redo')
 }
 
@@ -99,7 +107,13 @@ export function isHostMessage(value: unknown): value is HostMessage {
     isDocumentMetadata(value.state) && value.state.available && record(value.edit) && isGeneration(value.edit.id)
   if (value.type === 'action') return isNativeAction(value.action)
   if (value.type === 'resourceResult') return isGeneration(value.id) && typeof value.ok === 'boolean' &&
-    (value.image === undefined || (typeof value.image === 'string' && /^data:image\/(?:png|jpeg|gif|webp|avif|bmp|x-icon);base64,/.test(value.image)))
+    (value.image === undefined || (typeof value.image === 'string' && rasterDataUrl.test(value.image)))
+  if (value.type === 'imagePickerResult') return isGeneration(value.id) &&
+    (value.error === undefined || (typeof value.error === 'string' && value.error.length <= 512)) &&
+    (value.reference === undefined || (value.error === undefined && typeof value.reference === 'string' &&
+      value.reference.length <= 4096 && /^(?:\.\/|\.\.\/)\S+$/.test(value.reference))) &&
+    (value.preview === undefined || (typeof value.reference === 'string' && typeof value.preview === 'string' &&
+      value.preview.length <= 4 * Math.ceil(5 * 1024 * 1024 / 3) + 32 && rasterDataUrl.test(value.preview)))
   if (value.type !== 'state' || !isDocumentState(value.state)) return false
   const edit = value.edit
   return edit === undefined || (record(edit) && integer(edit.id, 1) && typeof edit.accepted === 'boolean' &&

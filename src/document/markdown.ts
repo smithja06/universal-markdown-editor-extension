@@ -432,6 +432,35 @@ function tryTextPatch(block: SourceBlock, node: ProseMirrorNode, references: str
   return equivalent(updated, node, references) ? updated : undefined
 }
 
+function tryImagePatch(block: SourceBlock, node: ProseMirrorNode, references: string): string | undefined {
+  if (!block.node.sameMarkup(node) || isLegacyBlock(block.raw) ||
+    (block.node.attrs.textAlign === 'left' && !needsBlockHtml(node))) return
+  const before = block.node.content
+  const from = before.findDiffStart(node.content)
+  const end = before.findDiffEnd(node.content)
+  if (from === null || !end || end.a < from || end.b !== from + 1) return
+  const image = node.nodeAt(from)
+  if (!image || image.type.name !== 'image' || needsBlockHtml(image)) return
+  const markdown = markdownProcessor.stringify({
+    type: 'root', children: [{ type: 'paragraph', children: inlineMarkdown([image], false) }],
+  } as Root).replace(/\n$/, '')
+  let patched: string | undefined
+  block.node.nodesBetween(Math.max(0, from - 1), Math.min(before.size, end.a + 1), (text, offset) => {
+    if (patched || !text.text || from < offset || end.a > offset + text.nodeSize) return
+    // Try the whole text run first so repeated words within that run keep their exact positions.
+    const selected = text.text.slice(from - offset, end.a - offset)
+    for (const [anchor, shift] of [[text.text, from - offset], [selected, 0]] as const) {
+      if (!anchor) continue
+      const index = block.raw.indexOf(anchor)
+      if (index < 0 || index !== block.raw.lastIndexOf(anchor)) continue
+      const start = index + shift
+      const updated = block.raw.slice(0, start) + markdown + block.raw.slice(start + end.a - from)
+      if (equivalent(updated, node, references)) { patched = updated; return }
+    }
+  })
+  return patched
+}
+
 function equivalent(source: string, node: ProseMirrorNode, references: string): boolean {
   const context = references ? source + '\n\n' + references : source
   const projection = parse(context)
@@ -524,7 +553,7 @@ export function writeMarkdown(session: MarkdownSession, document: ProseMirrorNod
     if (block) used.add(block)
     const unchanged = !!block && matchesSourceBlock(block.node, node)
     if (!unchanged && isEmptyParagraph(node)) return []
-    const raw = block && unchanged ? block.raw : (block && tryTextPatch(block, node, references)) ?? writeBlock(node, references)
+    const raw = block && unchanged ? block.raw : (block && (tryTextPatch(block, node, references) ?? tryImagePatch(block, node, references))) ?? writeBlock(node, references)
     return [{ raw, node, block, unchanged }]
   })
   if (!pieces.length) return { source: hasFrontMatter ? lead : '', protectedBoundaries: false }

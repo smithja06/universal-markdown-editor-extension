@@ -43,6 +43,7 @@ export interface LiveDocumentSnapshot {
   id: string
   title: string
   source: string
+  revision?: number
   lineEnding: '\n' | '\r\n'
   dirty: boolean
   pending: boolean
@@ -73,6 +74,8 @@ export interface FolioHost {
   resources?: {
     image(reference: string, signal: AbortSignal): Promise<string | undefined>
     openMarkdown(reference: string): Promise<void>
+    pickWorkspaceImage(revision: number, signal: AbortSignal): Promise<{ id: number; reference: string } | undefined>
+    confirmWorkspaceImage(selection: number, revision: number, signal: AbortSignal): Promise<void>
   }
   search(texts: string[], term: string, options: SearchOptions, signal: AbortSignal): Promise<TextMatch[]>
   recentCommands: { read(): string[]; write(ids: string[]): void }

@@ -15,6 +15,7 @@ import { dividerWidth, useSplitLayout } from './editor/useSplitLayout'
 import { scrollToSplitHeading, useSplitScroll } from './editor/splitScroll'
 import { calloutKinds } from './editor/schema'
 import { createWorkspace, type EditorMode, type EditorPane } from './document/workspace'
+import { markdownProcessor } from './document/markdown'
 import type { Heading } from './document/metadata'
 import { IconButton, Menu, Modal, type Item } from './ui/controls'
 import { Toolbar, fullFormatItems, paragraphStyle, paragraphStyles, useFormatting } from './ui/Toolbar'
@@ -186,6 +187,46 @@ export default function App({ host }: { host: FolioHost }) {
   }
   function addNode(type: string, attrs?: Record<string, unknown>) { editor?.chain().focus().insertContent({ type, attrs }).run() }
   const insert = (name: InsertRequest['name'], preset?: string) => () => setRequest({ name, preset })
+  function openImage(pane: EditorPane, position?: number, range?: { from: number; to: number }) {
+    if (!editor) return
+    if (!liveDocument) { setRequest({ name: 'image', position }); return }
+    if (!doc.activatePane(pane)) return
+    const view = pane === 'source' ? doc.sourceView.current : null
+    if (pane === 'source' && !view) return
+    const code = view?.state
+    const visual = editor.state
+    const initial = liveDocument.read()
+    const identity = editorIdentity.current
+    const openedMode = workspaceView.getState().mode
+    let revision = initial.pending ? undefined : initial.revision
+    const currentRevision = () => {
+      const current = liveDocument.read()
+      if (!current.available) throw new Error('This document was moved, deleted, or closed. Reopen it to insert an image.')
+      if (current.conflict || current.source !== initial.source || current.id !== initial.id ||
+        identity !== editorIdentity.current || openedMode !== workspaceView.getState().mode || !doc.canEdit() ||
+        (view && code ? doc.sourceView.current !== view || view.state.doc !== code.doc || !view.state.selection.eq(code.selection)
+          : editor.isDestroyed || editor.state.doc !== visual.doc || !editor.state.selection.eq(visual.selection)) ||
+        (revision !== undefined && revision !== current.revision)) {
+        throw new Error('The document or selection changed. Reopen Insert image to use the current selection.')
+      }
+      if (current.pending || current.revision === undefined) throw new Error('Wait for Folio to sync your pending edits, then try again.')
+      revision = current.revision
+      return revision
+    }
+    setRequest({ name: 'image', position, imageTarget: {
+      revision: currentRevision,
+      range,
+      insertSource: view && code ? (url, alt) => {
+        const { from, to } = code.selection.main
+        const text = markdownProcessor.stringify({
+          type: 'root', children: [{ type: 'paragraph', children: [{ type: 'image', url, alt }] }],
+        }).trimEnd()
+        view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length }, userEvent: 'input' })
+        requestAnimationFrame(() => view.focus())
+      } : undefined,
+    } })
+  }
+  const imageLabel = 'Image or image caption'
   const actions = registerItems(registry, platform, 'Insert', 'insert', [
     { label: 'Paragraph', icon: <Pilcrow size={16} />, run: () => editor?.chain().focus().setParagraph().run() },
     { label: 'Heading', icon: <Hash size={16} />, run: () => editor && paragraphStyle(editor, 'Heading 2') },
@@ -201,7 +242,7 @@ export default function App({ host }: { host: FolioHost }) {
       run: () => editor?.chain().focus().wrapIn('callout', { kind }).run(),
     })),
     { label: '', divider: true },
-    { label: 'Image or image caption', icon: <ImagePlus size={16} />, run: insert('image') },
+    { label: imageLabel, icon: <ImagePlus size={16} />, run: () => openImage('visual') },
     ...(!liveDocument ? [{ label: 'Image from file', icon: <Upload size={16} />, run: () => imageInput.current?.click() }] : []),
     { label: 'Emoji', icon: <Smile size={16} />, run: () => setDialog('emoji') },
     { label: 'Hyperlink', icon: <Link2 size={16} />, run: () => openLink() },
@@ -218,10 +259,20 @@ export default function App({ host }: { host: FolioHost }) {
     { label: 'Inline equation', icon: <Sigma size={16} />, run: insert('inlineMath') },
     { label: 'Block equation', icon: <Braces size={16} />, run: insert('blockMath') },
   ], editable && !source)
+  const sourceImageCommand = host.resources ? 'insert.source-image' : undefined
+  if (sourceImageCommand) registry.register({
+    id: sourceImageCommand, label: 'Insert image', category: 'Insert', keywords: 'workspace image reference',
+    available: () => editable && source, run: () => openImage('source'),
+  })
 
   const slashItems = slash ? actions.filter(item => !item.divider && item.label.toLowerCase().includes(slash.word)).slice(0, 11) : []
   const runSlash = (item: Item) => {
     if (!editor || !slash) return
+    if (liveDocument && item.label === imageLabel) {
+      openImage('visual', undefined, { from: slash.from, to: slash.to })
+      setSlash(null)
+      return
+    }
     editor.chain().focus().deleteRange({ from: slash.from, to: slash.to }).run()
     setSlash(null)
     item.run?.()
@@ -274,7 +325,11 @@ export default function App({ host }: { host: FolioHost }) {
   useEffect(() => {
     if (!editor) return
     const element = editor.view.dom
-    const edit = (event: Event) => { if (doc.activatePane('visual')) setRequest((event as CustomEvent<InsertRequest>).detail) }
+    const edit = (event: Event) => {
+      const target = (event as CustomEvent<InsertRequest>).detail
+      if (target.name === 'image' && liveDocument) openImage('visual', target.position)
+      else if (doc.activatePane('visual')) setRequest(target)
+    }
     const openSource = () => {
       if (split && doc.activatePane('source')) doc.sourceView.current?.focus()
       else doc.switchMode('source')
@@ -294,7 +349,7 @@ export default function App({ host }: { host: FolioHost }) {
       const position = editor.view.posAtDOM(image, 0)
       if (editor.state.doc.nodeAt(position)?.type.name === 'image') {
         editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, position)))
-        setRequest({ name: 'image', position })
+        openImage('visual', position)
       }
     }
     element.addEventListener('folio-edit-atom', edit)
@@ -545,7 +600,7 @@ export default function App({ host }: { host: FolioHost }) {
     </header>
     {!liveDocument && <DocumentTabs tabs={doc.tabs} activeId={doc.layout.activeId} canReopen={doc.layout.closed.length > 0} disabled={!started}
       select={id => execute('navigation.open-document', id)} close={id => report(doc.closeTab(id))} closeOthers={id => report(doc.closeOtherTabs(id))} reopen={() => report(doc.reopenTab())} create={() => execute('document.new-document')} />}
-    <Toolbar editor={editor} state={formatting} source={source} ready={editable} execute={execute} shortcut={commandShortcut} insertItems={actions} extraFormats={formatMenu.slice(5)} styleItems={styleItems} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} hostHistory={liveDocument ? ready && liveWritable : undefined} />
+    <Toolbar editor={editor} state={formatting} source={source} ready={editable} execute={execute} shortcut={commandShortcut} insertItems={actions} extraFormats={formatMenu.slice(5)} styleItems={styleItems} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} sourceImageCommand={sourceImageCommand} hostHistory={liveDocument ? ready && liveWritable : undefined} />
     {liveDocument && doc.liveState && <RecoveryNotice state={doc.liveState} copy={host.clipboard.writeText} discard={liveDocument.discardRecovery} notify={notify} />}
     {findPanel && doc.layout.activeId && <FindPanel panelRef={findRef} documentId={doc.layout.activeId} title={doc.file.title} mode={mode} startReplace={findPanel.replace}
       readOnly={!!liveDocument && !liveWritable}
@@ -617,7 +672,7 @@ export default function App({ host }: { host: FolioHost }) {
     </footer>
     <input ref={fileInput} type="file" accept=".md,.markdown,text/markdown" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void doc.importFile(file); event.target.value = '' }} />
     {!liveDocument && <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/avif,image/bmp,image/x-icon" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void addImage(file); event.target.value = '' }} />}
-    {request && editor && <InsertDialog request={request} editor={editor} anchors={doc.info.outline} close={() => setRequest(null)} chooseLocalImage={liveDocument ? undefined : () => imageInput.current?.click()} />}
+    {request && editor && <InsertDialog request={request} editor={editor} anchors={doc.info.outline} close={() => setRequest(null)} workspacePicker={host.resources} chooseLocalImage={liveDocument ? undefined : () => imageInput.current?.click()} />}
     {palette && <CommandPalette key={palette} entries={paletteEntries()} recent={recentCommands} scope={palette} run={runPalette} close={() => setPalette(null)} />}
     {dialog === 'shortcuts' && <Modal title="Keyboard shortcuts" close={() => setDialog(null)}><dl className="shortcuts">{shortcutRows.map(([label, keys]) => <div key={label}><dt>{label}</dt><dd><kbd>{keys}</kbd></dd></div>)}</dl></Modal>}
     {dialog === 'recent' && <Modal title="Recent documents" close={() => setDialog(null)}><div className="recent-list">{doc.recent.map(file => <button key={file.id} type="button" onClick={() => report(doc.openDocument(file.id).then(() => setDialog(null)))}><FileText size={17} /><span>{file.title}</span>{file.id === doc.layout.activeId && <small>Current</small>}</button>)}{!doc.recent.length && <p className="muted">Recently opened documents will appear here.</p>}</div></Modal>}

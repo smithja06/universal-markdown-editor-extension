@@ -15,6 +15,33 @@ function open(source: string) {
 }
 
 describe('Markdown source preservation', () => {
+  it('preserves authored markup around a selected span replaced by an inline image', () => {
+    const original = 'A  _word_ stays. Figure: replace and more.\r\n'
+    const { editor, session } = open(original)
+    const reference = '../media/caf%C3%A9%20%23%25%28final%29%252F.png'
+    const from = editor.state.doc.textContent.indexOf('replace') + 1
+    expect(from).toBeGreaterThan(0)
+    const image = editor.schema.nodes.image.create({ src: reference, alt: 'Picked image' })
+    editor.view.dispatch(editor.state.tr.replaceWith(from, from + 'replace'.length, image))
+    expect(writeMarkdown(session, editor.state.doc).source).toBe(original.replace('replace', `![Picked image](${reference})`))
+    editor.destroy()
+  })
+
+  it('preserves list delimiters and chooses the intended repeated text when inserting an image', () => {
+    const original = '+ A  _word_ stays. Figure: replace and replace.\n\nKeep   this.\n'
+    const { editor, session } = open(original)
+    const reference = '../media/asset.png'
+    const image = editor.schema.nodes.image.create({ src: reference, alt: 'Picked image' })
+    const position = { from: -1 }
+    editor.state.doc.descendants((node, offset) => {
+      if (node.isText && node.text?.includes('replace')) position.from = offset + node.text.lastIndexOf('replace')
+    })
+    expect(position.from).toBeGreaterThan(0)
+    editor.view.dispatch(editor.state.tr.replaceWith(position.from, position.from + 'replace'.length, image))
+    expect(writeMarkdown(session, editor.state.doc).source).toBe(original.replace('and replace.', `and ![Picked image](${reference}).`))
+    editor.destroy()
+  })
+
   it('writes ordinary visual edits as native Markdown', () => {
     const { editor, session } = open('')
     const headings = Array.from({ length: 6 }, (_, index) => ({

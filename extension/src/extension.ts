@@ -7,6 +7,7 @@ import { webviewHtml } from './webview'
 import { encodeRecoveryBase, recoveryGeneration, unpackRecovery, type PackedRecovery } from './packedRecovery'
 import { nativeCommands, type NativeAction } from '../../src/host/vscode/nativeCommands'
 import { openWorkspaceMarkdown, workspaceImage } from './resources'
+import { confirmWorkspaceImage, pickWorkspaceImage, type WorkspaceImageSelection } from './imagePicker'
 
 const viewType = 'folio.markdown'
 const unavailable = 'This document was moved, deleted, or closed. Reopen it from VS Code to continue.'
@@ -18,6 +19,7 @@ const fileVerificationIntervalMs = 250
 type Acknowledgement = Extract<HostMessage, { type: 'state' | 'accepted' }>
 type EditMessage = Extract<ClientMessage, { type: 'edit' }>
 type CommandMessage = Extract<ClientMessage, { type: 'command' }>
+type ImagePickerMessage = Extract<ClientMessage, { type: 'pickWorkspaceImage' | 'confirmWorkspaceImage' }>
 
 interface View {
   panel: vscode.WebviewPanel
@@ -35,6 +37,8 @@ interface Client {
   backupBase: { revision: number; source: string; encoded?: PackedRecovery['base'] }
   imageReads: number
   navigation?: number
+  imagePickerRequest?: number
+  imageSelection?: { id: number; revision: number; image: WorkspaceImageSelection }
   acknowledgement?: Acknowledgement
 }
 
@@ -85,6 +89,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
   private readonly sessions = new Map<vscode.TextDocument, Session>()
   private readonly activeJournals = new Set<string>()
   private readonly subscriptions: vscode.Disposable[]
+  private imagePickerOpen = false
 
   constructor(private readonly assetsRoot: vscode.Uri, private readonly recovery: vscode.Memento, private readonly scope: string) {
     this.subscriptions = [
@@ -142,6 +147,14 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
         }
         if (message.type === 'checkpoint') return void this.checkpoint(session, view, client, message.draft)
         if (message.type === 'dismiss') return void this.dismiss(view, client, message)
+        if (message.type === 'cancelWorkspaceImage') {
+          if (client.imagePickerRequest === message.id) client.imagePickerRequest = undefined
+          if (client.imageSelection?.id === message.id) client.imageSelection = undefined
+          return
+        }
+        if (message.type === 'pickWorkspaceImage' || message.type === 'confirmWorkspaceImage') {
+          return void this.selectImage(session, view, client, message)
+        }
         if (message.type === 'cancelResource') {
           if (client.navigation === message.id) client.navigation = undefined
           return
@@ -266,6 +279,57 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
       }
     }
     return false
+  }
+
+  private async selectImage(session: Session, view: View, client: Client, message: ImagePickerMessage) {
+    const { id, revision } = message
+    const browsing = message.type === 'pickWorkspaceImage'
+    const busy = 'An image picker is already open. Close it before browsing again.'
+    const reply = (outcome: Omit<Extract<HostMessage, { type: 'imagePickerResult' }>, 'type' | 'id'>) =>
+      this.post(view, { type: 'imagePickerResult', id, ...outcome }, client)
+    if (client.imagePickerRequest !== undefined || (browsing && this.imagePickerOpen)) return reply({ error: busy })
+    if (!view.panel.active) return reply({ error: 'Activate this Folio editor before browsing or inserting a workspace image.' })
+    client.imagePickerRequest = id
+    if (browsing) this.imagePickerOpen = true
+    const active = () => !view.disposed && view.client === client && client.imagePickerRequest === id
+    const check = () => {
+      if (!active() || session.document.isClosed || !session.state.available) throw new Error(unavailable)
+      if (session.document.version !== revision) throw new Error('The document changed while selecting an image. Reopen Insert image to use the current selection.')
+    }
+    try {
+      check()
+      if (!await this.verifyFile(session)) throw new Error(unavailable)
+      check()
+      if (browsing) {
+        const result = await pickWorkspaceImage(session.document, check)
+        if (!result) { if (active()) reply({}); return }
+        if (!await this.verifyFile(session)) throw new Error(unavailable)
+        check()
+        client.imageSelection = { id, revision, image: result.image }
+        reply({ reference: result.image.reference, preview: result.preview })
+      } else {
+        const selection = client.imageSelection
+        if (selection?.id !== message.selection || selection.revision !== revision) {
+          throw new Error('The selected image has expired. Browse again.')
+        }
+        const reference = await confirmWorkspaceImage(session.document, selection.image)
+        if (!await this.verifyFile(session)) throw new Error(unavailable)
+        check()
+        client.imageSelection = undefined
+        reply({ reference })
+      }
+    } catch (error) {
+      if (active()) {
+        // Prefer a document error if the view became stale during a filesystem request.
+        let failure = error
+        try { check() } catch (stale) { failure = stale }
+        reply({ error: failure instanceof vscode.FileSystemError || !(failure instanceof Error)
+          ? 'VS Code could not access this workspace. Check that it is available and try again.' : failure.message.slice(0, 512) })
+      }
+    } finally {
+      if (client.imagePickerRequest === id) client.imagePickerRequest = undefined
+      if (browsing) this.imagePickerOpen = false
+    }
   }
 
   private invalidateResources(resources: readonly vscode.Uri[]) {
