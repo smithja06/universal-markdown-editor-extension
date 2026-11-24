@@ -1,6 +1,6 @@
 # Folio in VS Code
 
-## Phase 6 through Milestone 2.5
+## Phase 6 through Milestone 2.6
 
 The extension registers `folio.markdown` as an optional `CustomTextEditorProvider` for `.md` and `.markdown`. VS Code continues to open Markdown in the native Text Editor by default. **Reopen Editor With → Folio Markdown Editor** opens the shared Folio interface with Visual, Markdown, and Split views. [Custom Editor API](https://code.visualstudio.com/api/extension-guides/custom-editors)
 
@@ -98,3 +98,17 @@ Milestone 2.4 remains incomplete. Automatic image placement and its upload picke
 ### Milestone 2.5 picker verification
 
 The desktop suite drives VS Code's built-in Simple File Dialog through the production `showOpenDialog` call. It covers Visual, Source, both editing panes across the Split and manual-reference cases, cancel, competing views, stale revisions, asset changes, and rejection at the workspace and raster boundaries. References use native Save and Undo/Redo, with byte comparisons for BOM/CRLF, authored Markdown, and the selected asset. The synthetic provider verifies that browsing is gated and manual preview still works. [Desktop coverage](extension-qualification.md#milestone-25-picker-coverage) [Verification and handoff](PROJECT_HANDOFF.md)
+
+## Milestone 2.6 release assessment
+
+| Priority | Finding |
+| --- | --- |
+| Release blocking for expanded picker support | Native macOS, native Linux, and real Remote need their own VSIX and filesystem qualification. The picker gate stays limited to local Windows fixed NTFS. Any Remote qualification also needs real disconnect, reconnect, extension-host restart, and workspace identity checks. [Platform record and runbooks](extension-qualification.md#milestone-26-environment-matrix) |
+| Release blocking before external binary distribution | Verify the final distribution's notices and corresponding source availability for EPL-covered ELK components. The VSIX now carries Vite's generated license inventory, supplemental copyrights for CSS and older dependency metadata, and pinned upstream source references. Review the exact artifact and source availability for the distribution channel before publishing. [Supplemental notices](../extension/THIRD_PARTY_NOTICES.md) [EPL-2.0 distribution terms](https://www.eclipse.org/legal/epl/epl-v20.html) |
+| Important but nonblocking on qualified Windows | A decoded picker selection now survives a cancelled or undecodable replacement. The focused desktop regression reproduces the former expiry and checks keyboard submission, raw Markdown bytes, and unchanged assets. Visibility and focus are automated, including high-contrast themes. Hands-on screen-reader and OS-native chooser presentation still need coverage. |
+| Important but nonblocking on qualified Windows | Exact-edit verification, conflict review, native history, and both draft journals protect routine edits and provider interruptions. Abrupt loss before a checkpoint lands, simultaneous storage failures, and unfinished IME input remain possible loss windows. Structural Visual edits can reserialize the affected block. Users can use Source for precise authored syntax. |
+| Important but nonblocking on qualified Windows | Large Visual edits still incur renderer acknowledgement tails. Short repeated view disposal samples cover activation and cleanup, with long-session renderer memory use still open. [Benchmarks and investigation thresholds](extension-benchmarks.md) |
+| Important but nonblocking on qualified Windows | Restricted Mode disabled the installed VSIX on Windows in VS Code 1.147.0 and 1.100.0, with the native editor available. The webview CSP and resource roots stay confined to the bundled UI and validated raster data. File and provider reads observe mutable paths, so revalidation narrows the read window and references can change after insertion. [VS Code Workspace Trust guide](https://code.visualstudio.com/api/extension-guides/workspace-trust) [Attachment boundary](extension-attachments.md#milestone-25-reference-only-picker) |
+| Future enhancement | Longer memory profiling, native dialog and assistive-technology coverage across qualified hosts, and transport-specific automation. Automatic uploads require a separate filesystem architecture that establishes containment, collision handling, and ownership after a restart. |
+
+The extension README covers installation, native editor opt-in, platform and Trust limitations, installable build steps, and draft recovery. Folio adds no extension telemetry or general webview network access. VS Code manages its own telemetry settings. The VSIX carries the extension MIT license and bundled dependency notices. The release material uses text instructions and the existing project documentation.

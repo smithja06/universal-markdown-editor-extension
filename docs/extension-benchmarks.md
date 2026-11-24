@@ -1,5 +1,36 @@
 # Folio Phase 6 extension benchmarks
 
+## Milestone 2.6 release candidate
+
+The existing one-worker desktop harness ran on Windows 11 Pro 25H2 x64 (26200.9974), VS Code 1.147.0, and Node 24.13.0 on the AMD Ryzen AI 9 HX 370. The active Windows power scheme was Silent. Each case used a fresh profile on local NTFS. The initial runs used 384 paced Source keys and 16 paced Visual or Split keys per 5 MB document. Every run observed all browser and host checkpoints, zero failures in both stores, and exact autosaved Markdown.
+
+| 5 MB measurement | Milestone 2.5 final (ms) | Milestone 2.6 initial median or smoke (ms) | Milestone 2.6 initial runs (ms) |
+| --- | ---: | ---: | ---: |
+| Source typing p95 | 77.20 | 102.14 | 95.70 / 102.14 / 105.53 |
+| Source checkpoint creation p95 | 49.10 | 73.00 | 69.70 / 73.00 / 76.10 |
+| Source checkpoint acknowledgement p95 | 180.80 | 1,368.80 | 721.10 / 1,368.80 / 2,463.90 |
+| Visual typing p95 | 146.17 | 200.62 | 229.65 / 200.62 / 119.16 |
+| Visual checkpoint acknowledgement p95 | 1,457.20 | 2,594.30 | 2,594.30 / 2,678.30 / 961.50 |
+| Split typing p95 | 100.66 | 140.34 | 140.34 |
+| Split checkpoint acknowledgement p95 | 439.80 | 1,202.80 | 1,202.80 |
+
+The initial Source median was below each investigation threshold. One case crossed 75 ms for checkpoint creation and 2 s for checkpoint acknowledgement. Its host handler p95 was 16.80 ms, and its reply delivery p95 was 2,452 ms. The other Source cases delivered replies in 704 and 1,366 ms p95. Initial Visual startup was 8.67, 6.94, and 3.41 s. The median stayed below 8 s. Source mode switches were 1.63, 1.56, and 1.85 s. The Split run opened in 3.29 s and switched in 1.75 s.
+
+The follow-up used the preserved Milestone 2.5 VSIX runtime bundle and the Milestone 2.6 bundle with the same harness, workloads, and local profiles. Each build ran three times in each mode. The first follow-up pair ran once per build and mode, with two more repeats per build and mode afterward. All twelve follow-up cases delivered every checkpoint and saved exact Markdown with zero storage failures.
+
+| 5 MB follow-up p95 | Milestone 2.5 preserved bundle median (ms) | Milestone 2.6 median (ms) | Milestone 2.6 follow-up runs (ms) |
+| --- | ---: | ---: | ---: |
+| Source typing | 54.46 | 48.47 | 61.24 / 48.47 / 43.47 |
+| Source checkpoint creation | 35.70 | 30.40 | 38.80 / 30.40 / 26.80 |
+| Source checkpoint acknowledgement | 31.90 | 23.70 | 33.20 / 23.70 / 21.10 |
+| Visual typing | 89.12 | 90.23 | 121.52 / 83.82 / 90.23 |
+| Visual checkpoint creation | 68.40 | 66.30 | 88.20 / 56.50 / 66.30 |
+| Visual checkpoint acknowledgement | 439.40 | 360.40 | 1,090.40 / 263.10 / 360.40 |
+
+The paired rechecks did not reproduce the initial Source or Visual slowdown. Milestone 2.6 opened the Source fixtures in 3.12–3.32 s and Visual fixtures in 3.11–3.56 s in the follow-up. Source reply delivery fell to 19–27 ms p95. The initial slowdown coincided with longer renderer delivery and startup times. Its exact cause was not established. The single Split run was slower than the reported Milestone 2.5 smoke, while startup and switching stayed within the investigation thresholds. Large Visual acknowledgement tails remain sensitive to renderer scheduling.
+
+All 16 two-view disposal cycles completed with no webview iframes left after each close. Host JS heap moved from 49.70 to 50.32 MiB, host RSS from 218.11 to 220.39 MiB, and workbench JS heap from 67.68 to 70.75 MiB. Workbench JS heap grew 0.18 MiB between cycles 12 and 16. The harness measures short sessions and a workbench heap sample. Long-session memory use and separate webview renderer retention still need measurements.
+
 ## Milestone 2.5 workspace image picker
 
 Windows 11 Pro 25H2 x64 (26200.9974), VS Code 1.147.0, and Node 24.13.0 ran three fresh 5 MB Source sessions against the Milestone 2.5 build before the final review refinements. Each session typed 384 keys at a target cadence of 75 ms, recorded 384 browser journals and 384 host checkpoint replies, and autosaved byte-exact Markdown. Both stores recorded zero failures.

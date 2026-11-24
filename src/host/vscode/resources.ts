@@ -1,8 +1,10 @@
 import type { LiveDocumentTransport } from './liveDocument'
 import type { FolioHost } from '../contracts'
-import { concurrentWorkspaceImages, type HostMessage } from './protocol'
+import { concurrentWorkspaceImages, type ClientMessage, type HostMessage } from './protocol'
 
 type PickerReply = Extract<HostMessage, { type: 'imagePickerResult' }>
+type PickerOperation = Omit<Extract<ClientMessage, { type: 'pickWorkspaceImage' }>, 'id' | 'revision'> |
+  Omit<Extract<ClientMessage, { type: 'confirmWorkspaceImage' }>, 'id' | 'revision'>
 
 export function createWorkspaceResources(transport: LiveDocumentTransport): NonNullable<FolioHost['resources']> & { dispose(): void } {
   let nextId = 1
@@ -17,7 +19,7 @@ export function createWorkspaceResources(transport: LiveDocumentTransport): NonN
     if (message.type === 'imagePickerResult') pickerRequests.get(message.id)?.(message)
   })
 
-  function pick(revision: number, signal: AbortSignal, selection?: number) {
+  function pick(revision: number, signal: AbortSignal, operation: PickerOperation) {
     return new Promise<PickerReply | undefined>((resolve, reject) => {
       if (disposed || signal.aborted) { resolve(undefined); return }
       const id = nextId++
@@ -34,8 +36,7 @@ export function createWorkspaceResources(transport: LiveDocumentTransport): NonN
       pickerRequests.set(id, finish)
       signal.addEventListener('abort', cancel, { once: true })
       try {
-        transport.post(selection === undefined ? { type: 'pickWorkspaceImage', id, revision } :
-          { type: 'confirmWorkspaceImage', id, revision, selection })
+        transport.post({ ...operation, id, revision })
       } catch { finish({ type: 'imagePickerResult', id, error: 'Folio could not reach the VS Code image picker.' }) }
     })
   }
@@ -88,8 +89,8 @@ export function createWorkspaceResources(transport: LiveDocumentTransport): NonN
       return result
     },
     async openMarkdown(reference) { await request('open', reference) },
-    async pickWorkspaceImage(revision, signal) {
-      const result = await pick(revision, signal)
+    async pickWorkspaceImage(revision, signal, previousSelection) {
+      const result = await pick(revision, signal, { type: 'pickWorkspaceImage', previousSelection })
       if (!result?.reference || signal.aborted) return
       if (!result.preview) throw new Error('VS Code could not preview the selected image.')
       const image = new Image()
@@ -104,7 +105,9 @@ export function createWorkspaceResources(transport: LiveDocumentTransport): NonN
       } finally { signal.removeEventListener('abort', cancel) }
     },
     async confirmWorkspaceImage(selection, revision, signal) {
-      if (!await pick(revision, signal, selection) && !signal.aborted) throw new Error('The workspace image selection is no longer available. Browse again.')
+      if (!await pick(revision, signal, { type: 'confirmWorkspaceImage', selection }) && !signal.aborted) {
+        throw new Error('The workspace image selection is no longer available. Browse again.')
+      }
     },
     dispose() {
       disposed = true

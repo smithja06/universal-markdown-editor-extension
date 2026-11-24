@@ -7,5 +7,9 @@ export default defineConfig({
   root: fileURLToPath(new URL('./extension', import.meta.url)),
   base: './',
   plugins: [react(), tailwindcss()],
-  build: { outDir: 'dist/webview', assetsInlineLimit: 0 },
+  build: {
+    outDir: 'dist/webview',
+    assetsInlineLimit: 0,
+    license: { fileName: 'THIRD_PARTY_NOTICES.md' },
+  },
 })

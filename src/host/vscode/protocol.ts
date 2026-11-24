@@ -34,7 +34,7 @@ export type ClientMessage =
   | { type: 'copy'; id: number; text: string }
   | { type: 'resource'; id: number; operation: 'image' | 'open'; reference: string }
   | { type: 'cancelResource'; id: number }
-  | { type: 'pickWorkspaceImage'; id: number; revision: number }
+  | { type: 'pickWorkspaceImage'; id: number; revision: number; previousSelection?: number }
   | { type: 'confirmWorkspaceImage'; id: number; revision: number; selection: number }
   | { type: 'cancelWorkspaceImage'; id: number }
 
@@ -76,7 +76,8 @@ export function isClientMessage(value: unknown): value is ClientMessage {
   if (value.type === 'resource') return isGeneration(value.id) && (value.operation === 'image' || value.operation === 'open') &&
     typeof value.reference === 'string' && value.reference.length > 0 && value.reference.length <= 4096
   if (value.type === 'cancelResource') return isGeneration(value.id)
-  if (value.type === 'pickWorkspaceImage') return isGeneration(value.id) && integer(value.revision)
+  if (value.type === 'pickWorkspaceImage') return isGeneration(value.id) && integer(value.revision) &&
+    (value.previousSelection === undefined || (isGeneration(value.previousSelection) && value.previousSelection < value.id))
   if (value.type === 'confirmWorkspaceImage') return isGeneration(value.id) && integer(value.revision) && isGeneration(value.selection)
   if (value.type === 'cancelWorkspaceImage') return isGeneration(value.id)
   return value.type === 'command' && (value.command === 'save' || value.command === 'undo' || value.command === 'redo')
