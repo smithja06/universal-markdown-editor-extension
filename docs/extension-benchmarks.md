@@ -1,5 +1,25 @@
 # Folio Phase 6 extension benchmarks
 
+## Milestone 2.7 Windows release candidate
+
+The RC's runtime bundles match Milestone 2.6 byte-for-byte. The one-worker harness ran sequentially after the builds on Windows 11 Pro 25H2 x64 (26200.9974), fixed NTFS, VS Code 1.147.0, and Node 24.13.0 on the AMD Ryzen AI 9 HX 370 in Windows' Silent power scheme. Each case used a new profile. Source ran 384 paced keys per repeat. The Visual and Split smoke tests ran 16 paced keys each.
+
+| 5 MB p95, ms | 2.5 preserved bundle | 2.6 matched repeat or Split smoke | 2.7 median or smoke | 2.7 individual runs |
+| --- | ---: | ---: | ---: | ---: |
+| Source typing | 54.46 | 48.47 | 51.28 | 54.44 / 51.28 / 42.71 |
+| Source checkpoint creation | 35.70 | 30.40 | 31.90 | 34.90 / 31.90 / 26.90 |
+| Source checkpoint acknowledgement | 31.90 | 23.70 | 26.60 | 29.00 / 26.60 / 20.80 |
+| Visual typing | 89.12 | 90.23 | 94.13 | 94.13 |
+| Split typing | 100.66 | 140.34 | 122.59 | 122.59 |
+
+The Split baseline is the historical 2.5 smoke. Milestone 2.7 startup was 3.11–3.49 s for Source, 3.20 s for Visual, and 3.77 s for Split. Source and Split switched in 0.74–0.76 s and 1.02 s respectively. Each of the five timing cases delivered every checkpoint to both stores with zero failures and autosaved exact Markdown. All three Source runs met the [existing investigation thresholds](#regression-thresholds). The cause of the initial Milestone 2.6 timing variation remains unknown.
+
+The disposal test completed all 16 two-view cycles. Host JS heap moved from 49.71 to 50.28 MiB, host RSS from 222.34 to 223.88 MiB, and workbench JS heap from 68.31 to 70.73 MiB. The workbench heap grew 0.18 MiB from cycles 12 to 16. This test samples short-lived views.
+
+A separate 384-key Visual case on the same 5 MB fixture ran for 32.11 s. It measured 96.64 ms typing p95, 61.50 ms checkpoint creation p95, and 2,430.50 ms checkpoint acknowledgement p95. Delivery after the host reply accounted for 2,418 ms p95 and the host handler recorded 15.54 ms p95. All 384 checkpoints reached both stores without failure, and the document autosaved byte-exact Markdown. The active webview JS heap samples were 60.69 MiB before typing, 194.91 MiB after 128 keys, 209.97 MiB after 256 keys, and 221.32 MiB after draining the queue. This single run measures live allocations and renderer delivery in a longer session. Post-close retention after sustained Visual use remains unmeasured.
+
+Use the [handoff commands](PROJECT_HANDOFF.md#milestone-27-verification) to reproduce these runs.
+
 ## Milestone 2.6 release candidate
 
 The existing one-worker desktop harness ran on Windows 11 Pro 25H2 x64 (26200.9974), VS Code 1.147.0, and Node 24.13.0 on the AMD Ryzen AI 9 HX 370. The active Windows power scheme was Silent. Each case used a fresh profile on local NTFS. The initial runs used 384 paced Source keys and 16 paced Visual or Split keys per 5 MB document. Every run observed all browser and host checkpoints, zero failures in both stores, and exact autosaved Markdown.

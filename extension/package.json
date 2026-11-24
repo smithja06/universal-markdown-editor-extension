@@ -15,7 +15,7 @@
   "main": "./dist/extension.cjs",
   "extensionKind": ["workspace"],
   "capabilities": { "virtualWorkspaces": true, "untrustedWorkspaces": { "supported": false } },
-  "files": ["dist/extension.cjs", "dist/webview", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "files": ["dist/extension.cjs", "dist/webview", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "EPL-1.0.txt"],
   "contributes": {
     "commands": [
       { "command": "folio.showVisual", "title": "Show Visual Editor", "category": "Folio", "enablement": "activeCustomEditorId == folio.markdown" },

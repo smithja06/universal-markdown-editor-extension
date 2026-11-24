@@ -34,4 +34,4 @@ npm ci
 npm run package:extension
 ```
 
-Install the resulting `extension/dist/folio.vsix`. The build uses the lockfile. The package includes the MIT license, `THIRD_PARTY_NOTICES.md`, and the generated `dist/webview/THIRD_PARTY_NOTICES.md`. Run `npm run test:extension` for the isolated desktop tests. Set `FOLIO_VSCODE_EXECUTABLE` to the installed VS Code application binary if discovery fails.
+Install the resulting `extension/dist/folio.vsix`. The build uses the lockfile. The package includes Folio's MIT license, `EPL-1.0.txt`, and third-party notices. The top-level notices link to the upstream ELK, EMF GWT, and Xbase sources. This candidate is for local validation while the release source archive and distribution terms are reviewed. Run `npm run test:extension` for the isolated desktop tests. Set `FOLIO_VSCODE_EXECUTABLE` to the installed VS Code application binary if discovery fails.
