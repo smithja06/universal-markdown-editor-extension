@@ -1,5 +1,22 @@
 # VS Code platform qualification
 
+## Milestone 2.7 environment matrix
+
+| Environment | Actual coverage |
+| --- | --- |
+| Windows 11 Pro 25H2 x64, build 26200.9974 | VS Code 1.147.0 x64 (`8a14f0cc1b08d531eb83255ea3764ae22aa932b5`, Electron 43.8.9, Chromium 150.0.7871.250, Node 24.22.1) ran all 44 desktop cases in a local workspace host. The fixtures used a drive-letter `file:` URI with empty authority on fixed `C:` NTFS. The directory case-sensitive attribute was disabled. The real VS Code chooser used Simple File Dialog presentation. |
+| Windows minimum-version smoke | VS Code 1.100.0 x64 (`19e0f9e681ecb8e5c09d8784acaa601316ca4571`, Electron 34.5.1, Chromium 132.0.6834.210, Node 20.19.0) installed the actual VSIX in separate local profiles for ordinary use and Restricted Mode. |
+| Windows synthetic provider | Local Windows extension-host fixture on `folio-test-remote://test-server/project`. Browse was gated. The tests covered manual image previews, links, workspace-root resolution, temporary unavailability, rename, delete, and pending recovery. Separate path tests cover authority mismatch. |
+| Native macOS and Linux | This checkout's execution host was Windows and had no access to either native graphical desktop. No OS/architecture, filesystem, chooser, or screen-reader evidence was collected for those platforms. [Native desktop runbook](#native-macos-and-linux-desktops) |
+| VS Code Remote | `wsl.exe --list --verbose` reported WSL uninstalled. OpenSSH was present, with no user SSH configuration or target supplied. Docker and Podman were absent from PATH, and no running container runtime or active Remote workspace was available. [Real Remote runbook](#real-remote-over-wsl-dev-containers-or-ssh) |
+| Other Windows filesystems, network or virtual workspaces and browser-only VS Code | Fixed local NTFS remains the only picker gate. Virtual workspaces are supported by the manifest and the Node workspace host provisions the extension. Browser-only VS Code lacks that host. |
+
+The 12 picker cases verify selection in all editing modes, including both Split panes, with percent-encoded Unicode and reserved characters. They compare raw BOM/CRLF and surrounding authored Markdown, exercise native history and exact Save, and compare asset bytes and directory entries. The suite also checks cancellation, stale selection invalidation, competing views, multi-root and junction isolation, invalid or oversized images, changed or missing assets, and read-only Markdown. Other desktop cases exercise commands, keyboard focus, light, dark and high-contrast themes, links, manual previews, and both recovery stores. OS-native dialog presentation and hands-on screen-reader use remain unverified.
+
+The strict fixture passed 44 cases and the native x64 probe reproduced the normalization collision, supporting the existing reference-only decision. [Probe procedure](#milestone-24-local-filesystem-probes) · [Attachment design](extension-attachments.md)
+
+Isolated installs of the exact Milestone 2.7 VSIX passed on 1.147.0 and 1.100.0. Each version opened Markdown in the native editor by default, offered opt-in Folio with all three modes, saved exact BOM/CRLF bytes, and kept Folio disabled in a separate Restricted Mode profile. On 1.147.0, the installed extension selected an existing image through the real Simple File Dialog. The generated percent-encoded relative reference previewed in Split. VS Code Save, Undo, and Redo produced the expected Markdown bytes and preserved asset bytes and directory entries. The 1.147.0 smoke also verified native default for `.markdown` and rendered an ELK-configured Mermaid diagram in Folio. [Artifact and command record](PROJECT_HANDOFF.md#milestone-27-verification)
+
 ## Milestone 2.6 environment matrix
 
 | Environment | Evidence and picker availability |

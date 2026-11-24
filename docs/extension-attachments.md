@@ -45,6 +45,8 @@ The picker uses metadata and read operations only. Folio performs no asset creat
 
 ## Deferred upload design
 
+Milestone 2.7 reran the Windows desktop picker and strict filesystem checks. The supported browse environment is a trusted local Windows workspace on a fixed NTFS volume with a drive-letter file URI and empty authority. The native probe again admitted normalization-equivalent names, so the reference-only design and disabled automatic uploads apply to every backend. [Windows evidence](extension-qualification.md#milestone-27-environment-matrix)
+
 The following sections retain the design and test requirements for a future qualified automatic-write backend.
 
 ### Selection and destination

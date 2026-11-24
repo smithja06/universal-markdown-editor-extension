@@ -1,6 +1,6 @@
 # Folio in VS Code
 
-## Phase 6 through Milestone 2.6
+## Phase 6 through Milestone 2.7
 
 The extension registers `folio.markdown` as an optional `CustomTextEditorProvider` for `.md` and `.markdown`. VS Code continues to open Markdown in the native Text Editor by default. **Reopen Editor With → Folio Markdown Editor** opens the shared Folio interface with Visual, Markdown, and Split views. [Custom Editor API](https://code.visualstudio.com/api/extension-guides/custom-editors)
 
@@ -101,6 +101,8 @@ The desktop suite drives VS Code's built-in Simple File Dialog through the produ
 
 ## Milestone 2.6 release assessment
 
+See the [Milestone 2.7 decision](#milestone-27-release-assessment) for the current release status.
+
 | Priority | Finding |
 | --- | --- |
 | Release blocking for expanded picker support | Native macOS, native Linux, and real Remote need their own VSIX and filesystem qualification. The picker gate stays limited to local Windows fixed NTFS. Any Remote qualification also needs real disconnect, reconnect, extension-host restart, and workspace identity checks. [Platform record and runbooks](extension-qualification.md#milestone-26-environment-matrix) |
@@ -112,3 +114,9 @@ The desktop suite drives VS Code's built-in Simple File Dialog through the produ
 | Future enhancement | Longer memory profiling, native dialog and assistive-technology coverage across qualified hosts, and transport-specific automation. Automatic uploads require a separate filesystem architecture that establishes containment, collision handling, and ownership after a restart. |
 
 The extension README covers installation, native editor opt-in, platform and Trust limitations, installable build steps, and draft recovery. Folio adds no extension telemetry or general webview network access. VS Code manages its own telemetry settings. The VSIX carries the extension MIT license and bundled dependency notices. The release material uses text instructions and the existing project documentation.
+
+## Milestone 2.7 release assessment
+
+The Windows release candidate is available for local validation as `smithja06.folio-markdown-editor@0.1.0`. Its host bundle and all 174 webview assets match Milestone 2.6 byte-for-byte. The package adds source references and license notices for the EPL 2.0 ELK and Xbase runtime and EPL 1.0 EMF GWT runtime, plus attribution for FastDom and other bundled inputs. The distribution record gives exact versions, artifact and source hash checks, and the steps to prepare and verify the source companion. The exact MELK build input, complete runtime notice closure, and public delivery terms and source arrangement need review before external distribution. [Distribution record](extension-distribution.md) · [Final verification](PROJECT_HANDOFF.md#milestone-27-verification)
+
+Windows qualification covers local fixed NTFS through the real VS Code Simple File Dialog. Native macOS and Linux desktops and genuine Remote transports remain unqualified. Hands-on use with assistive technology and the Windows OS-native dialog presentation remain open. [Environment matrix and runbooks](extension-qualification.md)
