@@ -82,7 +82,7 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
   function browse() {
     if (!workspacePicker || !imageTarget) return
     void checkImage(async (revision, signal) => {
-      const result = await workspacePicker.pickWorkspaceImage(revision, signal)
+      const result = await workspacePicker.pickWorkspaceImage(revision, signal, picked.current)
       if (!result || signal.aborted) return
       imageTarget.revision()
       picked.current = result.id

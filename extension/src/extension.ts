@@ -38,7 +38,7 @@ interface Client {
   imageReads: number
   navigation?: number
   imagePickerRequest?: number
-  imageSelection?: { id: number; revision: number; image: WorkspaceImageSelection }
+  imageSelections?: { id: number; revision: number; image: WorkspaceImageSelection }[]
   acknowledgement?: Acknowledgement
 }
 
@@ -149,7 +149,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
         if (message.type === 'dismiss') return void this.dismiss(view, client, message)
         if (message.type === 'cancelWorkspaceImage') {
           if (client.imagePickerRequest === message.id) client.imagePickerRequest = undefined
-          if (client.imageSelection?.id === message.id) client.imageSelection = undefined
+          client.imageSelections = client.imageSelections?.filter(selection => selection.id !== message.id)
           return
         }
         if (message.type === 'pickWorkspaceImage' || message.type === 'confirmWorkspaceImage') {
@@ -301,21 +301,25 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
       if (!await this.verifyFile(session)) throw new Error(unavailable)
       check()
       if (browsing) {
+        // Keep the displayed selection until the webview can decode a replacement.
+        // Each browse retains at most that selection and one new candidate.
+        client.imageSelections = client.imageSelections?.filter(selection =>
+          selection.id === message.previousSelection && selection.revision === revision) ?? []
         const result = await pickWorkspaceImage(session.document, check)
         if (!result) { if (active()) reply({}); return }
         if (!await this.verifyFile(session)) throw new Error(unavailable)
         check()
-        client.imageSelection = { id, revision, image: result.image }
+        client.imageSelections.push({ id, revision, image: result.image })
         reply({ reference: result.image.reference, preview: result.preview })
       } else {
-        const selection = client.imageSelection
-        if (selection?.id !== message.selection || selection.revision !== revision) {
+        const selection = client.imageSelections?.find(item => item.id === message.selection && item.revision === revision)
+        if (!selection) {
           throw new Error('The selected image has expired. Browse again.')
         }
         const reference = await confirmWorkspaceImage(session.document, selection.image)
         if (!await this.verifyFile(session)) throw new Error(unavailable)
         check()
-        client.imageSelection = undefined
+        client.imageSelections = undefined
         reply({ reference })
       }
     } catch (error) {

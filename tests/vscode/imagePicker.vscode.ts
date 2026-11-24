@@ -118,6 +118,47 @@ test('cancels the picker without changing Markdown and keeps manual entry availa
   expect((await read(file)).text).toBe(original)
 })
 
+test('keeps the last decoded selection after cancelled and undecodable replacements', async ({ desktop }) => {
+  const { page, workspace, command, read } = desktop
+  const media = await fixture(workspace)
+  const truncated = join(media, 'truncated.png')
+  await writeFile(truncated, bytes.subarray(0, 8))
+  await command('open', { file, editor: 'folio' })
+  const folio = frame(page)
+  await folio.getByRole('button', { name: 'Markdown Source', exact: true }).click()
+  const source = folio.getByRole('textbox', { name: 'Markdown source editor' })
+  await source.getByText('Figure: replace', { exact: true }).click()
+  await source.press('End')
+  const dialog = await imageDialog(folio, true)
+  const browse = dialog.getByRole('button', { name: 'Browse workspace images' })
+  const alt = dialog.getByLabel('Alternative text')
+  await browse.click()
+  await choose(page, join(media, assetName))
+  await expect(alt).toBeFocused()
+  await alt.fill('Original selection')
+
+  await browse.click()
+  await expect(chooser(page)).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(browse).toBeEnabled()
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await browse.click()
+    await choose(page, truncated)
+    await expect(dialog.getByRole('alert')).toContainText('could not be decoded')
+    await expect(dialog.getByLabel('Image URL')).toHaveValue(reference)
+    await expect(alt).toHaveValue('Original selection')
+  }
+
+  await alt.press('Enter')
+  await expect(dialog).toBeHidden()
+  const edited = original.replace('Figure: replace', `Figure: replace![Original selection](${reference})`)
+  await expect.poll(async () => (await read(file)).text).toBe(edited)
+  await command('saveDocument', { file })
+  expect(await readFile(join(workspace, file))).toEqual(Buffer.from('\uFEFF' + edited))
+  expect(await readFile(join(media, assetName))).toEqual(bytes)
+  expect(await readFile(truncated)).toEqual(bytes.subarray(0, 8))
+})
+
 test('rejects a pending selection after a native edit and preserves both views', async ({ desktop }) => {
   const { page, workspace, command, read } = desktop
   const media = await fixture(workspace)

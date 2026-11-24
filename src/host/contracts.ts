@@ -74,7 +74,7 @@ export interface FolioHost {
   resources?: {
     image(reference: string, signal: AbortSignal): Promise<string | undefined>
     openMarkdown(reference: string): Promise<void>
-    pickWorkspaceImage(revision: number, signal: AbortSignal): Promise<{ id: number; reference: string } | undefined>
+    pickWorkspaceImage(revision: number, signal: AbortSignal, previousSelection?: number): Promise<{ id: number; reference: string } | undefined>
     confirmWorkspaceImage(selection: number, revision: number, signal: AbortSignal): Promise<void>
   }
   search(texts: string[], term: string, options: SearchOptions, signal: AbortSignal): Promise<TextMatch[]>

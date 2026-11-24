@@ -28,6 +28,8 @@ it('validates message directions and requires safe revisions and normalized LF s
 
 it('only accepts bounded picker results and valid revision-bound requests', () => {
   expect(isClientMessage({ type: 'pickWorkspaceImage', id: 1, revision: 4 })).toBe(true)
+  expect(isClientMessage({ type: 'pickWorkspaceImage', id: 2, revision: 4, previousSelection: 1 })).toBe(true)
+  expect(isClientMessage({ type: 'pickWorkspaceImage', id: 2, revision: 4, previousSelection: 0 })).toBe(false)
   expect(isClientMessage({ type: 'pickWorkspaceImage', id: 1, revision: -1 })).toBe(false)
   expect(isClientMessage({ type: 'confirmWorkspaceImage', id: 2, selection: 1, revision: 4 })).toBe(true)
   expect(isClientMessage({ type: 'confirmWorkspaceImage', id: 2, selection: 0, revision: 4 })).toBe(false)
