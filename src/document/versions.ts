@@ -1,4 +1,4 @@
-import type { MarkdownFile } from './files'
+import { sameContent, sameLineage, type DocumentContent } from './formats/content'
 import type { DocumentFile } from './workspace'
 import {
   documentsStore, draftStores, getDraft, getSummary, putDraft, requestResult, requireLiveDocument,
@@ -24,7 +24,7 @@ export interface VersionSummary {
   bytes: number
 }
 
-export interface DocumentVersion extends VersionSummary { content: MarkdownFile }
+export interface DocumentVersion extends VersionSummary { content: DocumentContent }
 
 export interface VersionResult {
   status: 'created' | 'existing' | 'promoted' | 'deferred'
@@ -39,13 +39,14 @@ function dateRange(documentId: string, kind?: VersionKind) {
   return IDBKeyRange.bound([...key, 0], [...key, Number.MAX_SAFE_INTEGER])
 }
 
-function contentOf({ source, bom, lineEnding, original }: MarkdownFile): MarkdownFile {
-  return { source, bom, lineEnding, ...(original?.source === source ? { original } : {}) }
-}
-
-function sameContent(left: MarkdownFile, right: MarkdownFile) {
-  return left.source === right.source && left.bom === right.bom && left.lineEnding === right.lineEnding &&
-    (left.original?.source === left.source ? left.original.text : undefined) === (right.original?.source === right.source ? right.original.text : undefined)
+function contentOf(file: DocumentFile): DocumentContent {
+  const { source, bom, lineEnding } = file
+  if (file.format === 'txt') {
+    const { format, schemaVersion, mixedLineEndings, originalFile } = file
+    return { format, schemaVersion, source, bom, lineEnding, mixedLineEndings, ...(originalFile ? { originalFile } : {}) }
+  }
+  return { format: 'markdown', schemaVersion: 1, source, bom, lineEnding,
+    ...(file.original?.source === source ? { original: file.original } : {}) }
 }
 
 function sameDraft(left: DocumentFile, right: DocumentFile) {
@@ -61,7 +62,7 @@ async function appendVersion(transaction: IDBTransaction, file: DocumentFile, tr
   const kind = trigger === 'manual' || trigger === 'recovery' ? trigger : 'automatic'
   const content = contentOf(file)
   if (latest && latest.title === file.title) {
-    const previous: MarkdownFile | undefined = await requestResult(payloads.get(latest.id))
+    const previous: DocumentContent | undefined = await requestResult(payloads.get(latest.id))
     if (previous && sameContent(content, previous)) {
       if (kind !== 'automatic' && latest.kind === 'automatic') {
         const promoted = { ...latest, kind }
@@ -105,7 +106,7 @@ export function listVersions(documentId: string): Promise<VersionSummary[]> {
 async function versionIn(transaction: IDBTransaction, documentId: string, id: string): Promise<DocumentVersion | undefined> {
   const summary: VersionSummary | undefined = await requestResult(transaction.objectStore(versionsStore).get(id))
   if (summary?.documentId !== documentId) return undefined
-  const content: MarkdownFile | undefined = await requestResult(transaction.objectStore(versionContentStore).get(id))
+  const content: DocumentContent | undefined = await requestResult(transaction.objectStore(versionContentStore).get(id))
   if (!content) throw new Error('This saved version is incomplete.')
   return { ...summary, content }
 }
@@ -118,6 +119,7 @@ export function restoreVersion(current: DocumentFile, id: string, known?: Docume
   return workspaceTransaction([...historyStores, ...draftStores], 'readwrite', async transaction => {
     const version = await versionIn(transaction, current.id, id)
     if (!version) throw new Error('This version is no longer available.')
+    if (!sameLineage(current, version.content)) throw new Error('This version does not match the document format or original file.')
     const summary = await getSummary(transaction, current.id)
     requireLiveDocument(summary)
     const persisted = await getDraft(transaction, current.id)
@@ -130,7 +132,7 @@ export function restoreVersion(current: DocumentFile, id: string, known?: Docume
     const now = Date.now()
     await appendVersion(transaction, current, 'recovery', now)
     const restored: DocumentFile = {
-      ...current, original: undefined, ...version.content, title: version.title,
+      ...version.content, id: current.id, savedSource: current.savedSource, savedTitle: current.savedTitle, title: version.title,
       updated: Math.max(now, current.updated + 1, (persisted?.updated ?? -1) + 1),
       historyEpoch: crypto.randomUUID(),
     }

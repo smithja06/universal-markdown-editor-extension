@@ -27,6 +27,23 @@ export function updateMetadata(source: string, key: string, value: string | stri
 export interface Heading { title: string; level: number; anchor: string; position: number }
 export interface Statistics { words: number; characters: number; compact: number; minutes: number; headings: number; links: number; images: number }
 
+function wordStatistics(text: string) {
+  let words = 0
+  for (const part of new Intl.Segmenter(undefined, { granularity: 'word' }).segment(text)) if (part.isWordLike) words++
+  return { words, minutes: words ? Math.ceil(words / 225) : 0 }
+}
+
+export function plainDocumentInfo(text: string) {
+  const whitespace = /\s/u
+  let characters = 0
+  let compact = 0
+  for (const character of text) {
+    characters++
+    if (!whitespace.test(character)) compact++
+  }
+  return { outline: [] as Heading[], statistics: { ...wordStatistics(text), characters, compact, headings: 0, links: 0, images: 0 } }
+}
+
 export function documentInfo(doc: ProseMirrorNode) {
   const outline: Heading[] = []
   const anchors = new Set<string>()
@@ -54,8 +71,6 @@ export function documentInfo(doc: ProseMirrorNode) {
     if (node.type.name === 'rawInline' && /^\[(?!\^)/.test(node.attrs.value)) return /^\[([^\]]*)\]/.exec(node.attrs.value)?.[1] ?? ''
     return ''
   })
-  let words = 0
-  for (const part of new Intl.Segmenter(undefined, { granularity: 'word' }).segment(text)) if (part.isWordLike) words++
-  const statistics: Statistics = { words, characters: Array.from(text).length, compact: Array.from(text.replace(/\s/gu, '')).length, minutes: words ? Math.ceil(words / 225) : 0, headings: outline.length, links, images }
+  const statistics: Statistics = { ...wordStatistics(text), characters: Array.from(text).length, compact: Array.from(text.replace(/\s/gu, '')).length, headings: outline.length, links, images }
   return { outline, statistics }
 }

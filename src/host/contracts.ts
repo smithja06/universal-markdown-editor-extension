@@ -1,5 +1,6 @@
 import type { Command, ShortcutPlatform } from '../core/commands'
 import type { MarkdownFile, WritableMarkdownHandle } from '../document/files'
+import type { OriginalFile } from '../document/formats/content'
 import type { Appearance, DocumentFile, DocumentSummary, WorkspaceLayout } from '../document/workspace'
 import type { DocumentVersion, VersionResult, VersionSummary, VersionTrigger } from '../document/versions'
 import type { SearchOptions, TextMatch } from '../core/search'
@@ -14,7 +15,8 @@ export interface DocumentStorage {
   loadLayout(): Promise<WorkspaceLayout | undefined>
   storeLayout(layout: WorkspaceLayout): Promise<void>
   readDraft(id: string): Promise<DocumentFile | undefined>
-  insertDraft(file: DocumentFile, words?: number): Promise<DocumentSummary>
+  insertDraft(file: DocumentFile, words?: number, original?: OriginalFile, signal?: AbortSignal): Promise<DocumentSummary>
+  readOriginal(id: string): Promise<Blob | undefined>
   writeDraft(file: DocumentFile, words?: number, expected?: DocumentFile): Promise<DocumentSummary>
   touchDocument(id: string, openedAt: number): Promise<DocumentSummary>
   trashDocument(id: string): Promise<DocumentSummary>
@@ -25,9 +27,8 @@ export interface DocumentStorage {
   restoreVersion(file: DocumentFile, id: string, known?: DocumentFile, words?: number): Promise<DocumentFile>
 }
 
-export interface FileInput { name: string; arrayBuffer(): Promise<ArrayBuffer> }
+export interface FileInput { name: string; size?: number; arrayBuffer(): Promise<ArrayBuffer> }
 export interface FileOperations {
-  readMarkdown(input: FileInput): Promise<MarkdownFile>
   saveMarkdown(file: MarkdownFile, title: string, options: { handle?: WritableMarkdownHandle; saveAs?: boolean; download?: boolean }): Promise<{ filename: string; handle?: WritableMarkdownHandle }>
   download(filename: string, data: string | Uint8Array<ArrayBuffer>, mediaType: string): void
   addAttachment(input: FileInput & { type: string }): Promise<{ url: string; alt: string }>

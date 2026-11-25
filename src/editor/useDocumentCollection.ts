@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { draftSummary, emptyLayout, type DocumentFile, type DocumentSummary, type WorkspaceLayout } from '../document/workspace'
+import type { OriginalFile } from '../document/formats/content'
 import type { DocumentStorage } from '../host/contracts'
 
 export function useDocumentCollection(storage: DocumentStorage) {
@@ -69,6 +70,15 @@ export function useDocumentCollection(storage: DocumentStorage) {
     })
   }, [cache, enqueue, storage, updateSummary])
 
+  const insertImported = useCallback((file: DocumentFile, words: number, original: OriginalFile | undefined, signal: AbortSignal) => {
+    return enqueue(async () => {
+      const summary = await storage.insertDraft(file, words, original, signal)
+      drafts.current.set(file.id, file)
+      persisted.current.set(file.id, file)
+      updateSummary(summary)
+    })
+  }, [enqueue, storage, updateSummary])
+
   const loadFile = useCallback(async (id: string) => {
     if (documents.current.get(id)?.deletedAt !== undefined) return
     const existing = drafts.current.get(id)
@@ -95,5 +105,5 @@ export function useDocumentCollection(storage: DocumentStorage) {
     newIds.current.delete(id)
   }, [])
 
-  return { library, layout, documents, workspace, drafts, persisted, writing, enqueue, updateSummary, loadCollection, changeLayout, cache, persist, loadFile, opened, forget }
+  return { library, layout, documents, workspace, drafts, persisted, writing, enqueue, updateSummary, loadCollection, changeLayout, cache, persist, insertImported, loadFile, opened, forget }
 }

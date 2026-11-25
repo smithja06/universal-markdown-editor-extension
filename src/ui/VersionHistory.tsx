@@ -22,6 +22,7 @@ interface Props {
   title: string
   theme: 'light' | 'dark'
   automaticError: string
+  plainText?: boolean
   load(documentId: string): Promise<VersionSummary[]>
   read: DocumentStorage['readVersion']
   create(): ReturnType<DocumentStorage['recordVersion']>
@@ -29,7 +30,7 @@ interface Props {
   close(): void
 }
 
-export function VersionHistory({ documentId, title, theme, automaticError, load, read, create, restore, close }: Props) {
+export function VersionHistory({ documentId, title, theme, automaticError, plainText, load, read, create, restore, close }: Props) {
   const [versions, setVersions] = useState<VersionSummary[]>()
   const [selection, setSelection] = useState<{ id: string }>()
   const [preview, setPreview] = useState<DocumentVersion>()
@@ -68,7 +69,7 @@ export function VersionHistory({ documentId, title, theme, automaticError, load,
   }, [documentId, read, selection])
 
   useEffect(() => {
-    if (!preview || mode !== 'rendered') return
+    if (!preview || preview.content.format === 'txt' || mode !== 'rendered') return
     let active = true
     void import('../document/export').then(module => module.renderVersionPreview(preview.content.source)).then(
       html => { if (active) setRendered(html) },
@@ -147,10 +148,10 @@ export function VersionHistory({ documentId, title, theme, automaticError, load,
             : <p>{selection ? 'Loading preview…' : 'Choose a version to preview.'}</p>}</div>}
           {preview && <>
             <div className="version-preview-top">
-              <div role="group" aria-label="Preview format" className="version-formats">
+              {preview.content.format !== 'txt' && <div role="group" aria-label="Preview format" className="version-formats">
                 <button type="button" aria-pressed={mode === 'rendered'} onClick={() => setMode('rendered')}>Rendered</button>
                 <button type="button" aria-pressed={mode === 'markdown'} onClick={() => setMode('markdown')}>Markdown</button>
-              </div>
+              </div>}
               {!confirm && <button type="button" ref={restoreButton} className="secondary-button" disabled={!!busy} onClick={() => { setConfirm(true); setError(''); setStatus('') }}>Restore version</button>}
             </div>
             {confirm && <div className="version-confirm" role="group" aria-label="Confirm version restore">
@@ -160,13 +161,13 @@ export function VersionHistory({ documentId, title, theme, automaticError, load,
                 <button type="button" className="primary-button" disabled={!!busy} onClick={() => void restoreSelected()}>{busy === 'restore' ? 'Restoring…' : 'Confirm restore'}</button>
               </div>
             </div>}
-            {mode === 'markdown' ? <pre className="version-markdown" role="region" aria-label="Markdown version preview" tabIndex={0}>{preview.content.source}</pre>
+            {mode === 'markdown' || preview.content.format === 'txt' ? <pre className="version-markdown" role="region" aria-label={preview.content.format === 'txt' ? 'Plain text version preview' : 'Markdown version preview'} tabIndex={0}>{preview.content.source}</pre>
               : rendered ? <iframe className="version-frame" title="Rendered version preview" sandbox="" srcDoc={rendered} style={{ colorScheme: theme }} />
                 : <p className="muted version-empty" role="status">Rendering preview…</p>}
           </>}
         </div>
       </div>
-      <p className="muted version-footer">{storage} of Markdown stored for this document. Folio keeps the {automaticVersionLimit} most recent automatic checkpoints and retains versions you create or recover.</p>
+      <p className="muted version-footer">{storage} of {plainText ? 'plain text' : 'Markdown'} stored for this document. Folio keeps the {automaticVersionLimit} most recent automatic checkpoints and retains versions you create or recover.</p>
     </div>
   </Modal>
 }

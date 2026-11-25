@@ -9,6 +9,7 @@ import { IconButton } from './controls'
 export interface FindPanelHandle { focus(replace?: boolean): void; move(step: number): void }
 interface Props {
   readOnly?: boolean
+  plainText?: boolean
   panelRef: Ref<FindPanelHandle>
   documentId: string
   title: string
@@ -24,11 +25,12 @@ interface Props {
   close(): void
 }
 
-export function FindPanel({ panelRef, documentId, title, mode, startReplace, find, capture, subscribe, present, replace, clear, openSource, close, readOnly }: Props) {
+export function FindPanel({ panelRef, documentId, title, mode, startReplace, find, capture, subscribe, present, replace, clear, openSource, close, readOnly, plainText }: Props) {
   const replaceId = useId()
   const [term, setTerm] = useState('')
   const [value, setValue] = useState('')
-  const [scope, setScope] = useState<SearchScope>('rendered')
+  const [markdownScope, setScope] = useState<SearchScope>('rendered')
+  const scope = plainText ? 'source' : markdownScope
   const [options, setOptions] = useState<SearchOptions>({ caseSensitive: false, wholeWord: false, regex: false })
   const [expanded, setExpanded] = useState(startReplace)
   const [revision, setRevision] = useState(0)
@@ -119,8 +121,8 @@ export function FindPanel({ panelRef, documentId, title, mode, startReplace, fin
   }
 
   const selected = hits?.[active]
-  const sourceOnly = scope === 'source' && mode === 'visual' && selected && !selected.visual.length
-  const unmapped = scope === 'rendered' && mode === 'source' && selected && !selected.source.length
+  const sourceOnly = !plainText && scope === 'source' && mode === 'visual' && selected && !selected.visual.length
+  const unmapped = !plainText && scope === 'rendered' && mode === 'source' && selected && !selected.source.length
 
   return <section className="find-panel" aria-label="Find and replace" onKeyDown={event => {
     if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); close() }
@@ -130,9 +132,9 @@ export function FindPanel({ panelRef, documentId, title, mode, startReplace, fin
       <label className="find-input"><Search size={15} /><input ref={input} aria-label="Find text" placeholder={'Find in ' + title} value={term} onChange={event => { resetResult(); setTerm(event.target.value) }} onKeyDown={event => {
         if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); move(event.shiftKey ? -1 : 1) }
       }} /></label>
-      <select aria-label="Search scope" value={scope} onChange={event => { resetResult(); setScope(event.target.value as SearchScope) }}>
+      {!plainText && <select aria-label="Search scope" value={scope} onChange={event => { resetResult(); setScope(event.target.value as SearchScope) }}>
         <option value="rendered">Rendered content</option><option value="source">Raw Markdown</option>
-      </select>
+      </select>}
       <div className="find-options" role="group" aria-label="Search options">
         {([['caseSensitive', 'Match case', 'Aa'], ['wholeWord', 'Whole word', <WholeWord size={15} />], ['regex', 'Regular expression', '.*']] as const).map(([key, label, symbol]) => (
           <IconButton key={key} label={label} active={options[key]}
