@@ -16,6 +16,8 @@ import { scrollToSplitHeading, useSplitScroll } from './editor/splitScroll'
 import { calloutKinds } from './editor/schema'
 import { createWorkspace, type EditorMode, type EditorPane } from './document/workspace'
 import { markdownProcessor } from './document/markdown'
+import type { LineEnding } from './document/formats/content'
+import { formatCapabilities, identifyFormat, openFileTypes, type ExportSnapshot } from './document/formats/registry'
 import type { Heading } from './document/metadata'
 import { IconButton, Menu, Modal, type Item } from './ui/controls'
 import { Toolbar, fullFormatItems, paragraphStyle, paragraphStyles, useFormatting } from './ui/Toolbar'
@@ -54,6 +56,10 @@ const editorModes = [
   { mode: 'split', label: 'Split Editor', short: 'Split', icon: Columns2 },
 ] satisfies { mode: EditorMode; label: string; short: string; icon: typeof Code2 }[]
 
+const textLineEndings = [
+  { value: '\n', label: 'LF (Unix)' }, { value: '\r\n', label: 'CRLF (Windows)' }, { value: '\r', label: 'CR' },
+] satisfies { value: LineEnding; label: string }[]
+
 export default function App({ host }: { host: FolioHost }) {
   const liveDocument = host.liveDocument
   const [toast, setToast] = useState('')
@@ -70,6 +76,8 @@ export default function App({ host }: { host: FolioHost }) {
   const visualScroll = useRef<HTMLDivElement>(null)
   const doc = useDocument(notify, visualScroll, host, workspaceView)
   const { editor } = doc
+  const capabilities = formatCapabilities(doc.file)
+  const plainText = !capabilities.richText
   const formatting = useFormatting(editor)
   const { mode, sidebar, setSidebar, appearance, setAppearance } = useStore(workspaceView)
   const themeFromHost = host.appearance.themeFromHost
@@ -77,8 +85,8 @@ export default function App({ host }: { host: FolioHost }) {
     if (workspaceView.getState().appearance.theme !== theme) setAppearance({ theme })
   }), [setAppearance, themeFromHost, workspaceView])
   const accents = useMemo(() => accentTheme(appearance.accentColor, appearance.theme), [appearance.accentColor, appearance.theme])
-  const split = mode === 'split'
-  const source = mode === 'source' || (split && doc.activePane === 'source')
+  const split = !plainText && mode === 'split'
+  const source = plainText || mode === 'source' || (split && doc.activePane === 'source')
   const started = !!editor && doc.status !== 'loading'
   const ready = started && !!doc.layout.activeId
   const liveWritable = !!doc.liveState?.available && doc.liveState.conflict === undefined
@@ -86,10 +94,14 @@ export default function App({ host }: { host: FolioHost }) {
   const splitLayout = useSplitLayout(appearance.splitRatio, ratio => setAppearance({ splitRatio: ratio }))
   useSplitScroll(split && ready && appearance.syncScroll && !doc.previewIssue, editor, visualScroll, doc.sourceView, doc.scrollAnchors, doc.file.id)
   const [tab, setTab] = useState<PropertyTab>('Outline')
+  const propertiesTab = plainText && (tab === 'Outline' || tab === 'Front matter') ? 'Appearance' : tab
   const [width, setWidth] = useState(304)
   const [location, setLocation] = useState<SourceLocation>({ line: 1, column: 1 })
   const [request, setRequest] = useState<InsertRequest | null>(null)
   const [dialog, setDialog] = useState<'shortcuts' | 'recent' | 'history' | 'library' | 'emoji' | null>(null)
+  const [exportReview, setExportReview] = useState<{ snapshot: ExportSnapshot; message: string } | null>(null)
+  const [exportLineEnding, setExportLineEnding] = useState<LineEnding>()
+  const exporting = useRef<AbortController>(undefined)
   const root = useRef<HTMLDivElement>(null)
   const propertiesOrigin = useRef<HTMLElement | null>(null)
   const [palette, setPalette] = useState<'all' | 'documents' | 'headings' | null>(null)
@@ -390,13 +402,13 @@ export default function App({ host }: { host: FolioHost }) {
     titleInput.current?.blur()
     setDragging(false)
     const files = Array.from(event.dataTransfer.files)
-    const markdown = files.find(file => /\.(md|markdown)$/i.test(file.name))
-    if (markdown) { void doc.importFile(markdown); return }
-    const image = files.find(file => /^image\//i.test(file.type))
+    const document = files.find(file => identifyFormat(file.name))
+    if (document) { void doc.importFile(document); return }
+    const image = capabilities.richText && files.find(file => /^image\//i.test(file.type))
     const target = mode === 'source' || (split && (event.target as Element).closest('.source-shell')) ? 'source' : 'visual'
     const point = target === 'visual' ? editor?.view.posAtCoords({ left: event.clientX, top: event.clientY }) : undefined
     if (image) void addImage(image, point?.pos, target)
-    else notify('Drop a Markdown document or an image file.')
+    else notify(plainText ? 'Drop a Markdown or TXT document.' : 'Drop a Markdown or TXT document, or an image file.')
   }
 
   function dropBlock(event: DragEvent) {
@@ -413,27 +425,58 @@ export default function App({ host }: { host: FolioHost }) {
   async function copy(kind: 'markdown' | 'text') {
     try {
       const current = doc.project()
-      if (kind === 'markdown') await host.clipboard.writeText(current.source)
+      if (kind === 'markdown' || current.format === 'txt') await host.clipboard.writeText(current.source)
       else await host.clipboard.writeText(async () => {
         const { renderedText } = await import('./document/export')
         return renderedText(current.source)
       })
-      if (!liveDocument) notify(kind === 'markdown' ? 'Markdown copied' : 'Rendered text copied')
+      if (!liveDocument) notify(current.format === 'txt' ? 'Plain text copied' : kind === 'markdown' ? 'Markdown copied' : 'Rendered text copied')
     } catch (error) { notify('Could not copy to the clipboard. ' + errorMessage(error)) }
+  }
+
+  async function exportText(snapshot = doc.captureExport(), lineEnding?: LineEnding) {
+    if (exporting.current) return
+    const controller = new AbortController()
+    exporting.current = controller
+    try {
+      const result = await doc.exportCopy(snapshot, lineEnding, controller.signal)
+      if (result.status === 'needs-options') {
+        setExportLineEnding(undefined)
+        setExportReview({ snapshot, message: result.diagnostics[0].message })
+      } else {
+        setExportReview(null)
+        notify(result.status === 'downloaded' ? 'Download requested for ' + result.filename : result.diagnostics[0].message)
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setExportReview(null)
+        notify('Could not export the TXT copy. ' + errorMessage(error))
+      }
+    } finally {
+      if (exporting.current === controller) exporting.current = undefined
+    }
+  }
+
+  function cancelTextExport() {
+    exporting.current?.abort()
+    exporting.current = undefined
+    setExportReview(null)
   }
 
   const fileItems = registerItems(registry, platform, 'Document', 'document', [
     ...(liveDocument ? [] : [
       { label: 'New document', icon: <FilePlus2 size={16} />, run: newFile },
-      { label: 'Open Markdown…', icon: <FolderOpen size={16} />, shortcut: 'Ctrl+O', run: () => fileInput.current?.click() },
+      { label: 'New text document', icon: <FilePlus2 size={16} />, run: () => { doc.createDocument('txt'); requestAnimationFrame(() => doc.sourceView.current?.focus()) } },
+      { id: 'document.open-markdown', label: 'Open document…', icon: <FolderOpen size={16} />, shortcut: 'Ctrl+O', run: () => fileInput.current?.click() },
       { label: 'Document library', icon: <FolderOpen size={16} />, run: () => setDialog('library') },
       { label: 'Recent documents', icon: <FileText size={16} />, run: () => setDialog('recent') },
       { label: 'Version History', icon: <History size={16} />, disabled: !ready, run: () => setDialog('history') },
       { label: '', divider: true },
     ]),
-    { label: 'Save', icon: <Download size={16} />, shortcut: 'Ctrl+S', disabled: !ready || (!!liveDocument && !liveWritable), run: () => void doc.save() },
+    { id: 'document.save', label: plainText ? 'Save draft' : 'Save', icon: <Download size={16} />, shortcut: 'Ctrl+S', disabled: !ready || (!!liveDocument && !liveWritable), run: () => void doc.save() },
     ...(liveDocument ? [] : [
-      { label: 'Save as…', icon: <ArrowDownToLine size={16} />, shortcut: 'Ctrl+Shift+S', disabled: !ready, run: () => void doc.save({ saveAs: true }) },
+      { id: 'document.save-as', label: plainText ? 'Export TXT copy…' : 'Save as…', icon: <ArrowDownToLine size={16} />, shortcut: 'Ctrl+Shift+S', disabled: !ready,
+        run: () => { if (plainText) void exportText(); else void doc.save({ saveAs: true }) } },
       { label: '', divider: true },
       { label: 'Rename document', disabled: !ready, run: () => requestAnimationFrame(() => { titleInput.current?.focus(); titleInput.current?.select() }) },
       { label: 'Duplicate document', disabled: !ready, run: () => report(doc.duplicateDocument(doc.file.id)) },
@@ -453,10 +496,10 @@ export default function App({ host }: { host: FolioHost }) {
     { label: 'Keyboard shortcuts', run: () => setDialog('shortcuts') },
   ], started)
   const viewItems = registerItems(registry, platform, 'View', 'view', [
-    ...editorModes.map(({ mode: choice, label, icon: Icon }) => ({ id: 'view.mode.' + choice, label, keywords: 'switch editor mode ' + choice, icon: <Icon size={16} />, active: mode === choice, run: () => doc.switchMode(choice) })),
+    ...(plainText ? [] : editorModes.map(({ mode: choice, label, icon: Icon }) => ({ id: 'view.mode.' + choice, label, keywords: 'switch editor mode ' + choice, icon: <Icon size={16} />, active: mode === choice, run: () => doc.switchMode(choice) }))),
     ...(split ? [{ label: 'Sync Scroll', active: appearance.syncScroll, run: () => setAppearance({ syncScroll: !appearance.syncScroll }) }] : []),
-    { id: 'view.properties', label: sidebar ? 'Hide document properties' : 'Show document properties', keywords: 'toggle sidebar', icon: <PanelRight size={16} />, run: () => sidebar ? closeProperties() : openProperties(tab) },
-    { label: 'Document outline', icon: <ListTree size={16} />, run: () => openProperties('Outline') },
+    { id: 'view.properties', label: sidebar ? 'Hide document properties' : 'Show document properties', keywords: 'toggle sidebar', icon: <PanelRight size={16} />, run: () => sidebar ? closeProperties() : openProperties(propertiesTab) },
+    ...(plainText ? [] : [{ label: 'Document outline', icon: <ListTree size={16} />, run: () => openProperties('Outline') }]),
     { id: 'view.width', label: appearance.width === 'full' ? 'Page width' : 'Full width', keywords: 'toggle document width', icon: appearance.width === 'full' ? <Minimize2 size={16} /> : <Maximize2 size={16} />, run: () => setAppearance({ width: appearance.width === 'full' ? 'page' : 'full' }) },
     { label: 'Appearance', run: () => openProperties('Appearance') },
     { label: 'Statistics', run: () => openProperties('Statistics') },
@@ -475,7 +518,12 @@ export default function App({ host }: { host: FolioHost }) {
       notify(notices.length ? `HTML download started with ${notices.join(' and ')}` : 'HTML download started')
     } catch (error) { notify(errorMessage(error)) }
   }
-  const exportItems = registerItems(registry, platform, 'Export', 'export', [
+  const exportItems = registerItems(registry, platform, 'Export', 'export', plainText ? [
+    { label: 'Export TXT copy…', icon: <ArrowDownToLine size={16} />, disabled: !capabilities.exportCopy, run: () => void exportText() },
+    ...(doc.file.format === 'txt' && doc.file.originalFile ? [{ label: 'Download original', icon: <Download size={16} />, run: () => report(doc.downloadOriginal()) }] : []),
+    { label: '', divider: true },
+    { label: 'Copy plain text', icon: <Copy size={16} />, run: () => void copy('text') },
+  ] : [
     ...(liveDocument ? [] : [
       { label: 'Download Markdown', icon: <ArrowDownToLine size={16} />, run: () => void doc.save({ download: true }) },
       { label: 'Export HTML', icon: <FileCode2 size={16} />, run: () => void downloadHtml(false) },
@@ -519,7 +567,7 @@ export default function App({ host }: { host: FolioHost }) {
 
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
-      if (event.isComposing || event.defaultPrevented || request || dialog) return
+      if (event.isComposing || event.defaultPrevented || request || dialog || exportReview) return
       const nativeHistory = liveDocument && event.target instanceof Element && event.target.closest('.tiptap, .cm-content')
       for (const id of nativeHistory ? [...windowCommands, ...historyCommands] : windowCommands) {
         if ((palette && id !== 'workspace.palette') || host.keyboard.handledByHost?.has(id)) continue
@@ -565,7 +613,9 @@ export default function App({ host }: { host: FolioHost }) {
 
   const statusLabel = doc.liveState
     ? doc.liveState.conflict !== undefined ? 'Sync paused' : !doc.liveState.available ? 'File unavailable' : doc.liveState.pending ? 'Syncing to VS Code…' : doc.liveState.dirty ? 'Unsaved in VS Code' : 'Saved in VS Code'
-    : doc.status === 'loading' ? 'Opening workspace…' : !ready ? 'No open documents' : doc.status === 'pending' ? 'Saving draft…' : doc.status === 'unavailable' ? 'Local storage unavailable' : 'Saved locally'
+    : doc.status === 'loading' ? 'Opening workspace…' : !ready ? 'No open documents' : doc.status === 'pending' ? 'Saving draft…'
+      : doc.status === 'unavailable' ? plainText ? 'Draft could not be saved locally' : 'Local storage unavailable'
+        : plainText ? 'Draft saved locally' : 'Saved locally'
   const StatusIcon = doc.status === 'unavailable' ? CloudOff : doc.status === 'saved' ? Check : LoaderCircle
   const style = { ...(!themeFromHost && accents), '--writing-font': fonts[appearance.font], '--writing-size': appearance.fontSize + 'px', '--writing-leading': appearance.lineHeight } as CSSProperties
   return <div ref={root} className="app" data-theme={appearance.theme} style={style} onClickCapture={event => {
@@ -576,7 +626,7 @@ export default function App({ host }: { host: FolioHost }) {
       <div className="topbar-divider" />
       <div className="document-identity">
         {ready ? <div className="title-line"><input ref={titleInput} aria-label="Document name" key={doc.file.id + doc.file.title} defaultValue={doc.file.title} maxLength={155} readOnly={!!liveDocument} tabIndex={liveDocument ? -1 : undefined} onBlur={event => doc.changeTitle(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { event.currentTarget.value = doc.file.title; event.currentTarget.blur() } }} style={{ width: Math.min(240, Math.max(120, doc.file.title.length * 8.6 + 17)) }} />
-          {doc.dirty && <span className="unsaved-dot" aria-label="Changes since last file save" title="Changes since last file save" />}
+          {doc.dirty && <span className="unsaved-dot" aria-label={plainText ? 'Uncommitted draft changes' : 'Changes since last file save'} title={plainText ? 'Uncommitted draft changes' : 'Changes since last file save'} />}
         </div> : <span className="workspace-title">Workspace</span>}
         <nav className="menubar" aria-label="Document menu">
           <Menu label="File" items={fileItems} disabled={!started} />
@@ -590,20 +640,20 @@ export default function App({ host }: { host: FolioHost }) {
         {!liveDocument && <IconButton label="Open document library" disabled={!started} onClick={() => execute('document.document-library')}><FolderOpen size={18} /></IconButton>}
         <span className={'save-status status-' + doc.status} role="status" title={statusLabel}><StatusIcon size={14} /><span>{statusLabel}</span></span>
         <div className="topbar-action-divider" />
-        <div className="mode-selector" role="group" aria-label="Editing mode">
+        {!plainText && <div className="mode-selector" role="group" aria-label="Editing mode">
           {editorModes.map(({ mode: choice, label, short, icon: Icon }) => <button type="button" key={choice} disabled={!ready}
             aria-label={label} title={label} aria-pressed={mode === choice} onClick={() => execute('view.mode.' + choice)}><Icon size={15} /><span>{short}</span></button>)}
-        </div>
+        </div>}
         <IconButton label="Toggle document properties" active={sidebar} disabled={!ready} onClick={() => execute('view.properties')} className="sidebar-toggle"><PanelRight size={18} /></IconButton>
         <Menu label={liveDocument ? 'Copy' : 'Export'} items={exportItems} align="right" disabled={!ready} className="export-menu">{liveDocument ? <Copy size={16} /> : <Download size={16} />}<span>{liveDocument ? 'Copy' : 'Export'}</span><ChevronDown size={12} /></Menu>
       </div>
     </header>
     {!liveDocument && <DocumentTabs tabs={doc.tabs} activeId={doc.layout.activeId} canReopen={doc.layout.closed.length > 0} disabled={!started}
       select={id => execute('navigation.open-document', id)} close={id => report(doc.closeTab(id))} closeOthers={id => report(doc.closeOtherTabs(id))} reopen={() => report(doc.reopenTab())} create={() => execute('document.new-document')} />}
-    <Toolbar editor={editor} state={formatting} source={source} ready={editable} execute={execute} shortcut={commandShortcut} insertItems={actions} extraFormats={formatMenu.slice(5)} styleItems={styleItems} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} sourceImageCommand={sourceImageCommand} hostHistory={liveDocument ? ready && liveWritable : undefined} />
+    <Toolbar editor={editor} state={formatting} source={source} plainText={plainText} ready={editable} execute={execute} shortcut={commandShortcut} insertItems={actions} extraFormats={formatMenu.slice(5)} styleItems={styleItems} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} sourceImageCommand={sourceImageCommand} hostHistory={liveDocument ? ready && liveWritable : undefined} />
     {liveDocument && doc.liveState && <RecoveryNotice state={doc.liveState} copy={host.clipboard.writeText} discard={liveDocument.discardRecovery} notify={notify} />}
     {findPanel && doc.layout.activeId && <FindPanel panelRef={findRef} documentId={doc.layout.activeId} title={doc.file.title} mode={mode} startReplace={findPanel.replace}
-      readOnly={!!liveDocument && !liveWritable}
+      readOnly={!!liveDocument && !liveWritable} plainText={plainText}
       find={host.search} capture={doc.captureSearch} subscribe={doc.subscribeSearch} present={doc.presentSearch} replace={doc.applySearch}
       clear={doc.clearSearch} openSource={() => doc.switchMode('source', false)} close={closeSearch} />}
     <div className="workspace">
@@ -615,7 +665,7 @@ export default function App({ host }: { host: FolioHost }) {
         {!started ? <div className="opening-state"><LoaderCircle size={20} className="spinner" /> Opening workspace</div> : !ready && <div className="empty-workspace">
           <FileText size={27} aria-hidden="true" /><h2>No open documents</h2><div><button type="button" className="primary-button" onClick={newFile}>New document</button><button type="button" className="secondary-button" onClick={() => setDialog('library')}>Browse library</button></div>
         </div>}
-        <section className="visual-pane" aria-label="Visual pane" hidden={!ready || mode === 'source'}>
+        <section className="visual-pane" aria-label="Visual pane" hidden={!ready || plainText || mode === 'source'}>
           {split && <div className="split-pane-header"><Pilcrow size={15} /><span>Visual Editor</span></div>}
           {doc.previewIssue && <div className="preview-notice" role="status"><CircleAlert size={15} /><span><strong>Preview paused.</strong> {doc.previewIssue}</span></div>}
           <div className="visual-scroll" ref={visualScroll} onScroll={() => { if (grip) setGrip(null); doc.trackView() }}>
@@ -645,39 +695,53 @@ export default function App({ host }: { host: FolioHost }) {
           </div>
         </section>
         {split && <div className="split-divider" role="separator" tabIndex={0} aria-label="Resize editor panes" aria-orientation="vertical" hidden={splitLayout.stacked} {...splitLayout.separator}><i /></div>}
-        <section className="source-shell" aria-label="Markdown pane" hidden={!ready || mode === 'visual'}>
-          <div className="source-banner"><FileCode2 size={16} /><span>{split ? 'Markdown Source' : /\.(md|markdown)$/i.test(doc.file.title) ? doc.file.title : doc.file.title + '.md'}</span>
+        <section className="source-shell" aria-label={plainText ? 'Plain text pane' : 'Markdown pane'} hidden={!ready || !plainText && mode === 'visual'}>
+          <div className="source-banner"><FileCode2 size={16} /><span>{plainText ? (/\.txt$/i.test(doc.file.title) ? doc.file.title : doc.file.title + '.txt') : split ? 'Markdown Source' : /\.(md|markdown)$/i.test(doc.file.title) ? doc.file.title : doc.file.title + '.md'}</span>
             {split && <button type="button" className="sync-scroll" aria-pressed={appearance.syncScroll} onClick={() => execute('view.sync-scroll')}><Link size={14} /> Sync Scroll</button>}
           </div>
           <div className="source-pane-content" onPointerDownCapture={event => { if (split && !doc.activatePane('source')) event.preventDefault() }}
             onFocusCapture={() => { if (split) doc.activatePane('source') }}
             onBeforeInputCapture={event => { if (!doc.activatePane('source')) event.preventDefault() }}>
-            {started && <SourceEditor initial={doc.file.source} active={ready && mode !== 'visual'} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} readOnly={!!liveDocument && !liveWritable} canEdit={doc.canEdit} onChange={doc.setSource}
+            {started && <SourceEditor initial={doc.file.source} active={ready && (plainText || mode !== 'visual')} plainText={plainText} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} readOnly={!!liveDocument && !liveWritable} canEdit={doc.canEdit} onChange={doc.setSource}
               onOpenLink={host.resources ? (href, event) => (platform === 'mac' ? event.metaKey : event.ctrlKey) && openWorkspaceLink(href) : undefined}
               onLocation={location => { setLocation(location); doc.trackView() }} onReady={doc.registerSource} onLanguageError={() => notify('Markdown aids could not be loaded. Source editing is still available.')} />}
           </div>
         </section>
-        {dragging && <div className="drop-overlay" aria-hidden="true"><Upload size={29} /><strong>Drop a Markdown file or image</strong></div>}
+        {dragging && <div className="drop-overlay" aria-hidden="true"><Upload size={29} /><strong>{plainText ? 'Drop a Markdown or TXT file' : 'Drop a Markdown or TXT file, or an image'}</strong></div>}
       </main>
-      {ready && sidebar && <Properties appearance={appearance} setAppearance={setAppearance} hostTheme={!!themeFromHost} tab={tab} setTab={setTab} headings={doc.info.outline} active={doc.activeHeading || doc.info.outline[0]?.anchor || ''} statistics={doc.info.statistics} key={doc.file.id}
+      {ready && sidebar && <Properties appearance={appearance} setAppearance={setAppearance} hostTheme={!!themeFromHost} plainText={plainText} tab={propertiesTab} setTab={setTab} headings={doc.info.outline} active={doc.activeHeading || doc.info.outline[0]?.anchor || ''} statistics={doc.info.statistics} key={doc.file.id}
         metadata={doc.metadata} readOnly={!!liveDocument && !liveWritable} onMetadata={doc.changeMetadata} close={closeProperties} jump={jump} width={width} setWidth={value => setWidth(Math.min(430, Math.max(250, value)))} />}
     </div>
     <footer className="statusbar">
-      <div><span className="mode-indicator"><i />{split ? 'Split mode' : source ? 'Source mode' : 'Visual mode'}</span><span className="status-separator" /><button type="button" onClick={() => openProperties('Statistics')}>{doc.info.statistics.words.toLocaleString()} words</button><span className="reading-time">{doc.info.statistics.minutes} min read</span></div>
+      <div><span className="mode-indicator"><i />{plainText ? 'Plain text' : split ? 'Split mode' : source ? 'Source mode' : 'Visual mode'}</span><span className="status-separator" /><button type="button" onClick={() => openProperties('Statistics')}>{doc.info.statistics.words.toLocaleString()} words</button><span className="reading-time">{doc.info.statistics.minutes} min read</span></div>
       <div>
         {doc.warnings > 0 && !source && <button type="button" className="warning-link" onClick={() => doc.switchMode('source')} title="Open preserved syntax in Markdown source"><CircleAlert size={13} /> {doc.warnings} preserved {doc.warnings === 1 ? 'item' : 'items'}</button>}
         {source && <span>Ln {location.line}, Col {location.column}</span>}
-        <span className="status-encoding">UTF-8</span><span className="status-separator" /><span>Markdown</span>
+        <span className="status-encoding">{plainText && doc.file.bom ? 'UTF-8 BOM' : 'UTF-8'}</span><span className="status-separator" /><span>{plainText ? 'TXT' : 'Markdown'}</span>
       </div>
     </footer>
-    <input ref={fileInput} type="file" accept=".md,.markdown,text/markdown" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void doc.importFile(file); event.target.value = '' }} />
+    <input ref={fileInput} type="file" accept={liveDocument ? '.md,.markdown,text/markdown' : openFileTypes} hidden onChange={event => { const file = event.target.files?.[0]; if (file) void doc.importFile(file); event.target.value = '' }} />
     {!liveDocument && <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/avif,image/bmp,image/x-icon" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void addImage(file); event.target.value = '' }} />}
     {request && editor && <InsertDialog request={request} editor={editor} anchors={doc.info.outline} close={() => setRequest(null)} workspacePicker={host.resources} chooseLocalImage={liveDocument ? undefined : () => imageInput.current?.click()} />}
     {palette && <CommandPalette key={palette} entries={paletteEntries()} recent={recentCommands} scope={palette} run={runPalette} close={() => setPalette(null)} />}
     {dialog === 'shortcuts' && <Modal title="Keyboard shortcuts" close={() => setDialog(null)}><dl className="shortcuts">{shortcutRows.map(([label, keys]) => <div key={label}><dt>{label}</dt><dd><kbd>{keys}</kbd></dd></div>)}</dl></Modal>}
     {dialog === 'recent' && <Modal title="Recent documents" close={() => setDialog(null)}><div className="recent-list">{doc.recent.map(file => <button key={file.id} type="button" onClick={() => report(doc.openDocument(file.id).then(() => setDialog(null)))}><FileText size={17} /><span>{file.title}</span>{file.id === doc.layout.activeId && <small>Current</small>}</button>)}{!doc.recent.length && <p className="muted">Recently opened documents will appear here.</p>}</div></Modal>}
     {dialog === 'library' && <DocumentLibrary items={doc.library} tabs={doc.tabs.map(item => item.id)} close={() => setDialog(null)} create={doc.createDocument} open={doc.openDocument} rename={doc.renameDocument} duplicate={doc.duplicateDocument} remove={doc.deleteDocument} restore={doc.restoreDocument} />}
-    {dialog === 'history' && <VersionHistory key={doc.file.id} documentId={doc.file.id} title={doc.file.title} theme={appearance.theme} automaticError={doc.historyError} load={doc.loadVersions} read={host.storage.readVersion} create={doc.createVersion} restore={async version => { await doc.restoreHistoryVersion(version); notify('Version restored') }} close={() => setDialog(null)} />}
+    {dialog === 'history' && <VersionHistory key={doc.file.id} documentId={doc.file.id} title={doc.file.title} theme={appearance.theme} plainText={plainText} automaticError={doc.historyError} load={doc.loadVersions} read={host.storage.readVersion} create={doc.createVersion} restore={async version => { await doc.restoreHistoryVersion(version); notify('Version restored') }} close={() => setDialog(null)} />}
+    {exportReview && <Modal title="Export TXT copy" close={cancelTextExport}>
+      <form className="dialog-form" onSubmit={event => { event.preventDefault(); if (exportLineEnding) void exportText(exportReview.snapshot, exportLineEnding) }}>
+        <p>{exportReview.message}</p>
+        <label className="field">Line endings
+          <select required data-dialog-focus value={textLineEndings.findIndex(item => item.value === exportLineEnding)}
+            onChange={event => setExportLineEnding(textLineEndings[Number(event.target.value)]?.value)}>
+            <option value={-1} disabled>Choose a line ending</option>
+            {textLineEndings.map(({ label }, index) => <option key={label} value={index}>{label}</option>)}
+          </select>
+        </label>
+        <div className="dialog-actions"><button type="button" className="secondary-button" onClick={cancelTextExport}>Cancel</button>
+          <button type="submit" className="primary-button" disabled={!exportLineEnding}>Download copy</button></div>
+      </form>
+    </Modal>}
     {dialog === 'emoji' && <Modal title="Insert emoji" close={() => setDialog(null)}><div className="emoji-grid">
       {['😀', '👋', '✨', '💡', '✅', '📌', '🗂️', '📝', '📚', '🔎', '🌿', '🎯', '🚀', '⚠️', '❤️', '🙌', '🎉', '📎', '⭐', '🔗'].map(emoji => <button type="button" key={emoji} onClick={() => { editor?.chain().focus().insertContent(emoji).run(); setDialog(null) }}>{emoji}</button>)}
     </div></Modal>}

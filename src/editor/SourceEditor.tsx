@@ -13,6 +13,7 @@ const selectionKeymap = searchKeymap.filter(binding => ['Mod-Alt-g', 'Mod-d', 'M
 interface Props {
   initial: string
   active: boolean
+  plainText?: boolean
   lineNumberDisplay: boolean
   wordWrap: boolean
   readOnly?: boolean
@@ -25,6 +26,15 @@ interface Props {
 }
 
 export interface SourceRuntime { view: EditorView; apply(value: string | EditorState): void }
+
+function sourceSettings({ lineNumberDisplay, wordWrap, readOnly, plainText }: Props) {
+  return [
+    ...(lineNumberDisplay ? [lineNumbers(), highlightActiveLineGutter()] : []),
+    ...(wordWrap ? [EditorView.lineWrapping] : []),
+    EditorState.readOnly.of(!!readOnly), EditorView.editable.of(!readOnly),
+    EditorView.contentAttributes.of({ 'aria-label': plainText ? 'Plain text editor' : 'Markdown source editor', 'aria-multiline': 'true', tabindex: '0' }),
+  ]
+}
 
 export function replaceSource(view: EditorView | null, source: string, origin: 'visual' | 'metadata' | 'search' | 'host', recordHistory = true) {
   if (!view) return false
@@ -60,11 +70,6 @@ export function SourceEditor(props: Props) {
 
   useEffect(() => {
     if (!container.current) return
-    const configuration = () => [
-      ...(latest.current.lineNumberDisplay ? [lineNumbers(), highlightActiveLineGutter()] : []),
-      ...(latest.current.wordWrap ? [EditorView.lineWrapping] : []),
-      EditorState.readOnly.of(!!latest.current.readOnly), EditorView.editable.of(!latest.current.readOnly),
-    ]
     const reportLocation = (state: EditorState) => {
       const head = state.selection.main.head
       const line = state.doc.lineAt(head)
@@ -74,13 +79,12 @@ export function SourceEditor(props: Props) {
         doc,
         extensions: [
           EditorState.transactionFilter.of(transaction => !transaction.docChanged || latest.current.canEdit() ? transaction : []),
-          settings.current.of(configuration()), history(), highlightActiveLine(), highlightSelectionMatches(), sourceSearchDecorations,
-          language.current.of(languageSupport.current ?? []),
+          settings.current.of(sourceSettings(latest.current)), history(), highlightActiveLine(), highlightSelectionMatches(), sourceSearchDecorations,
+          language.current.of(latest.current.plainText ? [] : languageSupport.current ?? []),
           keymap.of([{ key: 'Mod-Shift-z', run: redo, preventDefault: true }, ...defaultKeymap, ...historyKeymap, ...selectionKeymap, indentWithTab]),
-          EditorView.contentAttributes.of({ 'aria-label': 'Markdown source editor', 'aria-multiline': 'true', tabindex: '0' }),
           EditorView.domEventHandlers({
             click(event, view) {
-              if (!latest.current.onOpenLink || event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return false
+              if (latest.current.plainText || !latest.current.onOpenLink || event.button !== 0 || (!event.ctrlKey && !event.metaKey)) return false
               const position = view.posAtCoords({ x: event.clientX, y: event.clientY })
               if (position === null) return false
               let node = syntaxTree(view.state).resolveInner(position, 1)
@@ -101,14 +105,18 @@ export function SourceEditor(props: Props) {
     view.current = editor
     latest.current.onReady({ view: editor, apply(value) {
       editor.setState(typeof value === 'string' ? createState(value) : value)
-      if (typeof value !== 'string') editor.dispatch({ effects: [settings.current.reconfigure(configuration()), language.current.reconfigure(languageSupport.current ?? [])] })
+      if (typeof value !== 'string') editor.dispatch({ effects: [settings.current.reconfigure(sourceSettings(latest.current)), language.current.reconfigure(latest.current.plainText ? [] : languageSupport.current ?? [])] })
       reportLocation(editor.state)
     } })
     return () => { latest.current.onReady(null); view.current = null; editor.destroy() }
   }, [])
 
   useEffect(() => {
-    if (!props.active || languageSupport.current) return
+    if (props.plainText || languageSupport.current) {
+      view.current?.dispatch({ effects: language.current.reconfigure(props.plainText ? [] : languageSupport.current ?? []) })
+      return
+    }
+    if (!props.active) return
     let current = true
     void import('./SourceLanguage').then(({ sourceLanguage }) => {
       if (!current) return
@@ -116,15 +124,11 @@ export function SourceEditor(props: Props) {
       view.current?.dispatch({ effects: language.current.reconfigure(sourceLanguage) })
     }, () => { if (current) latest.current.onLanguageError() })
     return () => { current = false }
-  }, [props.active])
+  }, [props.active, props.plainText])
 
   useEffect(() => {
-    view.current?.dispatch({ effects: settings.current.reconfigure([
-      ...(props.lineNumberDisplay ? [lineNumbers(), highlightActiveLineGutter()] : []),
-      ...(props.wordWrap ? [EditorView.lineWrapping] : []),
-      EditorState.readOnly.of(!!props.readOnly), EditorView.editable.of(!props.readOnly),
-    ]) })
-  }, [props.lineNumberDisplay, props.wordWrap, props.readOnly])
+    view.current?.dispatch({ effects: settings.current.reconfigure(sourceSettings(latest.current)) })
+  }, [props.lineNumberDisplay, props.wordWrap, props.readOnly, props.plainText])
 
   return <div ref={container} className="source-editor" />
 }

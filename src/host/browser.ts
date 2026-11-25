@@ -1,5 +1,5 @@
-import { decodeMarkdown, encodeMarkdown, markdownFilename, type WritableMarkdownHandle } from '../document/files'
-import { insertDraft, loadLayout, loadLibrary, readDraft, recoverDocument, storeLayout, touchDocument, trashDocument, writeDraft } from '../document/workspaceStorage'
+import { encodeMarkdown, markdownFilename, type WritableMarkdownHandle } from '../document/files'
+import { insertDraft, loadLayout, loadLibrary, readDraft, readOriginal, recoverDocument, storeLayout, touchDocument, trashDocument, writeDraft } from '../document/workspaceStorage'
 import { listVersions, readVersion, recordVersion, restoreVersion } from '../document/versions'
 import { normalizeAppearance } from '../document/workspace'
 import { browserSearch } from './browserSearch'
@@ -18,7 +18,6 @@ const download: FileOperations['download'] = (filename, data, mediaType) => {
 
 const browserFiles: FileOperations = {
   download,
-  async readMarkdown(input) { return decodeMarkdown(new Uint8Array(await input.arrayBuffer())) },
   async saveMarkdown(file, title, options) {
     const filename = markdownFilename(title)
     const picker = (window as Window & { showSaveFilePicker?: FilePicker }).showSaveFilePicker?.bind(window)
@@ -71,7 +70,7 @@ const appearance: AppearancePreferences = {
 }
 
 export const browserHost: FolioHost = {
-  storage: { loadLibrary, loadLayout, storeLayout, readDraft, insertDraft, writeDraft, touchDocument, trashDocument,
+  storage: { loadLibrary, loadLayout, storeLayout, readDraft, readOriginal, insertDraft, writeDraft, touchDocument, trashDocument,
     recoverDocument, listVersions, readVersion, recordVersion, restoreVersion },
   files: browserFiles,
   appearance,

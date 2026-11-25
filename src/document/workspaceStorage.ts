@@ -1,11 +1,13 @@
 import { draftSummary, emptyLayout, withoutTabs, type DocumentFile, type DocumentSummary, type WorkspaceLayout } from './workspace'
 import { WorkspaceRestoreConflict } from '../host/contracts'
+import { sameContent, sameLineage, type OriginalFile } from './formats/content'
 
 export const sessionsStore = 'sessions'
 export const documentsStore = 'documents'
 export const draftsStore = 'document-drafts'
 export const versionsStore = 'document-versions'
 export const versionContentStore = 'version-content'
+export const originalsStore = 'document-originals'
 export const versionOrderIndex = 'document-date'
 export const versionKindIndex = 'document-kind-date'
 
@@ -15,7 +17,7 @@ function openDatabase() {
   if (blockedUpgrade) return Promise.reject(blockedUpgrade)
   if (database) return database
   const opening = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('folio-workspace', 3)
+    const request = indexedDB.open('folio-workspace', 4)
     request.onupgradeneeded = event => {
       const db = request.result
       if (event.oldVersion < 1) db.createObjectStore(sessionsStore)
@@ -43,6 +45,7 @@ function openDatabase() {
           sessions.delete('current')
         }
       }
+      if (event.oldVersion < 4) db.createObjectStore(originalsStore, { keyPath: 'reference.id' })
     }
     request.onblocked = () => {
       blockedUpgrade = new Error('Close older Folio tabs to finish upgrading local storage, then retry.')
@@ -82,23 +85,28 @@ export function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   })
 }
 
-export async function workspaceTransaction<T>(stores: string[], mode: IDBTransactionMode, work: (transaction: IDBTransaction) => Promise<T>, options?: IDBTransactionOptions): Promise<T> {
+export async function workspaceTransaction<T>(stores: string[], mode: IDBTransactionMode, work: (transaction: IDBTransaction) => Promise<T>, options?: IDBTransactionOptions, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted()
   const db = await openDatabase()
+  signal?.throwIfAborted()
   const transaction = db.transaction(stores, mode, options)
+  const abort = () => { try { transaction.abort() } catch { /* IndexedDB may have already finished. */ } }
   const finished = new Promise<void>((resolve, reject) => {
     transaction.oncomplete = () => resolve()
     transaction.onabort = () => reject(transaction.error ?? new Error('The local storage transaction was interrupted.'))
   })
   void finished.catch(() => undefined)
+  signal?.addEventListener('abort', abort, { once: true })
   try {
     const result = await work(transaction)
     await finished
     return result
   } catch (error) {
-    try { transaction.abort() } catch { /* IndexedDB may have already aborted. */ }
+    abort()
     await finished.catch(() => undefined)
+    signal?.throwIfAborted()
     throw error
-  }
+  } finally { signal?.removeEventListener('abort', abort) }
 }
 
 export function getSummary(transaction: IDBTransaction, id: string): Promise<DocumentSummary | undefined> {
@@ -149,13 +157,29 @@ export function readDraft(id: string) {
   })
 }
 
-export function insertDraft(file: DocumentFile, words?: number) {
-  return workspaceTransaction(draftStores, 'readwrite', async transaction => {
+export function readOriginal(id: string) {
+  return workspaceTransaction([originalsStore], 'readonly', async transaction => {
+    const original: OriginalFile | undefined = await requestResult(transaction.objectStore(originalsStore).get(id))
+    return original?.bytes
+  })
+}
+
+export function insertDraft(file: DocumentFile, words?: number, original?: OriginalFile, signal?: AbortSignal) {
+  const reference = file.format === 'txt' ? file.originalFile : undefined
+  return workspaceTransaction(reference || original ? [...draftStores, originalsStore] : draftStores, 'readwrite', async transaction => {
     const summary = draftSummary(file, undefined, words)
     await requestResult(transaction.objectStore(documentsStore).add(summary))
     await requestResult(transaction.objectStore(draftsStore).add(file))
+    if (original) {
+      if (reference?.id !== original.reference.id || reference.byteLength !== original.bytes.size || reference.sha256 !== original.reference.sha256) {
+        throw new Error('The original file does not match this draft.')
+      }
+      await requestResult(transaction.objectStore(originalsStore).add(original))
+    } else if (reference && await requestResult(transaction.objectStore(originalsStore).getKey(reference.id)) === undefined) {
+      throw new Error('The original file for this draft is unavailable.')
+    }
     return summary
-  })
+  }, original ? { durability: 'strict' } : undefined, signal)
 }
 
 export function writeDraft(file: DocumentFile, words?: number, expected?: DocumentFile) {
@@ -163,9 +187,9 @@ export function writeDraft(file: DocumentFile, words?: number, expected?: Docume
     const summary = await getSummary(transaction, file.id)
     requireLiveDocument(summary)
     const previous = await getDraft(transaction, file.id)
-    const changed = previous && expected && (previous.updated !== expected.updated || previous.source !== expected.source || previous.title !== expected.title ||
+    const changed = previous && expected && (previous.updated !== expected.updated || !sameContent(previous, expected) || previous.title !== expected.title ||
       previous.savedSource !== expected.savedSource || previous.savedTitle !== expected.savedTitle)
-    if (!previous || previous.historyEpoch !== file.historyEpoch || previous.updated > file.updated || changed) throw new WorkspaceRestoreConflict()
+    if (!previous || !sameLineage(previous, file) || previous.historyEpoch !== file.historyEpoch || previous.updated > file.updated || changed) throw new WorkspaceRestoreConflict()
     return putDraft(transaction, file, summary, words)
   })
 }

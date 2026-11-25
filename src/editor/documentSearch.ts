@@ -11,13 +11,28 @@ interface SearchBlock { from: number; source: MatchRange; node: ProseMirrorNode;
 interface TextPart extends MatchRange { marks: readonly Mark[] }
 interface Segment { text: string; from: number; block: number; parts: TextPart[] }
 
-export interface SearchDocument {
+interface SearchIdentity {
   id: string
   revision: number
   canReplace: boolean
+}
+
+interface MarkdownSearchDocument extends SearchIdentity {
+  format: 'markdown'
   session: MarkdownSession
   blocks: SearchBlock[]
   segments: Segment[]
+}
+
+interface TextSearchDocument extends SearchIdentity {
+  format: 'txt'
+  source: string
+}
+
+export type SearchDocument = MarkdownSearchDocument | TextSearchDocument
+
+export function searchSource(document: SearchDocument) {
+  return document.format === 'txt' ? document.source : document.session.source
 }
 
 export interface SearchHit {
@@ -85,7 +100,7 @@ function mapSpans(tokens: { text: string; from?: number }[], segments: Segment[]
   return spans
 }
 
-export function searchDocument(id: string, revision: number, session: MarkdownSession, canReplace = true): SearchDocument {
+export function searchDocument(id: string, revision: number, session: MarkdownSession, canReplace = true): MarkdownSearchDocument {
   const blocks: SearchBlock[] = []
   const segments: Segment[] = []
   const tokens = markdownProcessor.parse(session.source).children
@@ -105,7 +120,7 @@ export function searchDocument(id: string, revision: number, session: MarkdownSe
     blocks.push({ from, source: { from: original.start, to: original.end }, node, spans: mapSpans(leaves, local) })
     for (const segment of local) segments.push(segment)
   })
-  return { id, revision, canReplace, session, blocks, segments }
+  return { format: 'markdown', id, revision, canReplace, session, blocks, segments }
 }
 
 function mappedRanges(spans: Span[], range: MatchRange, from: 'visual' | 'source') {
@@ -135,11 +150,13 @@ function firstSourceBlockEndingAfter(blocks: SearchBlock[], position: number) {
 }
 
 export function searchTexts(document: SearchDocument, scope: SearchScope) {
+  if (document.format === 'txt') return [document.source]
   return scope === 'source' ? [document.session.source] : document.segments.map(segment => segment.text)
 }
 
 export function locateSearchHits(document: SearchDocument, scope: SearchScope, matches: TextMatch[]): SearchHit[] {
   return matches.map(match => {
+    if (document.format === 'txt') return { match, source: [{ from: match.from, to: match.to }], visual: [] }
     if (scope === 'source') {
       const start = firstSourceBlockEndingAfter(document.blocks, match.from)
       const visual: SearchHit['visual'] = []
@@ -157,7 +174,7 @@ export function locateSearchHits(document: SearchDocument, scope: SearchScope, m
   })
 }
 
-export function searchVisualOffsets(document: SearchDocument, actual: ProseMirrorNode) {
+export function searchVisualOffsets(document: MarkdownSearchDocument, actual: ProseMirrorNode) {
   const offsets = new Map<number, number>()
   const indexed = document.blocks.map((block, index) => ({ ...block, index })).filter(block => !isEmptyParagraph(block.node))
   let index = 0
@@ -220,10 +237,11 @@ export function applyRenderedHits(change: Transform, hits: SearchHit[], value: s
 
 export function replaceSearchHits(document: SearchDocument, scope: SearchScope, hits: SearchHit[], value: string, regex: boolean) {
   if (!document.canReplace) throw new Error('Finish the Markdown structure or use Raw Markdown to replace text in this draft.')
-  let source = document.session.source
+  const original = searchSource(document)
+  let source = original
   let skipped = 0
   let replaced = 0
-  if (scope === 'source') {
+  if (document.format === 'txt' || scope === 'source') {
     const pieces: string[] = []
     let from = 0
     for (const { match } of hits) {
@@ -233,12 +251,12 @@ export function replaceSearchHits(document: SearchDocument, scope: SearchScope, 
       if (text !== match.text) replaced++
     }
     source = pieces.join('') + source.slice(from)
-    if (replaced) {
-      const before = validateSource(document.session.source)
+    if (document.format === 'markdown' && replaced) {
+      const before = validateSource(original)
       const after = validateSource(source)
       const newIssue = after.find(item => !before.some(previous => previous.message === item.message))
       if (newIssue) throw new Error('The replacement would leave invalid Markdown. ' + newIssue.message)
-      if (after.length >= before.length && syntaxSignature(document.session.source) !== syntaxSignature(source)) {
+      if (after.length >= before.length && syntaxSignature(original) !== syntaxSignature(source)) {
         throw new Error('The replacement would change Markdown structure. Edit the syntax directly in Markdown Source.')
       }
     }

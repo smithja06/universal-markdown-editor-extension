@@ -5,7 +5,8 @@ import { newDocument } from './workspace'
 import { insertDraft, loadLayout, readDraft, writeDraft } from './workspaceStorage'
 import { automaticVersionLimit, listVersions, readVersion, recordVersion, restoreVersion, versionInterval } from './versions'
 
-const legacy = newDocument('Existing file', decodeMarkdown(new TextEncoder().encode('\uFEFF# Legacy\r\n\nExact line endings\r\n')))
+const legacyContent = decodeMarkdown(new TextEncoder().encode('\uFEFF# Legacy\r\n\nExact line endings\r\n'))
+const legacy = { ...legacyContent, id: 'legacy-history', title: 'Existing file', savedTitle: 'Existing file', savedSource: legacyContent.source, updated: 1 }
 const workspace = (file = legacy) => ({ currentId: file.id, files: [file] })
 
 beforeAll(async () => {

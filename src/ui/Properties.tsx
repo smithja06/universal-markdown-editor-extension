@@ -145,21 +145,22 @@ function AppearancePanel({ appearance, setAppearance, hostTheme }: AppearanceSet
   </section>
 }
 
-function StatisticsPanel({ data }: { data: Statistics }) {
+function StatisticsPanel({ data, plainText }: { data: Statistics; plainText?: boolean }) {
   const entries = [
     ['Words', data.words], ['Characters', data.characters], ['Characters excluding spaces', data.compact],
-    ['Reading time', data.minutes + ' min'], ['Headings', data.headings], ['Links', data.links], ['Images', data.images],
+    ['Reading time', data.minutes + ' min'], ...(plainText ? [] : [['Headings', data.headings], ['Links', data.links], ['Images', data.images]]),
   ]
   return <section className="properties-content"><div className="section-heading"><h3>Document statistics</h3></div>
     <dl className="statistics-list">{entries.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{typeof value === 'number' ? value.toLocaleString() : value}</dd></div>)}</dl>
   </section>
 }
 
-export function Properties({ tab, setTab, headings, active, statistics, metadata, onMetadata, close, jump, width, setWidth, appearance, setAppearance, hostTheme, readOnly }: AppearanceSettings & {
+export function Properties({ tab, setTab, headings, active, statistics, metadata, onMetadata, close, jump, width, setWidth, appearance, setAppearance, hostTheme, readOnly, plainText }: AppearanceSettings & {
   tab: Tab; setTab(tab: Tab): void; headings: Heading[]; active: string; statistics: Statistics; metadata: string; onMetadata(value: string): void; close(): void;
-  jump(heading: Heading): void; width: number; setWidth(value: number): void; readOnly?: boolean
+  jump(heading: Heading): void; width: number; setWidth(value: number): void; readOnly?: boolean; plainText?: boolean
 }) {
   const id = useId()
+  const availableTabs = plainText ? tabs.filter(item => item.name === 'Appearance' || item.name === 'Statistics') : tabs
   return <aside className="properties" style={{ '--sidebar-width': width + 'px' } as React.CSSProperties} aria-label="Document properties">
     <div className="sidebar-resize" role="separator" aria-label="Resize document properties" aria-orientation="vertical" aria-valuenow={width} aria-valuemin={250} aria-valuemax={430} tabIndex={0} onKeyDown={event => {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setWidth(width + (event.key === 'ArrowLeft' ? 12 : -12)) }
@@ -174,20 +175,21 @@ export function Properties({ tab, setTab, headings, active, statistics, metadata
     <div className="property-tabs" role="tablist" aria-label="Properties views" onKeyDown={event => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
       event.preventDefault()
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
-        : (tabs.findIndex(item => item.name === tab) + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length
-      setTab(tabs[next].name)
+      const length = availableTabs.length
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? length - 1
+        : (availableTabs.findIndex(item => item.name === tab) + (event.key === 'ArrowRight' ? 1 : length - 1)) % length
+      setTab(availableTabs[next].name)
       document.getElementById(id + '-tab-' + next)?.focus()
     }}>
-      {tabs.map(({ name, icon: Icon }, index) => <button type="button" role="tab" key={name} id={id + '-tab-' + index} aria-controls={id + '-panel'} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)} title={name}>
+      {availableTabs.map(({ name, icon: Icon }, index) => <button type="button" role="tab" key={name} id={id + '-tab-' + index} aria-controls={id + '-panel'} aria-selected={tab === name} tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)} title={name}>
         <Icon size={16} /><span>{name}</span>
       </button>)}
     </div>
-    <div className="property-panel" id={id + '-panel'} role="tabpanel" tabIndex={0} aria-labelledby={id + '-tab-' + tabs.findIndex(item => item.name === tab)}>
+    <div className="property-panel" id={id + '-panel'} role="tabpanel" tabIndex={0} aria-labelledby={id + '-tab-' + availableTabs.findIndex(item => item.name === tab)}>
       {tab === 'Outline' && <Outline headings={headings} active={active} jump={jump} />}
       {tab === 'Front matter' && <FrontMatter value={metadata} update={onMetadata} readOnly={readOnly} />}
       {tab === 'Appearance' && <AppearancePanel appearance={appearance} setAppearance={setAppearance} hostTheme={hostTheme} />}
-      {tab === 'Statistics' && <StatisticsPanel data={statistics} />}
+      {tab === 'Statistics' && <StatisticsPanel data={statistics} plainText={plainText} />}
     </div>
   </aside>
 }

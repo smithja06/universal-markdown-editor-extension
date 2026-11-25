@@ -4,7 +4,7 @@ import { newDocument } from './workspace'
 import { loadLibrary, loadLayout, readDraft, insertDraft, writeDraft, trashDocument, recoverDocument, storeLayout } from './workspaceStorage'
 import { readVersion } from './versions'
 
-const legacy = { ...newDocument('Legacy'), source: '# Draft\n', bom: true, lineEnding: '\r\n' as const }
+const legacy = { id: 'legacy-draft', title: 'Legacy', savedTitle: 'Legacy', source: '# Draft\n', savedSource: '', bom: true, lineEnding: '\r\n' as const, updated: 1 }
 
 beforeAll(async () => {
   const connection = await new Promise<IDBDatabase>((resolve, reject) => {

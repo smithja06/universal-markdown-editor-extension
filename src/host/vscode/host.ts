@@ -19,6 +19,7 @@ const storage: DocumentStorage = {
   loadLayout: unsupported,
   storeLayout: unsupported,
   readDraft: unsupported,
+  readOriginal: unsupported,
   insertDraft: unsupported,
   writeDraft: unsupported,
   touchDocument: unsupported,
@@ -31,7 +32,6 @@ const storage: DocumentStorage = {
 }
 
 const files: FileOperations = {
-  readMarkdown: unsupported,
   saveMarkdown: unsupported,
   download() { throw unavailable() },
   addAttachment: unsupported,

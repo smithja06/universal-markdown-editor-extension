@@ -106,8 +106,8 @@ export function fullFormatItems(editor: Editor, openLink: () => void): Item[] {
   ]
 }
 
-export function Toolbar({ editor, state, source, ready, execute, shortcut, insertItems, extraFormats, styleItems, sourceCanUndo, sourceCanRedo, sourceImageCommand, hostHistory }: {
-  editor: Editor | null; source: boolean; ready: boolean; execute(id: string): void; shortcut(id: string): string | undefined;
+export function Toolbar({ editor, state, source, plainText, ready, execute, shortcut, insertItems, extraFormats, styleItems, sourceCanUndo, sourceCanRedo, sourceImageCommand, hostHistory }: {
+  editor: Editor | null; source: boolean; plainText?: boolean; ready: boolean; execute(id: string): void; shortcut(id: string): string | undefined;
   state: ReturnType<typeof useFormatting>; insertItems: Item[]; extraFormats: Item[]; styleItems: Item[]; sourceCanUndo: boolean; sourceCanRedo: boolean; sourceImageCommand?: string; hostHistory?: boolean
 }) {
   const enabled = !!editor && !!state && ready && !source
@@ -136,7 +136,7 @@ export function Toolbar({ editor, state, source, ready, execute, shortcut, inser
     label: 'Align ' + value, icon: <Icon size={15} />, active: state?.alignment === value,
     run: apply(current => value === 'left' ? current.chain().focus().unsetTextAlign().run() : current.chain().focus().setTextAlign(value).run()),
   }))
-  const table = active('table') && editor ? tableItems(editor) : []
+  const table = !plainText && active('table') && editor ? tableItems(editor) : []
   const lists = [
     { label: 'Bullet list', id: 'insert.bullet-list', mark: 'bulletList', Icon: List },
     { label: 'Numbered list', id: 'insert.numbered-list', mark: 'orderedList', Icon: ListOrdered },
@@ -159,7 +159,7 @@ export function Toolbar({ editor, state, source, ready, execute, shortcut, inser
     </div>
     {source ? <>
       {sourceImageCommand && <div className="toolbar-group"><IconButton label="Insert image" disabled={!ready} onClick={() => execute(sourceImageCommand)}><ImagePlus size={17} /></IconButton></div>}
-      <div className="source-toolbar-label"><Code2 size={16} /> Markdown source <span>{shortcut('search.find')} to find</span></div>
+      <div className="source-toolbar-label"><Code2 size={16} /> {plainText ? 'Plain text' : 'Markdown source'} <span>{shortcut('search.find')} to find</span></div>
     </> : <>
       <div className="toolbar-group style-tools">
         <Menu label="Paragraph style" value={paragraph} chevron disabled={!enabled} items={styleItems.map(item => ({ ...item, active: state?.style === item.label }))}>

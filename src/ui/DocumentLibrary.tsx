@@ -100,7 +100,7 @@ export function DocumentLibrary({ items, tabs, close, create, open, rename, dupl
             <FileText size={17} aria-hidden="true" className="library-row-icon" />
             <div className="library-row-details">
               {view === 'Trash' ? <strong>{item.title}</strong> : <button type="button" className="library-open" disabled={busy} onClick={() => void run(() => open(item.id), 'close')}>{item.title}</button>}
-              <p className="muted">Markdown · {view === 'Trash' ? `Deleted ${calendar.format(item.deletedAt)}` : `Modified ${calendar.format(item.updated)} · Created ${calendar.format(item.createdAt)}`}{item.words !== undefined && ` · ${item.words.toLocaleString()} ${item.words === 1 ? 'word' : 'words'}`}{openIds.has(item.id) && ' · Open'}</p>
+              <p className="muted">{item.format === 'txt' ? 'TXT' : 'Markdown'} · {view === 'Trash' ? `Deleted ${calendar.format(item.deletedAt)}` : `Modified ${calendar.format(item.updated)} · Created ${calendar.format(item.createdAt)}`}{item.words !== undefined && ` · ${item.words.toLocaleString()} ${item.words === 1 ? 'word' : 'words'}`}{openIds.has(item.id) && ' · Open'}</p>
             </div>
             <div className="library-row-actions">
               {view === 'Trash' ? <button type="button" className="secondary-button" disabled={busy} aria-label={'Restore ' + item.title} onClick={() => void run(() => restore(item.id), 'Document restored to the library.')}><RotateCcw size={13} /> Restore</button> : <>
