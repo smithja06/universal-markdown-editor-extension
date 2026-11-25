@@ -1,5 +1,11 @@
 # Folio VSIX distribution record
 
+## Standalone DOCX worker dependencies
+
+Phase 7B uses `fflate` 0.8.3 (MIT) for DEFLATE and ZIP writing and `saxes` 6.0.0 (ISC) for namespace-aware XML events. `saxes` uses `xmlchars` 2.2.0 (MIT). The lockfile pins these inputs. The browser host builds the worker only for the standalone bundle. The VS Code build uses its existing host and notice inventory. [fflate license](https://github.com/101arrowz/fflate/blob/v0.8.3/LICENSE) · [saxes license](https://github.com/lddubeau/saxes/blob/v6.0.0/LICENSE) · [xmlchars license](https://github.com/lddubeau/xmlchars/blob/v2.2.0/LICENSE)
+
+The standalone build copies `DOCX_THIRD_PARTY_NOTICES.txt` from `public/` into `dist/`. It includes the exact locked license texts and attributions. The saxes npm archive omits its license file, so the notice uses the upstream v6.0.0 tag. Retain the notice beside the standalone worker when distributing that artifact, and check the final bundle and notice together. [Standalone DOCX notices](../public/DOCX_THIRD_PARTY_NOTICES.txt) · [Codec and limits](phase-7-multiformat-foundation.md#phase-7b-codec-and-limits)
+
 ## Package inventory
 
 The Milestone 2.7 audit covers `smithja06.folio-markdown-editor@0.1.0`, built from the repository lockfile using `npm run package:extension`. VSCE uses the files allowlist in `extension/package.json` and runs with `--no-dependencies`. [Final artifact and verification](PROJECT_HANDOFF.md#milestone-27-verification)

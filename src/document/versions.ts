@@ -41,6 +41,10 @@ function dateRange(documentId: string, kind?: VersionKind) {
 
 function contentOf(file: DocumentFile): DocumentContent {
   const { source, bom, lineEnding } = file
+  if (file.format === 'docx') {
+    const { format, schemaVersion, document, issues, originalFile } = file
+    return { format, schemaVersion, document, issues, source, bom: false, lineEnding: '\n', ...(originalFile ? { originalFile } : {}) }
+  }
   if (file.format === 'txt') {
     const { format, schemaVersion, mixedLineEndings, originalFile } = file
     return { format, schemaVersion, source, bom, lineEnding, mixedLineEndings, ...(originalFile ? { originalFile } : {}) }
@@ -75,7 +79,8 @@ async function appendVersion(transaction: IDBTransaction, file: DocumentFile, tr
 
   const version: VersionSummary = {
     id: crypto.randomUUID(), documentId: file.id, createdAt: Math.max(now, (latest?.createdAt ?? -1) + 1),
-    kind, title: file.title, bytes: encoder.encode(content.source).byteLength + encoder.encode(content.original?.text ?? '').byteLength,
+    kind, title: file.title, bytes: content.format === 'docx' ? encoder.encode(JSON.stringify(content)).byteLength
+      : encoder.encode(content.source).byteLength + encoder.encode(content.original?.text ?? '').byteLength,
   }
   if (kind === 'automatic') {
     const keys = await requestResult(versions.index(versionKindIndex).getAllKeys(dateRange(file.id, kind)))

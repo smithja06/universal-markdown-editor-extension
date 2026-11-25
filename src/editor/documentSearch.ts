@@ -29,9 +29,21 @@ interface TextSearchDocument extends SearchIdentity {
   source: string
 }
 
-export type SearchDocument = MarkdownSearchDocument | TextSearchDocument
+interface RichSearchDocument extends SearchIdentity {
+  format: 'docx'
+  document: ProseMirrorNode
+  segments: Segment[]
+}
 
-export function searchSource(document: SearchDocument) {
+export type SearchDocument = MarkdownSearchDocument | TextSearchDocument | RichSearchDocument
+
+export function richSearchDocument(id: string, revision: number, document: ProseMirrorNode): RichSearchDocument {
+  const segments: Segment[] = []
+  document.forEach((node, from) => { segments.push(...blockSegments(node, from, 0)) })
+  return { format: 'docx', id, revision, document, segments, canReplace: true }
+}
+
+export function searchSource(document: MarkdownSearchDocument | TextSearchDocument) {
   return document.format === 'txt' ? document.source : document.session.source
 }
 
@@ -151,13 +163,13 @@ function firstSourceBlockEndingAfter(blocks: SearchBlock[], position: number) {
 
 export function searchTexts(document: SearchDocument, scope: SearchScope) {
   if (document.format === 'txt') return [document.source]
-  return scope === 'source' ? [document.session.source] : document.segments.map(segment => segment.text)
+  return document.format === 'markdown' && scope === 'source' ? [document.session.source] : document.segments.map(segment => segment.text)
 }
 
 export function locateSearchHits(document: SearchDocument, scope: SearchScope, matches: TextMatch[]): SearchHit[] {
   return matches.map(match => {
     if (document.format === 'txt') return { match, source: [{ from: match.from, to: match.to }], visual: [] }
-    if (scope === 'source') {
+    if (document.format === 'markdown' && scope === 'source') {
       const start = firstSourceBlockEndingAfter(document.blocks, match.from)
       const visual: SearchHit['visual'] = []
       for (let block = start; document.blocks[block]?.source.from < match.to; block++) {
@@ -169,7 +181,7 @@ export function locateSearchHits(document: SearchDocument, scope: SearchScope, m
     const visual = { from: segment.from + match.from, to: segment.from + match.to, block: segment.block }
     const parts = segment.parts.filter(part => part.to > visual.from && part.from < visual.to)
     const marks = parts[0]?.marks
-    return { match, block: segment.block, visual: [visual], source: mappedRanges(document.blocks[segment.block].spans, visual, 'visual'),
+    return { match, block: segment.block, visual: [visual], source: document.format === 'docx' ? [] : mappedRanges(document.blocks[segment.block].spans, visual, 'visual'),
       marks: marks && parts.every(part => Mark.sameSet(part.marks, marks)) ? marks : undefined }
   })
 }
@@ -235,7 +247,7 @@ export function applyRenderedHits(change: Transform, hits: SearchHit[], value: s
   return { skipped, replaced }
 }
 
-export function replaceSearchHits(document: SearchDocument, scope: SearchScope, hits: SearchHit[], value: string, regex: boolean) {
+export function replaceSearchHits(document: MarkdownSearchDocument | TextSearchDocument, scope: SearchScope, hits: SearchHit[], value: string, regex: boolean) {
   if (!document.canReplace) throw new Error('Finish the Markdown structure or use Raw Markdown to replace text in this draft.')
   const original = searchSource(document)
   let source = original

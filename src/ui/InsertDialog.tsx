@@ -3,6 +3,7 @@ import type { Editor } from '@tiptap/core'
 import { NodeSelection } from '@tiptap/pm/state'
 import { DiagramPreview } from '../editor/nodeViews'
 import { safeUrl } from '../editor/schema'
+import { safeDocxLink } from '../document/formats/docx/model'
 import type { FolioHost } from '../host/contracts'
 import { Modal } from './controls'
 
@@ -32,8 +33,8 @@ export const diagramPresets = {
   'State diagram': 'stateDiagram-v2\n  [*] --> Draft\n  Draft --> Published\n  Published --> [*]',
 }
 
-export function InsertDialog({ request, editor, anchors, close, chooseLocalImage, workspacePicker }: {
-  request: InsertRequest; editor: Editor; anchors: { anchor: string; title: string }[]; close(): void; chooseLocalImage?(): void; workspacePicker?: WorkspacePicker
+export function InsertDialog({ request, editor, anchors, close, chooseLocalImage, workspacePicker, docx }: {
+  request: InsertRequest; editor: Editor; anchors: { anchor: string; title: string }[]; close(): void; chooseLocalImage?(): void; workspacePicker?: WorkspacePicker; docx?: boolean
 }) {
   const { name, imageTarget } = request
   const sourceImage = !!imageTarget?.insertSource
@@ -129,7 +130,10 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
     if (request.position !== undefined) command.setNodeSelection(request.position)
     let result: boolean
     if (name === 'link') {
-      if (!safeUrl(input)) { setError('Enter a URL, file path, or heading anchor.'); return }
+      if (!(docx ? safeDocxLink(input) : safeUrl(input))) {
+        setError(docx ? 'Enter an absolute HTTP, HTTPS, email (mailto:), or phone (tel:) link.' : 'Enter a URL, file path, or heading anchor.')
+        return
+      }
       result = selection.empty && !wasLink
         ? command.insertContent({ type: 'text', text: label.trim() || input, marks: [{ type: 'link', attrs: { href: input } }] }).run()
         : command.extendMarkRange('link').setLink({ href: input }).run()
@@ -177,8 +181,8 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
       </>}
       {name === 'link' && <>
         {!wasLink && selection.empty && <label className="field">Link text<input value={label} onChange={event => setLabel(event.target.value)} placeholder="Text to display" /></label>}
-        <label className="field">Destination<input data-dialog-focus value={value} onChange={event => setValue(event.target.value)} placeholder="https://, #heading, or ./file.md" /></label>
-        {anchors.length > 0 && <label className="field">Link to a heading<select value={value.startsWith('#') ? value : ''} onChange={event => setValue(event.target.value)}><option value="">Choose a heading</option>{anchors.map(item => <option key={item.anchor} value={'#' + item.anchor}>{item.title}</option>)}</select></label>}
+        <label className="field">Destination<input data-dialog-focus value={value} onChange={event => setValue(event.target.value)} placeholder={docx ? 'https://example.com' : 'https://, #heading, or ./file.md'} /></label>
+        {!docx && anchors.length > 0 && <label className="field">Link to a heading<select value={value.startsWith('#') ? value : ''} onChange={event => setValue(event.target.value)}><option value="">Choose a heading</option>{anchors.map(item => <option key={item.anchor} value={'#' + item.anchor}>{item.title}</option>)}</select></label>}
       </>}
       {name === 'image' && <>
         <label className="field">Image URL<input data-dialog-focus disabled={busy} value={value} onChange={event => { picked.current = undefined; setValue(event.target.value) }} placeholder={workspacePicker ? './media/image.png' : 'https://example.com/image.png'} /></label>

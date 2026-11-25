@@ -123,7 +123,7 @@ function FrontMatter({ value, update, readOnly }: { value: string; update(value:
 
 interface AppearanceSettings { appearance: Appearance; setAppearance(value: Partial<Appearance>): void; hostTheme?: boolean }
 
-function AppearancePanel({ appearance, setAppearance, hostTheme }: AppearanceSettings) {
+function AppearancePanel({ appearance, setAppearance, hostTheme, docx }: AppearanceSettings & { docx?: boolean }) {
   const hex = accentHex(appearance.accentColor)
   return <section className="properties-content fields-panel">
     <div className="section-heading"><h3>Appearance</h3></div>
@@ -140,27 +140,34 @@ function AppearancePanel({ appearance, setAppearance, hostTheme }: AppearanceSet
     <label className="field">Editor font size<select value={appearance.fontSize} onChange={event => setAppearance({ fontSize: Number(event.target.value) })}>{[12, 14, 15, 16, 18, 20, 22, 24].map(size => <option key={size} value={size}>{size} px</option>)}</select></label>
     <label className="field">Editor line height<select value={appearance.lineHeight} onChange={event => setAppearance({ lineHeight: Number(event.target.value) })}>{[1.25, 1.5, 1.7, 1.9, 2.2].map(value => <option key={value}>{value}</option>)}</select></label>
     <label className="field">Document width<select value={appearance.width} onChange={event => setAppearance({ width: event.target.value as typeof appearance.width })}><option value="page">Page width</option><option value="full">Full width</option></select></label>
-    <label className="check-field"><input type="checkbox" checked={appearance.lineNumbers} onChange={event => setAppearance({ lineNumbers: event.target.checked })} /> Show line numbers</label>
-    <label className="check-field"><input type="checkbox" checked={appearance.wordWrap} onChange={event => setAppearance({ wordWrap: event.target.checked })} /> Wrap source lines</label>
+    {!docx && <>
+      <label className="check-field"><input type="checkbox" checked={appearance.lineNumbers} onChange={event => setAppearance({ lineNumbers: event.target.checked })} /> Show line numbers</label>
+      <label className="check-field"><input type="checkbox" checked={appearance.wordWrap} onChange={event => setAppearance({ wordWrap: event.target.checked })} /> Wrap source lines</label>
+    </>}
   </section>
 }
 
-function StatisticsPanel({ data, plainText }: { data: Statistics; plainText?: boolean }) {
+function StatisticsPanel({ data, plainText, docx }: { data: Statistics; plainText?: boolean; docx?: boolean }) {
   const entries = [
     ['Words', data.words], ['Characters', data.characters], ['Characters excluding spaces', data.compact],
-    ['Reading time', data.minutes + ' min'], ...(plainText ? [] : [['Headings', data.headings], ['Links', data.links], ['Images', data.images]]),
+    ['Reading time', data.minutes + ' min'], ...(plainText ? [] : [['Headings', data.headings], ['Links', data.links]]),
+    ...(plainText || docx ? [] : [['Images', data.images]]),
   ]
   return <section className="properties-content"><div className="section-heading"><h3>Document statistics</h3></div>
     <dl className="statistics-list">{entries.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{typeof value === 'number' ? value.toLocaleString() : value}</dd></div>)}</dl>
   </section>
 }
 
-export function Properties({ tab, setTab, headings, active, statistics, metadata, onMetadata, close, jump, width, setWidth, appearance, setAppearance, hostTheme, readOnly, plainText }: AppearanceSettings & {
+export function Properties({ tab, setTab, headings, active, statistics, metadata, onMetadata, close, jump, width, setWidth, appearance, setAppearance, hostTheme, readOnly, plainText, docx }: AppearanceSettings & {
   tab: Tab; setTab(tab: Tab): void; headings: Heading[]; active: string; statistics: Statistics; metadata: string; onMetadata(value: string): void; close(): void;
-  jump(heading: Heading): void; width: number; setWidth(value: number): void; readOnly?: boolean; plainText?: boolean
+  jump(heading: Heading): void; width: number; setWidth(value: number): void; readOnly?: boolean; plainText?: boolean; docx?: boolean
 }) {
   const id = useId()
-  const availableTabs = plainText ? tabs.filter(item => item.name === 'Appearance' || item.name === 'Statistics') : tabs
+  const availableTabs = tabs.filter(item => {
+    if (item.name === 'Front matter') return !plainText && !docx
+    if (item.name === 'Outline') return !plainText
+    return true
+  })
   return <aside className="properties" style={{ '--sidebar-width': width + 'px' } as React.CSSProperties} aria-label="Document properties">
     <div className="sidebar-resize" role="separator" aria-label="Resize document properties" aria-orientation="vertical" aria-valuenow={width} aria-valuemin={250} aria-valuemax={430} tabIndex={0} onKeyDown={event => {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); setWidth(width + (event.key === 'ArrowLeft' ? 12 : -12)) }
@@ -188,8 +195,8 @@ export function Properties({ tab, setTab, headings, active, statistics, metadata
     <div className="property-panel" id={id + '-panel'} role="tabpanel" tabIndex={0} aria-labelledby={id + '-tab-' + availableTabs.findIndex(item => item.name === tab)}>
       {tab === 'Outline' && <Outline headings={headings} active={active} jump={jump} />}
       {tab === 'Front matter' && <FrontMatter value={metadata} update={onMetadata} readOnly={readOnly} />}
-      {tab === 'Appearance' && <AppearancePanel appearance={appearance} setAppearance={setAppearance} hostTheme={hostTheme} />}
-      {tab === 'Statistics' && <StatisticsPanel data={statistics} plainText={plainText} />}
+      {tab === 'Appearance' && <AppearancePanel appearance={appearance} setAppearance={setAppearance} hostTheme={hostTheme} docx={docx} />}
+      {tab === 'Statistics' && <StatisticsPanel data={statistics} plainText={plainText} docx={docx} />}
     </div>
   </aside>
 }

@@ -41,7 +41,7 @@ test('rejects invalid UTF-8, UTF-16, binary-looking data, and unsupported format
   }
   expect(identifyFormat('note.MarkDown')).toBe('markdown')
   expect(identifyFormat('note.TXT')).toBe('txt')
-  expect(await importDocument(input('note.docx', encoder.encode('text')))).toMatchObject({ status: 'rejected', diagnostics: [{ code: 'unsupported-format' }] })
+  expect(await importDocument(input('note.xlsx', encoder.encode('text')))).toMatchObject({ status: 'rejected', diagnostics: [{ code: 'unsupported-format' }] })
 })
 
 test('mixed newlines require a choice only after editing and a stale export cannot deliver', async () => {

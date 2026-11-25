@@ -27,7 +27,9 @@ export function paragraphStyle(editor: Editor, value: string) {
   else editor.chain().focus().setParagraph().updateAttributes('paragraph', reset).run()
 }
 
-export const paragraphStyles = ['Normal text', 'Title', 'Subtitle', 'Heading 1', 'Heading 2', 'Heading 3', 'Heading 4', 'Heading 5', 'Heading 6', 'Quote', 'Preformatted', 'Code block']
+const headingStyles = ['Heading 1', 'Heading 2', 'Heading 3', 'Heading 4', 'Heading 5', 'Heading 6']
+export const docxParagraphStyles = ['Normal text', ...headingStyles]
+export const paragraphStyles = ['Normal text', 'Title', 'Subtitle', ...headingStyles, 'Quote', 'Preformatted', 'Code block']
 const fontName = (name?: string) => name === 'Inter Variable' ? 'Inter' : name ?? 'Inter'
 
 function setParagraphAttribute(editor: Editor, key: string, value: string | null) {
@@ -61,33 +63,56 @@ export function useFormatting(editor: Editor | null) {
   })
 }
 
-export function formatItems(editor: Editor, openLink: () => void): Item[] {
+export function formatItems(editor: Editor, openLink: () => void, docx?: boolean): Item[] {
+  const links = [
+    { label: 'Edit link', icon: <Link2 size={15} />, shortcut: 'Ctrl+K', run: openLink },
+    { label: 'Remove link', disabled: !editor.isActive('link'), run: () => editor.chain().focus().extendMarkRange('link').unsetLink().run() },
+  ]
+  const clear = { label: 'Clear formatting', shortcut: 'Ctrl+\\', run: () => editor.chain().focus().unsetAllMarks().clearNodes().resetAttributes('paragraph', ['displayStyle', 'textAlign', 'lineSpacing', 'paragraphSpacing', 'indent']).run() }
+  if (docx) return [...links, clear]
   return [
     { label: 'Superscript', active: editor.isActive('superscript'), run: () => editor.chain().focus().toggleSuperscript().run() },
     { label: 'Subscript', active: editor.isActive('subscript'), run: () => editor.chain().focus().toggleSubscript().run() },
     { label: 'Inline code', icon: <Code2 size={15} />, shortcut: 'Ctrl+E', active: editor.isActive('code'), run: () => editor.chain().focus().toggleCode().run() },
-    { label: 'Edit link', icon: <Link2 size={15} />, shortcut: 'Ctrl+K', run: openLink },
-    { label: 'Remove link', disabled: !editor.isActive('link'), run: () => editor.chain().focus().extendMarkRange('link').unsetLink().run() },
+    ...links,
     { label: '', divider: true },
     ...[1, 1.4, 1.7, 2].map(value => ({ label: 'Line spacing ' + value, run: () => setParagraphAttribute(editor, 'lineSpacing', String(value)) })),
     ...[0, 8, 16, 24].map(value => ({ label: 'Paragraph spacing ' + value + ' px', run: () => setParagraphAttribute(editor, 'paragraphSpacing', String(value) + 'px') })),
     { label: '', divider: true },
     { label: 'Increase indentation', icon: <IndentIncrease size={15} />, run: () => indent(editor, 1) },
     { label: 'Decrease indentation', icon: <IndentDecrease size={15} />, run: () => indent(editor, -1) },
-    { label: 'Clear formatting', shortcut: 'Ctrl+\\', run: () => editor.chain().focus().unsetAllMarks().clearNodes().resetAttributes('paragraph', ['displayStyle', 'textAlign', 'lineSpacing', 'paragraphSpacing', 'indent']).run() },
+    clear,
   ]
 }
 
-export function tableItems(editor: Editor): Item[] {
+export function tableItems(editor: Editor, docx?: boolean): Item[] {
+  const addColumn = (side: 'addColumnBefore' | 'addColumnAfter') => () => {
+    const command = editor.chain().focus()[side]()
+    if (docx && editor.isActive('tableHeader')) command.command(({ tr }) => {
+      const { $from } = tr.selection
+      for (let depth = $from.depth; depth > 0; depth--) {
+        const row = $from.node(depth)
+        if (row.type.name !== 'tableRow') continue
+        row.forEach((cell, offset) => {
+          if (cell.type.name === 'tableCell') tr.setNodeMarkup($from.start(depth) + offset, editor.schema.nodes.tableHeader, cell.attrs)
+        })
+        break
+      }
+      return true
+    })
+    return command.run()
+  }
   return [
-    { label: 'Add row above', run: () => editor.chain().focus().addRowBefore().run() },
+    { label: 'Add row above', disabled: docx && editor.isActive('tableHeader'), run: () => editor.chain().focus().addRowBefore().run() },
     { label: 'Add row below', run: () => editor.chain().focus().addRowAfter().run() },
-    { label: 'Add column before', run: () => editor.chain().focus().addColumnBefore().run() },
-    { label: 'Add column after', run: () => editor.chain().focus().addColumnAfter().run() },
+    { label: 'Add column before', run: addColumn('addColumnBefore') },
+    { label: 'Add column after', run: addColumn('addColumnAfter') },
     { label: 'Toggle header row', run: () => editor.chain().focus().toggleHeaderRow().run() },
-    ...alignments.slice(0, 3).map(([value, Icon]) => ({ label: 'Align cells ' + value, icon: <Icon size={15} />, run: () => editor.chain().focus().setCellAttribute('cellAlign', value).run() })),
-    { label: 'Merge cells', disabled: !editor.can().mergeCells(), run: () => editor.chain().focus().mergeCells().run() },
-    { label: 'Split cell', disabled: !editor.can().splitCell(), run: () => editor.chain().focus().splitCell().run() },
+    ...(docx ? [] : [
+      ...alignments.slice(0, 3).map(([value, Icon]) => ({ label: 'Align cells ' + value, icon: <Icon size={15} />, run: () => editor.chain().focus().setCellAttribute('cellAlign', value).run() })),
+      { label: 'Merge cells', disabled: !editor.can().mergeCells(), run: () => editor.chain().focus().mergeCells().run() },
+      { label: 'Split cell', disabled: !editor.can().splitCell(), run: () => editor.chain().focus().splitCell().run() },
+    ]),
     { label: '', divider: true },
     { label: 'Delete row', run: () => editor.chain().focus().deleteRow().run() },
     { label: 'Delete column', run: () => editor.chain().focus().deleteColumn().run() },
@@ -95,19 +120,19 @@ export function tableItems(editor: Editor): Item[] {
   ]
 }
 
-export function fullFormatItems(editor: Editor, openLink: () => void): Item[] {
+export function fullFormatItems(editor: Editor, openLink: () => void, docx?: boolean): Item[] {
   return [
-    { label: 'Bold', icon: <Bold size={15} />, shortcut: 'Ctrl+B', run: () => editor.chain().focus().toggleBold().run() },
-    { label: 'Italic', icon: <Italic size={15} />, shortcut: 'Ctrl+I', run: () => editor.chain().focus().toggleItalic().run() },
-    { label: 'Underline', icon: <Underline size={15} />, shortcut: 'Ctrl+U', run: () => editor.chain().focus().toggleUnderline().run() },
-    { label: 'Strikethrough', icon: <Strikethrough size={15} />, run: () => editor.chain().focus().toggleStrike().run() },
+    { label: 'Bold', icon: <Bold size={15} />, shortcut: 'Ctrl+B', active: editor.isActive('bold'), run: () => editor.chain().focus().toggleBold().run() },
+    { label: 'Italic', icon: <Italic size={15} />, shortcut: 'Ctrl+I', active: editor.isActive('italic'), run: () => editor.chain().focus().toggleItalic().run() },
+    { label: 'Underline', icon: <Underline size={15} />, shortcut: 'Ctrl+U', active: editor.isActive('underline'), run: () => editor.chain().focus().toggleUnderline().run() },
+    ...(docx ? [] : [{ label: 'Strikethrough', icon: <Strikethrough size={15} />, run: () => editor.chain().focus().toggleStrike().run() }]),
     { label: '', divider: true },
-    ...formatItems(editor, openLink),
+    ...formatItems(editor, openLink, docx),
   ]
 }
 
-export function Toolbar({ editor, state, source, plainText, ready, execute, shortcut, insertItems, extraFormats, styleItems, sourceCanUndo, sourceCanRedo, sourceImageCommand, hostHistory }: {
-  editor: Editor | null; source: boolean; plainText?: boolean; ready: boolean; execute(id: string): void; shortcut(id: string): string | undefined;
+export function Toolbar({ editor, state, source, plainText, docx, ready, execute, shortcut, insertItems, extraFormats, styleItems, sourceCanUndo, sourceCanRedo, sourceImageCommand, hostHistory }: {
+  editor: Editor | null; source: boolean; plainText?: boolean; docx?: boolean; ready: boolean; execute(id: string): void; shortcut(id: string): string | undefined;
   state: ReturnType<typeof useFormatting>; insertItems: Item[]; extraFormats: Item[]; styleItems: Item[]; sourceCanUndo: boolean; sourceCanRedo: boolean; sourceImageCommand?: string; hostHistory?: boolean
 }) {
   const enabled = !!editor && !!state && ready && !source
@@ -136,15 +161,15 @@ export function Toolbar({ editor, state, source, plainText, ready, execute, shor
     label: 'Align ' + value, icon: <Icon size={15} />, active: state?.alignment === value,
     run: apply(current => value === 'left' ? current.chain().focus().unsetTextAlign().run() : current.chain().focus().setTextAlign(value).run()),
   }))
-  const table = !plainText && active('table') && editor ? tableItems(editor) : []
+  const table = !plainText && active('table') && editor ? tableItems(editor, docx) : []
   const lists = [
     { label: 'Bullet list', id: 'insert.bullet-list', mark: 'bulletList', Icon: List },
     { label: 'Numbered list', id: 'insert.numbered-list', mark: 'orderedList', Icon: ListOrdered },
-    { label: 'Task list', id: 'insert.checklist', mark: 'taskList', Icon: ListTodo },
+    ...(docx ? [] : [{ label: 'Task list', id: 'insert.checklist', mark: 'taskList', Icon: ListTodo }]),
   ].map(({ label, id, mark, Icon }) => ({ label, active: active(mark), icon: <Icon size={16} />, run: () => execute(id) }))
   const strike = { label: 'Strikethrough', active: active('strike'), icon: <Strikethrough size={16} />, run: () => execute('format.strikethrough') }
   const divider = { label: '', divider: true }
-  const compactFormats = [
+  const compactFormats = docx ? lists : [
     strike, ...lists, ...alignItems,
     ...(table.length ? [divider, ...table] : []),
     divider, ...fontFamilies.map(item => ({ ...item, label: 'Font family – ' + item.label })),
@@ -166,28 +191,30 @@ export function Toolbar({ editor, state, source, plainText, ready, execute, shor
           <Pilcrow size={15} /><span>{paragraph}</span>
         </Menu>
       </div>
-      <div className="toolbar-group type-tools wide-toolbar-tool">
+      {!docx && <div className="toolbar-group type-tools wide-toolbar-tool">
         <Menu label="Font family" value={family} chevron disabled={!enabled} items={fontFamilies}>
           <span>{family}</span>
         </Menu>
         <Menu label="Font size" value={fontSize} chevron disabled={!enabled} items={fontSizes}>
           <span>{fontSize}</span>
         </Menu>
-      </div>
+      </div>}
       <div className="toolbar-group mark-tools">
         <IconButton label={label('Bold', 'format.bold')} active={active('bold')} disabled={!enabled} onClick={() => execute('format.bold')}><Bold size={16} /></IconButton>
         <IconButton label={label('Italic', 'format.italic')} active={active('italic')} disabled={!enabled} onClick={() => execute('format.italic')}><Italic size={16} /></IconButton>
         <IconButton label={label('Underline', 'format.underline')} active={active('underline')} disabled={!enabled} onClick={() => execute('format.underline')}><Underline size={16} /></IconButton>
-        <IconButton label={strike.label} className="wide-toolbar-tool" active={strike.active} disabled={!enabled} onClick={strike.run}>{strike.icon}</IconButton>
-        <Menu label="Text color" className="wide-toolbar-tool" disabled={!enabled} items={[...textColors, clearColor]}>
-          <span className="color-letter" style={{ borderBottomColor: state?.text.color ?? 'currentColor' }}>A</span><ChevronDown size={10} />
-        </Menu>
-        <Menu label="Text highlight" className="wide-toolbar-tool" disabled={!enabled} items={[...textHighlights, clearHighlight]}>
-          <Highlighter size={17} /><ChevronDown size={10} />
-        </Menu>
+        {!docx && <>
+          <IconButton label={strike.label} className="wide-toolbar-tool" active={strike.active} disabled={!enabled} onClick={strike.run}>{strike.icon}</IconButton>
+          <Menu label="Text color" className="wide-toolbar-tool" disabled={!enabled} items={[...textColors, clearColor]}>
+            <span className="color-letter" style={{ borderBottomColor: state?.text.color ?? 'currentColor' }}>A</span><ChevronDown size={10} />
+          </Menu>
+          <Menu label="Text highlight" className="wide-toolbar-tool" disabled={!enabled} items={[...textHighlights, clearHighlight]}>
+            <Highlighter size={17} /><ChevronDown size={10} />
+          </Menu>
+        </>}
       </div>
       <div className="toolbar-group list-tools wide-toolbar-tool">
-        <Menu label="Alignment" chevron disabled={!enabled} items={alignItems}><CurrentAlign size={17} /></Menu>
+        {!docx && <Menu label="Alignment" chevron disabled={!enabled} items={alignItems}><CurrentAlign size={17} /></Menu>}
         {lists.map(item => <IconButton key={item.label} label={item.label} disabled={!enabled} active={item.active} onClick={item.run}>{item.icon}</IconButton>)}
       </div>
       <div className="toolbar-group insert-tools">
@@ -195,7 +222,7 @@ export function Toolbar({ editor, state, source, plainText, ready, execute, shor
         <Menu label="Insert content" align="right" chevron disabled={!enabled} items={insertItems}><Plus size={17} /></Menu>
         <Menu label="More formatting" align="right" disabled={!enabled} items={extraFormats} compactItems={compactFormats}><Ellipsis size={19} /></Menu>
       </div>
-      {table.length > 0 && <div className="toolbar-group wide-toolbar-tool"><Menu label="Table controls" chevron items={table}>Table</Menu></div>}
+      {table.length > 0 && <div className={docx ? 'toolbar-group' : 'toolbar-group wide-toolbar-tool'}><Menu label="Table controls" chevron disabled={!enabled} items={table}>Table</Menu></div>}
     </>}
   </div>
 }

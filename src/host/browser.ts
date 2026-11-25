@@ -73,6 +73,10 @@ export const browserHost: FolioHost = {
   storage: { loadLibrary, loadLayout, storeLayout, readDraft, readOriginal, insertDraft, writeDraft, touchDocument, trashDocument,
     recoverDocument, listVersions, readVersion, recordVersion, restoreVersion },
   files: browserFiles,
+  docx: {
+    async read(bytes, signal) { return (await import('../document/formats/docx/workerClient')).readDocxInWorker(bytes, signal) },
+    async write(document, signal) { return (await import('../document/formats/docx/workerClient')).writeDocxInWorker(document, signal) },
+  },
   appearance,
   clipboard: {
     async writeText(text) {
