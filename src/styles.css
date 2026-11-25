@@ -277,6 +277,8 @@ kbd { font: 11px/1.4 "Cascadia Code", Consolas, monospace; color: var(--muted); 
 .tiptap .selectedCell::after { position: absolute; inset: 0; content: ""; background: color-mix(in srgb, var(--accent) 22%, transparent); pointer-events: none; }
 .tiptap .column-resize-handle { position: absolute; right: -2px; top: 0; bottom: 0; width: 4px; z-index: 2; background: var(--accent); pointer-events: none; }
 .tiptap.resize-cursor { cursor: col-resize; }
+.docx-pane .tiptap .column-resize-handle { display: none; }
+.docx-pane .tiptap.resize-cursor { cursor: text; }
 .tiptap .ProseMirror-selectednode { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tiptap .is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--soft); float: left; height: 0; pointer-events: none; }
 
@@ -468,6 +470,8 @@ kbd { font: 11px/1.4 "Cascadia Code", Consolas, monospace; color: var(--muted); 
 .modal-heading { display: flex; justify-content: space-between; align-items: center; padding: 13px 17px; border-bottom: 1px solid var(--line); }
 .modal h2 { margin: 0; font: 770 17px/1.25 "Manrope Variable", sans-serif; letter-spacing: -.02em; }
 .dialog-form { display: grid; gap: 12px; padding: 16px 17px 17px; }
+.export-diagnostics { display: grid; gap: 8px; margin: 0; padding-inline-start: 20px; max-height: min(45vh, 360px); overflow: auto; overflow-wrap: anywhere; }
+.export-diagnostics li > * { display: block; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; padding-top: 4px; }
 .primary-button, .secondary-button, .danger-button { padding: 7px 12px; min-height: 32px; border-radius: 6px; font-size: 12px; font-weight: 650; line-height: 1.2; }
 .primary-button { background: var(--accent-fill); color: var(--accent-fill-text); border: 1px solid var(--accent-fill-border); }
@@ -514,15 +518,17 @@ kbd { font: 11px/1.4 "Cascadia Code", Consolas, monospace; color: var(--muted); 
 .version-formats button { padding: 5px 7px; border-radius: 4px; font-size: 12px; }
 .version-formats button:hover { background: var(--hover); }
 .version-formats button[aria-pressed="true"] { color: var(--accent-strong); font-weight: 650; background: var(--accent-surface); }
-.version-frame, .version-markdown { display: block; flex: 1; width: 100%; min-height: 0; border: 0; border-radius: 0 0 7px 0; }
+.version-frame, .version-markdown, .version-docx { display: block; flex: 1; width: 100%; min-height: 0; border: 0; border-radius: 0 0 7px 0; }
 .version-markdown { margin: 0; padding: 13px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); font: 12px/1.6 "Cascadia Code", Consolas, monospace; }
+.version-docx { padding: 16px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--writing-size)/var(--writing-leading) var(--writing-font); }
+.version-docx-link { color: var(--accent); text-decoration: underline; }
 .version-empty { display: grid; align-content: center; justify-items: center; flex: 1; text-align: center; color: var(--muted); font-size: 12px; }
 .version-confirm { padding: 8px 10px; background: var(--accent-surface); border-bottom: 1px solid var(--accent-outline); font-size: 12px; color: var(--text); }
 .version-confirm p { margin: 0; }
 @media (max-width: 620px) {
   .version-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(90px, 1fr) minmax(180px, 1.75fr); }
   .version-list { border-inline-end: 0; border-bottom: 1px solid var(--line-strong); border-radius: 7px 7px 0 0; }
-  .version-frame, .version-markdown { border-radius: 0 0 7px 7px; }
+  .version-frame, .version-markdown, .version-docx { border-radius: 0 0 7px 7px; }
 }
 .emoji-grid { display: grid; grid-template-columns: repeat(5, 1fr); padding: 15px; gap: 5px; }
 .emoji-grid button { border: 1px solid var(--line); border-radius: 7px; min-height: 44px; font-size: 22px; }

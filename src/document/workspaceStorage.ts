@@ -1,6 +1,6 @@
 import { draftSummary, emptyLayout, withoutTabs, type DocumentFile, type DocumentSummary, type WorkspaceLayout } from './workspace'
 import { WorkspaceRestoreConflict } from '../host/contracts'
-import { sameContent, sameLineage, type OriginalFile } from './formats/content'
+import { originalReference, sameContent, sameLineage, type OriginalFile } from './formats/content'
 
 export const sessionsStore = 'sessions'
 export const documentsStore = 'documents'
@@ -165,7 +165,7 @@ export function readOriginal(id: string) {
 }
 
 export function insertDraft(file: DocumentFile, words?: number, original?: OriginalFile, signal?: AbortSignal) {
-  const reference = file.format === 'txt' ? file.originalFile : undefined
+  const reference = originalReference(file)
   return workspaceTransaction(reference || original ? [...draftStores, originalsStore] : draftStores, 'readwrite', async transaction => {
     const summary = draftSummary(file, undefined, words)
     await requestResult(transaction.objectStore(documentsStore).add(summary))

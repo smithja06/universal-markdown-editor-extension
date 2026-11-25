@@ -1,6 +1,7 @@
 import type { Command, ShortcutPlatform } from '../core/commands'
 import type { MarkdownFile, WritableMarkdownHandle } from '../document/files'
 import type { OriginalFile } from '../document/formats/content'
+import type { DocxCodec } from '../document/formats/docx/model'
 import type { Appearance, DocumentFile, DocumentSummary, WorkspaceLayout } from '../document/workspace'
 import type { DocumentVersion, VersionResult, VersionSummary, VersionTrigger } from '../document/versions'
 import type { SearchOptions, TextMatch } from '../core/search'
@@ -66,6 +67,7 @@ export interface LiveDocument {
 export interface FolioHost {
   storage: DocumentStorage
   files: FileOperations
+  docx?: DocxCodec
   liveDocument?: LiveDocument
   appearance: AppearancePreferences
   clipboard: { writeText(text: string | (() => Promise<string>)): Promise<void> }

@@ -1,6 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createElement, Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { History, Plus } from 'lucide-react'
+import type { JSONContent } from '@tiptap/core'
 import { Modal } from './controls'
+import type { DocumentFormat } from '../document/formats/content'
 import { automaticVersionLimit, versionStorageError, type DocumentVersion, type VersionSummary } from '../document/versions'
 import type { DocumentStorage } from '../host/contracts'
 
@@ -8,6 +10,43 @@ const timestamp = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', time
 const calendarDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'full' })
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
 const labels = { automatic: 'Automatic', manual: 'Manual', recovery: 'Recovery' }
+
+const docxTags = {
+  paragraph: 'p', bulletList: 'ul', orderedList: 'ol', listItem: 'li',
+  tableRow: 'tr', tableCell: 'td', tableHeader: 'th',
+} as const
+const headingTags = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const
+
+function docxPreview(node: JSONContent): ReactNode {
+  const children = (node.content ?? []).map((child, index) => <Fragment key={index}>{docxPreview(child)}</Fragment>)
+  switch (node.type) {
+    case 'doc': return children
+    case 'heading': return createElement(headingTags[Number(node.attrs?.level) - 1] ?? 'h1', null, children)
+    case 'orderedList': return <ol start={node.attrs?.start}>{children}</ol>
+    case 'table': {
+      const header = node.content?.[0]?.content?.[0]?.type === 'tableHeader'
+      return <div className="tableWrapper"><table>
+        {header && <thead>{children[0]}</thead>}
+        <tbody>{header ? children.slice(1) : children}</tbody>
+      </table></div>
+    }
+    case 'text':
+    case 'hardBreak': {
+      let content: ReactNode = node.type === 'text' ? node.text : <br />
+      for (const mark of node.marks ?? []) {
+        if (mark.type === 'bold') content = <strong>{content}</strong>
+        if (mark.type === 'italic') content = <em>{content}</em>
+        if (mark.type === 'underline') content = <u>{content}</u>
+        if (mark.type === 'link') content = <span className="version-docx-link" title={mark.attrs?.href}>{content}</span>
+      }
+      return content
+    }
+    default: {
+      const tag = docxTags[node.type as keyof typeof docxTags]
+      return tag ? createElement(tag, null, children) : children
+    }
+  }
+}
 
 function relativeTime(value: number) {
   const seconds = Math.max(0, (Date.now() - value) / 1000)
@@ -22,7 +61,7 @@ interface Props {
   title: string
   theme: 'light' | 'dark'
   automaticError: string
-  plainText?: boolean
+  format?: DocumentFormat
   load(documentId: string): Promise<VersionSummary[]>
   read: DocumentStorage['readVersion']
   create(): ReturnType<DocumentStorage['recordVersion']>
@@ -30,7 +69,7 @@ interface Props {
   close(): void
 }
 
-export function VersionHistory({ documentId, title, theme, automaticError, plainText, load, read, create, restore, close }: Props) {
+export function VersionHistory({ documentId, title, theme, automaticError, format, load, read, create, restore, close }: Props) {
   const [versions, setVersions] = useState<VersionSummary[]>()
   const [selection, setSelection] = useState<{ id: string }>()
   const [preview, setPreview] = useState<DocumentVersion>()
@@ -69,7 +108,7 @@ export function VersionHistory({ documentId, title, theme, automaticError, plain
   }, [documentId, read, selection])
 
   useEffect(() => {
-    if (!preview || preview.content.format === 'txt' || mode !== 'rendered') return
+    if (!preview || preview.content.format === 'txt' || preview.content.format === 'docx' || mode !== 'rendered') return
     let active = true
     void import('../document/export').then(module => module.renderVersionPreview(preview.content.source)).then(
       html => { if (active) setRendered(html) },
@@ -148,7 +187,7 @@ export function VersionHistory({ documentId, title, theme, automaticError, plain
             : <p>{selection ? 'Loading preview…' : 'Choose a version to preview.'}</p>}</div>}
           {preview && <>
             <div className="version-preview-top">
-              {preview.content.format !== 'txt' && <div role="group" aria-label="Preview format" className="version-formats">
+              {preview.content.format !== 'txt' && preview.content.format !== 'docx' && <div role="group" aria-label="Preview format" className="version-formats">
                 <button type="button" aria-pressed={mode === 'rendered'} onClick={() => setMode('rendered')}>Rendered</button>
                 <button type="button" aria-pressed={mode === 'markdown'} onClick={() => setMode('markdown')}>Markdown</button>
               </div>}
@@ -161,13 +200,15 @@ export function VersionHistory({ documentId, title, theme, automaticError, plain
                 <button type="button" className="primary-button" disabled={!!busy} onClick={() => void restoreSelected()}>{busy === 'restore' ? 'Restoring…' : 'Confirm restore'}</button>
               </div>
             </div>}
-            {mode === 'markdown' || preview.content.format === 'txt' ? <pre className="version-markdown" role="region" aria-label={preview.content.format === 'txt' ? 'Plain text version preview' : 'Markdown version preview'} tabIndex={0}>{preview.content.source}</pre>
+            {preview.content.format === 'docx'
+              ? <div className="version-docx tiptap" role="region" aria-label="DOCX version preview" tabIndex={0}>{docxPreview(preview.content.document)}</div>
+              : mode === 'markdown' || preview.content.format === 'txt' ? <pre className="version-markdown" role="region" aria-label={preview.content.format === 'txt' ? 'Plain text version preview' : 'Markdown version preview'} tabIndex={0}>{preview.content.source}</pre>
               : rendered ? <iframe className="version-frame" title="Rendered version preview" sandbox="" srcDoc={rendered} style={{ colorScheme: theme }} />
                 : <p className="muted version-empty" role="status">Rendering preview…</p>}
           </>}
         </div>
       </div>
-      <p className="muted version-footer">{storage} of {plainText ? 'plain text' : 'Markdown'} stored for this document. Folio keeps the {automaticVersionLimit} most recent automatic checkpoints and retains versions you create or recover.</p>
+      <p className="muted version-footer">{storage} of {format === 'docx' ? 'DOCX' : format === 'txt' ? 'plain text' : 'Markdown'} stored for this document. Folio keeps the {automaticVersionLimit} most recent automatic checkpoints and retains versions you create or recover.</p>
     </div>
   </Modal>
 }

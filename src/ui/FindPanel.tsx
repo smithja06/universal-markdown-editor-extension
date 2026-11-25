@@ -10,6 +10,7 @@ export interface FindPanelHandle { focus(replace?: boolean): void; move(step: nu
 interface Props {
   readOnly?: boolean
   plainText?: boolean
+  docx?: boolean
   panelRef: Ref<FindPanelHandle>
   documentId: string
   title: string
@@ -25,12 +26,13 @@ interface Props {
   close(): void
 }
 
-export function FindPanel({ panelRef, documentId, title, mode, startReplace, find, capture, subscribe, present, replace, clear, openSource, close, readOnly, plainText }: Props) {
+export function FindPanel({ panelRef, documentId, title, mode, startReplace, find, capture, subscribe, present, replace, clear, openSource, close, readOnly, plainText, docx }: Props) {
   const replaceId = useId()
   const [term, setTerm] = useState('')
   const [value, setValue] = useState('')
   const [markdownScope, setScope] = useState<SearchScope>('rendered')
-  const scope = plainText ? 'source' : markdownScope
+  const markdown = !plainText && !docx
+  const scope = plainText ? 'source' : docx ? 'rendered' : markdownScope
   const [options, setOptions] = useState<SearchOptions>({ caseSensitive: false, wholeWord: false, regex: false })
   const [expanded, setExpanded] = useState(startReplace)
   const [revision, setRevision] = useState(0)
@@ -113,7 +115,7 @@ export function FindPanel({ panelRef, documentId, title, mode, startReplace, fin
     try {
       const { replaced, skipped } = replace(model, scope, all ? hits : [hits[active]], value, options.regex)
       const parts = [replaced ? `${replaced} ${replaced === 1 ? 'match replaced' : 'matches replaced'}.` : '',
-        skipped ? `${skipped} ${skipped === 1 ? 'match spans' : 'matches span'} multiple formats. Use Raw Markdown to edit ${skipped === 1 ? 'it' : 'them'}.` : '']
+        skipped ? `${skipped} ${skipped === 1 ? 'match spans' : 'matches span'} multiple formats.${markdown ? ` Use Raw Markdown to edit ${skipped === 1 ? 'it' : 'them'}.` : ''}` : '']
       setFeedback(parts.filter(Boolean).join(' ') || 'The replacement matches the current text.')
       if (all) setIndex(0)
       else if (!replaced && !skipped) move(1)
@@ -121,8 +123,8 @@ export function FindPanel({ panelRef, documentId, title, mode, startReplace, fin
   }
 
   const selected = hits?.[active]
-  const sourceOnly = !plainText && scope === 'source' && mode === 'visual' && selected && !selected.visual.length
-  const unmapped = !plainText && scope === 'rendered' && mode === 'source' && selected && !selected.source.length
+  const sourceOnly = markdown && scope === 'source' && mode === 'visual' && selected && !selected.visual.length
+  const unmapped = markdown && scope === 'rendered' && mode === 'source' && selected && !selected.source.length
 
   return <section className="find-panel" aria-label="Find and replace" onKeyDown={event => {
     if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); close() }
@@ -132,7 +134,7 @@ export function FindPanel({ panelRef, documentId, title, mode, startReplace, fin
       <label className="find-input"><Search size={15} /><input ref={input} aria-label="Find text" placeholder={'Find in ' + title} value={term} onChange={event => { resetResult(); setTerm(event.target.value) }} onKeyDown={event => {
         if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); move(event.shiftKey ? -1 : 1) }
       }} /></label>
-      {!plainText && <select aria-label="Search scope" value={scope} onChange={event => { resetResult(); setScope(event.target.value as SearchScope) }}>
+      {markdown && <select aria-label="Search scope" value={scope} onChange={event => { resetResult(); setScope(event.target.value as SearchScope) }}>
         <option value="rendered">Rendered content</option><option value="source">Raw Markdown</option>
       </select>}
       <div className="find-options" role="group" aria-label="Search options">
@@ -155,7 +157,7 @@ export function FindPanel({ panelRef, documentId, title, mode, startReplace, fin
     </form>
     {sourceOnly && <div className="find-feedback">This match is visible in Markdown Source. <button type="button" onClick={openSource}>Show source</button></div>}
     {unmapped && <div className="find-feedback">This match is shown near its Markdown block. An exact source span is unavailable.</div>}
-    {model && !model.canReplace && <p className="find-feedback">Finish the Markdown structure or use Raw Markdown to replace text in this draft.</p>}
+    {markdown && model && !model.canReplace && <p className="find-feedback">Finish the Markdown structure or use Raw Markdown to replace text in this draft.</p>}
     {error && <p className="find-feedback field-error" role="alert">{error}</p>}
     {feedback && <p className="find-feedback" role="status">{feedback}</p>}
   </section>
