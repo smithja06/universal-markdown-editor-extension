@@ -1,5 +1,38 @@
 # VS Code platform qualification
 
+## Phase 7C multi-format qualification
+
+The November 26, 2026 qualification used Windows 11 Pro 25H2 x64 (26200.9974), desktop VS Code 1.147.0 (`8a14f0cc1b08d531eb83255ea3764ae22aa932b5`), Node 24.13.0, and npm 11.21.0. Test workspaces used local, drive-letter `file:` URIs on fixed `C:` NTFS. Standalone browser coverage used Chromium 159.0.8154.6. The synthetic `folio-test-remote:` fixture exercised provider rejection, and a profile with independent user, extension, and shared-data directories exercised Restricted Mode. Minimum-version retesting, true Remote, other providers and volumes, macOS and Linux desktop, and browser-only VS Code remain unqualified for the new formats.
+
+| Workflow | Qualification boundary |
+| --- | --- |
+| TXT | Native default and opt-in Folio, literal edits, find/replace, native Save and history, BOM/CRLF exact bytes, LF, native-buffer changes, Revert, mixed-ending read-only UI, conflict review, webview disposal, and an extension-host stop before host acceptance. Unsupported encodings and mixed/CR-only endings are outside writable scope. |
+| DOCX | Opt-in local package open and malformed/unsupported rejection, formatting and table edits, find/replace, native dirty state and history, Revert, exact original, reviewed copy export, stale revision rejection, external replacement, native Save and Save As boundaries, pending webview recovery, accepted host-journal recovery, and native hot-exit restoration after actual reload. |
+| DOCX write gate | Native Save and Save As reject without attempting destination writes. Cancellation before destination selection, an external replacement while dirty, and preservation of the dirty draft are separate observations. There was no in-place write to interrupt or writable-provider failure to simulate. The reviewed copy uses the workbench renderer's download facility, and output is reimported in the test. |
+| Remaining lifecycle coverage | Disk or profile-storage failure during backup, a native backup lagging a later acknowledged revision in a live host, and sustained near-limit DOCX editing are unqualified. Original bytes survive native backup restore. A journal-only draft with a different package fingerprint remains for manual review. |
+
+See `tests/vscode/multiformat.vscode.ts` for the desktop fixtures. Set `FOLIO_TEST_VSIX=extension/dist/folio.vsix` and `FOLIO_VSCODE_CLI_JS` to the selected VS Code install's `resources/app/out/cli.js` to run installed smoke cases using the VS Code CLI. Omit `FOLIO_TEST_VSIX` for desktop tests that instrument the development bundle. Use distinct Playwright output paths and keep the isolated fixture root outside those paths.
+
+| Command | Result |
+| --- | --- |
+| `npm run lint` | Passed. |
+| `npx tsc --noEmit` and `npx tsc --project extension/tsconfig.json` | Passed. The final production extension build ran both checks again. |
+| `npm test` | 221 passed in 20 files, including DOCX workspace snapshot validation and competing rich revision review. |
+| `npm run build` and `npm run build:extension` | Passed with the existing Vite chunk-size warnings. |
+| `npm run test:e2e -- --workers=5 --output test-results/phase-7c-chromium-final` | 74 passed with `PLAYWRIGHT_CHROMIUM_EXECUTABLE` set to the Playwright Chromium binary. Markdown, TXT, and DOCX standalone cases all passed. |
+| `npm run test:extension -- --output test-results/phase-7c-desktop` | 60 passed, including 16 multi-format and all 44 baseline desktop cases. A final focused development and installed rerun exercised the persistent failed-Revert explanation and the original-package download after hot exit. |
+| `npm run package:extension` | Produced `extension/dist/folio.vsix`, with 187 ZIP entries, 3,510,915 bytes, and SHA-256 `cd0764731b0302165513443c9768a11a8bfcc5e8a23a2f65ede888e217c5790d`. Python ZIP inspection matched the complete inventory, manifest, worker, notices, and webview assets to the built files. The 151,480-byte DOCX worker is the sole compiled ZIP/XML codec bundle in the VSIX. |
+| VSIX install and smoke below | Eight passed on VS Code 1.147.0. Separate isolated installs exercised optional Markdown and TXT, native TXT byte fidelity and Revert, DOCX formatting and reviewed downloads, failed and clean DOCX Revert, DOCX hot exit with exact original bytes, and Restricted Mode. |
+
+```powershell
+$env:FOLIO_TEST_VSIX = 'extension/dist/folio.vsix'
+$env:FOLIO_VSCODE_CLI_JS = Join-Path $env:LOCALAPPDATA 'Programs/Microsoft VS Code/8a14f0cc1b/resources/app/out/cli.js'
+npx playwright test --config playwright.vscode.config.ts editor.vscode.ts multiformat.vscode.ts -g 'opens optionally|TXT defaults to native|TXT discloses|TXT replaces literal|DOCX offers reviewed|DOCX flags a replacement|Restricted Mode|native DOCX backups' --output test-results/phase-7c-installed-final
+Remove-Item Env:FOLIO_TEST_VSIX, Env:FOLIO_VSCODE_CLI_JS
+```
+
+Development checks first reproduced the missing opt-in editors. Subsequent fixture corrections isolated the shared-data directory for Restricted Mode and recreated the custom editor after the extension-host process stopped. The Save As fixture checks the destination and the native dirty state because the workbench catches provider save errors. The initial installed smoke could not reliably observe a transient DOCX Revert failure notification. Folio now retains the failure explanation in the editor, reestablishes a native draft edit when needed, and preserves the profile backup on failure. The final installed smoke passed.
+
 ## Milestone 2.7 environment matrix
 
 | Environment | Actual coverage |

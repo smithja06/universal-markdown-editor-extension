@@ -3,7 +3,7 @@ import * as vscode from 'vscode'
 
 const assetAttribute = /\b(src|href)="\.\/(assets\/[\w./-]+)"/g
 
-export async function webviewHtml(webview: vscode.Webview, root: vscode.Uri): Promise<string> {
+export async function webviewHtml(webview: vscode.Webview, root: vscode.Uri, format: 'Markdown' | 'TXT' | 'DOCX' = 'Markdown'): Promise<string> {
   const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, 'index.html'))
   const template = new TextDecoder().decode(bytes)
   const nonce = randomBytes(18).toString('base64')
@@ -18,7 +18,7 @@ export async function webviewHtml(webview: vscode.Webview, root: vscode.Uri): Pr
     "base-uri 'none'",
     "form-action 'none'",
   ].join('; ')
-  return template.replace('<head>', `<head>\n    <meta http-equiv="Content-Security-Policy" content="${policy}">`)
+  return template.replace('<head>', `<head>\n    <meta http-equiv="Content-Security-Policy" content="${policy}">\n    <meta name="folio-format" content="${format}">`)
     .replace(/<(?:script|link)\b[^>]*>/g, tag => {
       const resolved = tag.replace(assetAttribute, (attribute: string, key: string, path: string) => {
         if (path.split('/').includes('..')) return attribute

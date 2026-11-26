@@ -8,6 +8,7 @@ import App from '../../App'
 import { createWebviewHost } from './host'
 import { connectionMessage, isHostMessage, type ClientMessage } from './protocol'
 import { createRecoveryJournal } from './recovery'
+import { RecoveryNotice } from './RecoveryNotice'
 import { webviewTheme } from './theme'
 
 declare function acquireVsCodeApi(): { postMessage(message: { connection: string; message: ClientMessage }): void }
@@ -17,12 +18,13 @@ if (container) {
   const root = createRoot(container)
   const theme = webviewTheme()
   const platform = /Mac|iPhone|iPad/.test(navigator.platform) ? 'mac' : 'other'
+  const format = document.querySelector('meta[name="folio-format"]')?.getAttribute('content') ?? 'Markdown'
 
   const loading = (message?: string) => <main className="app" data-theme={theme}>
-    <p className="opening-state" role={message ? 'alert' : 'status'}>{message ?? 'Opening Markdown in VS Code…'}</p>
+    <p className="opening-state" role={message ? 'alert' : 'status'}>{message ?? `Opening ${format} in VS Code…`}</p>
   </main>
 
-  if (typeof acquireVsCodeApi !== 'function') root.render(loading('Open a Markdown document in VS Code to use the Folio editor.'))
+  if (typeof acquireVsCodeApi !== 'function') root.render(loading('Open a document in VS Code to use the Folio editor.'))
   else {
     const vscode = acquireVsCodeApi()
     const connection = crypto.randomUUID()
@@ -39,11 +41,14 @@ if (container) {
         window.addEventListener('message', receive)
         return () => window.removeEventListener('message', receive)
       },
-    }, platform, theme, createRecoveryJournal(() => window.localStorage))
+    }, platform, theme, createRecoveryJournal(() => window.localStorage), format)
 
     const mount = () => {
       const state = host.liveDocument.read()
       if (!state.id) root.render(loading(state.message))
+      else if (state.format === 'docx' && !state.available) root.render(<main className="app" data-theme={theme}>
+        <RecoveryNotice state={state} copy={host.clipboard.writeText} discard={host.liveDocument.discardRecovery} notify={() => undefined} />
+      </main>)
       else {
         unsubscribe()
         root.render(<App host={host} />)

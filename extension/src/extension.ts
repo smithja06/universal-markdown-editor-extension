@@ -8,8 +8,12 @@ import { encodeRecoveryBase, recoveryGeneration, unpackRecovery, type PackedReco
 import { nativeCommands, type NativeAction } from '../../src/host/vscode/nativeCommands'
 import { openWorkspaceMarkdown, workspaceImage } from './resources'
 import { confirmWorkspaceImage, pickWorkspaceImage, type WorkspaceImageSelection } from './imagePicker'
+import { containsBinaryControls, decodeTxt, maxTxtImportBytes, TxtInputError } from '../../src/document/formats/txt'
+import { isLocalDocumentFile, readLocalDocument } from './localDocumentFile'
+import { DocxEditorProvider, docxViewType } from './docxEditor'
 
 const viewType = 'folio.markdown'
+const txtViewType = 'folio.txt'
 const unavailable = 'This document was moved, deleted, or closed. Reopen it from VS Code to continue.'
 const providerUnavailable = 'The workspace filesystem is temporarily unavailable. Review your pending draft before continuing.'
 const stale = 'The document changed in VS Code before this edit could be applied.'
@@ -51,6 +55,8 @@ interface Session {
   queued: number
   pending?: { view: View; expected: string; committed?: DocumentState }
   watcher?: vscode.Disposable
+  txtCheck?: Promise<void>
+  txtIssue?: string
 }
 
 function documentState(document: vscode.TextDocument, available: boolean, previous?: DocumentState): DocumentState {
@@ -77,6 +83,38 @@ function position(source: string, offset: number): vscode.Position {
   return new vscode.Position(line, offset - previous - 1)
 }
 
+function txtEncodingIssue(document: vscode.TextDocument) {
+  if (document.encoding !== 'utf8' && document.encoding !== 'utf8bom') {
+    return 'This TXT editor supports UTF-8 with an optional BOM. Check the encoding in VS Code’s native Text Editor.'
+  }
+}
+
+function txtFileByteLength(source: string, state: DocumentState) {
+  let bytes = Buffer.byteLength(source, 'utf8') + (state.bom ? 3 : 0)
+  if (state.eol === '\r\n') {
+    for (let offset = source.indexOf('\n'); offset >= 0; offset = source.indexOf('\n', offset + 1)) bytes++
+  }
+  return bytes
+}
+
+async function txtFileIssue(document: vscode.TextDocument) {
+  if (!isLocalDocumentFile(document.uri)) return 'Folio TXT editing is available for local files. Use the native Text Editor for this provider.'
+  try {
+    const decoded = decodeTxt(await readLocalDocument(document.uri, maxTxtImportBytes))
+    if (decoded.mixedLineEndings || decoded.lineEnding === '\r') {
+      return 'This TXT file uses mixed or CR-only line endings. Folio shows the native buffer read-only. VS Code’s own Save command can still normalize the file.'
+    }
+    if (decoded.bom !== (document.encoding === 'utf8bom')) return 'The saved TXT BOM and VS Code encoding differ. Reopen the file with its original UTF-8 encoding to edit.'
+    if (decoded.source.includes('\n') && decoded.lineEnding !== (document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n')) {
+      return 'The saved TXT line endings and VS Code buffer differ. Reopen the file to review it before editing.'
+    }
+  } catch (error) {
+    if (error instanceof TxtInputError) return error.message + ' Open the native Text Editor to review this file.'
+    return error instanceof TypeError ? 'This TXT file is outside Folio’s UTF-8 compatibility scope.' :
+      'Folio could not verify TXT encoding and line endings. Check that the file is available and no larger than 16 MiB.'
+  }
+}
+
 function within(resource: vscode.Uri, root: vscode.Uri): boolean {
   if (resource.scheme !== root.scheme || resource.authority !== root.authority) return false
   const insensitive = resource.scheme === 'file' && process.platform === 'win32'
@@ -91,11 +129,15 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
   private readonly subscriptions: vscode.Disposable[]
   private imagePickerOpen = false
 
-  constructor(private readonly assetsRoot: vscode.Uri, private readonly recovery: vscode.Memento, private readonly scope: string) {
+  constructor(private readonly assetsRoot: vscode.Uri, private readonly recovery: vscode.Memento, private readonly scope: string,
+    private readonly format: 'markdown' | 'txt' = 'markdown') {
     this.subscriptions = [
       vscode.workspace.onDidChangeTextDocument(({ document }) => {
         const session = this.sessions.get(document)
-        if (session) this.refresh(session)
+        if (session) {
+          this.refresh(session)
+          if (this.format === 'txt' && !document.isDirty) void this.checkTxtFile(session)
+        }
       }),
       vscode.workspace.onDidSaveTextDocument(document => {
         const session = this.sessions.get(document)
@@ -112,7 +154,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel, token: vscode.CancellationToken) {
     panel.webview.options = { enableScripts: true, enableForms: false, localResourceRoots: [this.assetsRoot] }
-    const html = await webviewHtml(panel.webview, this.assetsRoot)
+    const html = await webviewHtml(panel.webview, this.assetsRoot, this.format === 'txt' ? 'TXT' : 'Markdown')
     if (token.isCancellationRequested) return
     const session = this.sessions.get(document) ?? this.createSession(document)
     const view: View = { panel, disposed: false, subscriptions: [] }
@@ -153,6 +195,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
           return
         }
         if (message.type === 'pickWorkspaceImage' || message.type === 'confirmWorkspaceImage') {
+          if (this.format !== 'markdown') return
           return void this.selectImage(session, view, client, message)
         }
         if (message.type === 'cancelResource') {
@@ -160,6 +203,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
           return
         }
         if (message.type === 'resource') {
+          if (this.format !== 'markdown') return
           const valid = () => !view.disposed && view.client === client && session.state.available && !session.document.isClosed
           const { id, operation, reference } = message
           if (!valid()) return this.post(view, { type: 'resourceResult', id, ok: false }, client)
@@ -189,6 +233,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
           )
           return
         }
+        if (message.type === 'docxFile' || message.type === 'cancelDocxFile') return
         session.queued++
         session.operations = session.operations.then(() => {
           if (view.client !== client) return
@@ -204,6 +249,11 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
         })
       }),
     ]
+    if (session.txtCheck) await session.txtCheck
+    if (view.disposed || token.isCancellationRequested || document.isClosed) {
+      this.removeView(session, view)
+      return
+    }
     panel.webview.html = html
   }
 
@@ -227,14 +277,30 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
     const fileBacked = !document.isUntitled && vscode.workspace.fs.isWritableFileSystem(document.uri.scheme) !== undefined
     const session: Session = { document, fileBacked, state: documentState(document, !document.isClosed), views: new Set(), operations: Promise.resolve(), queued: 0 }
     this.sessions.set(document, session)
+    if (this.format === 'txt') void this.checkTxtFile(session)
     if (fileBacked) {
       const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.joinPath(document.uri, '..'), '*'))
       const verify = (uri: vscode.Uri) => {
-        if (within(document.uri, uri)) void this.verifyFile(session).catch(() => undefined)
+        if (within(document.uri, uri)) {
+          void this.verifyFile(session).then(available => {
+            if (available && this.format === 'txt') return this.checkTxtFile(session)
+          }).catch(() => undefined)
+        }
       }
       session.watcher = vscode.Disposable.from(watcher, watcher.onDidDelete(verify), watcher.onDidChange(verify))
     }
     return session
+  }
+
+  private checkTxtFile(session: Session) {
+    const check = txtFileIssue(session.document).then(issue => {
+      if (session.txtCheck !== check) return
+      session.txtIssue = issue
+      session.txtCheck = undefined
+      this.refresh(session)
+    })
+    session.txtCheck = check
+    return check
   }
 
   private removeView(session: Session, view: View) {
@@ -352,8 +418,12 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
     if (!session.state.available) return
     const previous = session.state
     const next = documentState(session.document, !session.document.isClosed, previous)
+    if (this.format === 'txt') {
+      next.format = 'txt'
+      next.readOnly = txtEncodingIssue(session.document) ?? session.txtIssue
+    }
     if (previous.revision === next.revision && previous.dirty === next.dirty && previous.available === next.available &&
-      previous.eol === next.eol && previous.bom === next.bom) return
+      previous.eol === next.eol && previous.bom === next.bom && previous.format === next.format && previous.readOnly === next.readOnly) return
     session.state = next
     if (session.pending?.expected === next.source && next.available) session.pending.committed ??= next
     this.broadcast(session)
@@ -384,10 +454,11 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
     const client = view.client
     if (!client || view.disposed) return
     const drafts: RecoveryDraft[] = []
+    const prefix = this.journalPrefix()
     for (const key of this.recovery.keys()) {
-      if (!key.startsWith(recoveryPrefix) || this.activeJournals.has(key.slice(recoveryPrefix.length))) continue
+      if (!key.startsWith(prefix) || this.activeJournals.has(key.slice(prefix.length))) continue
       const draft = unpackRecovery(this.recovery.get(key))
-      if (draft && key === recoveryPrefix + draft.id) drafts.push(draft)
+      if (draft && key === prefix + draft.id) drafts.push(draft)
     }
     this.post(view, { type: 'recovery', scope: this.scope, id: client.journalId, active: [...this.activeJournals], drafts, baseRevision: client.backupBase.revision })
     if (client.acknowledgement) this.post(view, client.acknowledgement)
@@ -408,7 +479,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
         record = { id, uri, generation, eol: draft.eol, bom: draft.bom, baseRevision: draft.baseRevision,
           change: draft.change, encoding: 'deflate-utf16-v1', base: base.encoded }
       } else record = draft
-      await this.recovery.update(recoveryPrefix + id, record)
+      await this.recovery.update(this.journalPrefix() + id, record)
       stored = true
     } catch { /* The webview continues to retain its locally stored generation. */ }
     finally { this.post(view, { type: 'stored', id, generation, stored }, client) }
@@ -419,7 +490,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
       this.post(view, { type: 'dismissed', id, generation, dismissed: false }, client)
       return
     }
-    const key = recoveryPrefix + id
+    const key = this.journalPrefix() + id
     const current = this.recovery.get(key)
     let dismissed = false
     try {
@@ -431,6 +502,8 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
     } catch { /* The webview retains its recovery copy on failure. */ }
     finally { this.post(view, { type: 'dismissed', id, generation, dismissed }, client) }
   }
+
+  private journalPrefix() { return this.format === 'txt' ? recoveryPrefix + 'txt.' : recoveryPrefix }
 
   private async apply(session: Session, view: View, client: Client, { id, revision, change }: EditMessage) {
     const reject = (message: string) => this.acknowledge(view, client, session.state, id, false, message)
@@ -449,12 +522,21 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
     if (id <= client.abandoned || view.client !== client) return reject('This Folio edit expired before it reached VS Code.')
     const { document } = session
     if (!session.state.available || document.isClosed) return reject(unavailable)
-    const base = documentState(document, true, session.state)
-    session.state = base
+    if (this.format === 'txt') {
+      while (session.txtCheck) await session.txtCheck
+      if (id <= client.abandoned || view.client !== client || !session.state.available || document.isClosed) return reject(unavailable)
+    }
+    this.refresh(session)
+    const base = session.state
+    if (base.readOnly) return reject(base.readOnly)
     if (base.revision !== revision) return reject(stale)
     if (change.to > base.source.length) return reject('The edit range is invalid.')
     const expected = spliceSource(base.source, change)
     if (expected === base.source) return reject('This edit did not change the document.')
+    if (this.format === 'txt' && (txtFileByteLength(expected, base) > maxTxtImportBytes || containsBinaryControls(expected) || /[\uD800-\uDFFF]/u.test(expected) ||
+      !base.bom && expected.startsWith('\uFEFF'))) {
+      return reject('This TXT edit exceeds the limit or contains invalid Unicode, binary controls, or a leading BOM character.')
+    }
 
     const edit = new vscode.WorkspaceEdit()
     edit.replace(document.uri, new vscode.Range(position(base.source, change.from), position(base.source, change.to)), change.text.replace(/\n/g, base.eol))
@@ -479,15 +561,17 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
 
   private async command(session: Session, view: View, client: Client, { command }: CommandMessage) {
     const available = await this.verifyFile(session)
+    while (session.txtCheck) await session.txtCheck
     if (view.disposed || view.client !== client) return
     if (!available || !session.state.available || session.document.isClosed) this.post(view, { type: 'error', message: unavailable }, client)
+    else if (session.state.readOnly) this.post(view, { type: 'error', message: session.state.readOnly }, client)
     else if (command === 'save') {
       if (!await session.document.save()) this.post(view, { type: 'error', message: 'VS Code could not save this document.' }, client)
       this.refresh(session)
     } else {
       const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input
-      if (view.panel.active && input instanceof vscode.TabInputCustom && input.viewType === viewType && input.uri.toString() === session.state.uri) {
-        await vscode.commands.executeCommand(command)
+      if (view.panel.active && input instanceof vscode.TabInputCustom && input.viewType === (this.format === 'txt' ? txtViewType : viewType) && input.uri.toString() === session.state.uri) {
+        await vscode.commands.executeCommand(command === 'revert' ? 'workbench.action.files.revert' : command)
       } else this.post(view, { type: 'error', message: 'Focus this editor to use its undo or redo history.' }, client)
     }
   }
@@ -505,11 +589,20 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }
   const scope = createHash('sha256').update(workspace).digest('hex')
-  const provider = new FolioEditorProvider(vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview'), context.workspaceState, scope)
+  const assets = vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview')
+  const provider = new FolioEditorProvider(assets, context.workspaceState, scope)
+  const txt = new FolioEditorProvider(assets, context.workspaceState, createHash('sha256').update(scope + '/txt').digest('hex'), 'txt')
+  const docx = new DocxEditorProvider(assets, context.workspaceState, createHash('sha256').update(scope + '/docx').digest('hex'),
+    context.storageUri ?? context.globalStorageUri)
   context.subscriptions.push(provider, vscode.window.registerCustomEditorProvider(viewType, provider, {
     webviewOptions: { retainContextWhenHidden: true },
     supportsMultipleEditorsPerDocument: true,
   }))
+  context.subscriptions.push(txt, vscode.window.registerCustomEditorProvider(txtViewType, txt, {
+    webviewOptions: { retainContextWhenHidden: true },
+    supportsMultipleEditorsPerDocument: true,
+  }))
+  context.subscriptions.push(docx, vscode.window.registerCustomEditorProvider(docxViewType, docx))
   for (const [command, action] of Object.entries(nativeCommands)) {
     context.subscriptions.push(vscode.commands.registerCommand(command, () => provider.runAction(action)))
   }

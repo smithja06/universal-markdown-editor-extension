@@ -1,4 +1,5 @@
 import type { LiveDocument, LiveDocumentSnapshot } from '../contracts'
+import { readDocxSnapshot } from '../../document/formats/docx/model'
 import { rebaseSource, sourceChange, type ClientMessage, type DocumentState, type HostMessage } from './protocol'
 import type { RecoveryDraft, RecoveryJournal } from './recovery'
 
@@ -12,8 +13,6 @@ type NativeCommand = Parameters<LiveDocument['run']>[0]
 type Acknowledgement = Extract<HostMessage, { type: 'state' }>['edit']
 type RecoveryContext = Extract<HostMessage, { type: 'recovery' }>
 
-const closedMessage = 'This Markdown document is no longer available in VS Code.'
-const conflictMessage = 'VS Code and Folio changed the same Markdown text. Review both versions before continuing.'
 const rejectedMessage = 'VS Code could not apply this edit. Review your pending draft before continuing.'
 
 export function createLiveDocumentClient(transport: LiveDocumentTransport, journal?: RecoveryJournal): LiveDocument & {
@@ -41,6 +40,8 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
   let nextCopyId = 1
   const copies = new Map<number, (copied: boolean) => void>()
   let disposed = false
+  const formatName = () => authoritative?.format === 'docx' ? 'DOCX' : authoritative?.format === 'txt' ? 'TXT' : 'Markdown'
+  const closedMessage = () => `This ${formatName()} document is no longer available in VS Code.`
   let snapshot: LiveDocumentSnapshot = {
     id: '', title: '', source: '', lineEnding: '\n', available: false, dirty: false, pending: true,
   }
@@ -53,6 +54,9 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
     const next: LiveDocumentSnapshot = {
       id: authoritative?.uri ?? '', title: authoritative?.title ?? '', source, revision: authoritative?.revision, lineEnding: authoritative?.eol ?? '\n',
       available, dirty: !!authoritative?.dirty || source !== nativeSource,
+      format: authoritative?.format, bom: authoritative?.bom, readOnly: authoritative?.readOnly,
+      notice: authoritative?.notice, issues: authoritative?.issues,
+      originalFingerprint: authoritative?.originalFingerprint,
       pending: authoritative ? optimistic && (!!inFlight || source !== nativeSource) : message === undefined,
       conflict, message, recovery: archived, recoveryWarning,
     }
@@ -72,7 +76,9 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
     }
     for (const entry of drafts) add(entry)
     try {
-      for (const entry of journal?.read(scope) ?? []) if (!activeIds.has(entry.id)) add(entry)
+      for (const entry of journal?.read(scope) ?? []) {
+        if (!activeIds.has(entry.id) && (authoritative?.format !== 'docx' || entry.uri === authoritative.uri)) add(entry)
+      }
     } catch { /* Extension-host copies remain available. */ }
     if (draft && draft.reason !== 'pending') add(draft)
     const entries = [...byId.values()]
@@ -89,13 +95,14 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
       eol: reason === 'pending' ? eol : draft?.eol ?? eol,
       bom: reason === 'pending' ? !!bom : draft?.bom ?? !!bom,
       native: reason === 'pending' ? undefined : { source, eol, bom: !!bom },
+      originalFingerprint: reason === 'pending' ? authoritative.originalFingerprint : draft?.originalFingerprint ?? authoritative.originalFingerprint,
     }
     try {
       if (!journal) throw new Error('Webview recovery storage unavailable.')
       journal.write(scope, draft)
       recoveryWarning = undefined
     } catch {
-      recoveryWarning = 'This draft has no confirmed recovery copy yet. Keep this editor open and copy your Markdown if synchronization stalls.'
+      recoveryWarning = `This draft has no confirmed recovery copy yet. Keep this editor open and copy your ${formatName()} draft if synchronization stalls.`
     }
     try {
       if (reason === 'pending' && backupBase && backupBase.source.length >= 64_000) {
@@ -165,6 +172,11 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
 
   function flush() {
     if (!authoritative?.available || conflict !== undefined || inFlight || disposed) return
+    if (authoritative.readOnly) {
+      if (desired !== authoritative.source) preserveDraft(authoritative.readOnly, 'rejected')
+      commands.length = 0
+      return
+    }
     const change = sourceChange(authoritative.source, desired)
     if (change) {
       const id = nextEditId++
@@ -194,9 +206,10 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
     }
     if (!state.available) {
       authoritative = deferred && deferred.revision > state.revision ? { ...deferred, available: false } : state
+      refreshRecovery()
       deferred = undefined
-      if (inFlight || draft?.reason === 'pending') preserveDraft(closedMessage, 'unavailable')
-      else message = closedMessage
+      if (inFlight || draft?.reason === 'pending') preserveDraft(state.readOnly ?? closedMessage(), 'unavailable')
+      else message = state.readOnly ?? closedMessage()
       clearTimeout(timer)
       inFlight = undefined
       commands.length = 0
@@ -217,10 +230,14 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
       authoritative = state
       message = undefined
       const unchangedRevision = state.revision === revision && state.source === base
-      const rebased = rebaseSource(acknowledgement.accepted ? proposal : base, desired, state.source)
+      const rebaseBase = acknowledgement.accepted ? proposal : base
+      // Overlapping or disjoint JSON splices can each change the meaning of a rich document.
+      const rebased = state.format === 'docx'
+        ? (state.source === rebaseBase ? desired : undefined)
+        : rebaseSource(rebaseBase, desired, state.source)
       if (desired === state.source) desired = state.source
       else if (!acknowledgement.accepted && unchangedRevision) preserveDraft(acknowledgement.message || rejectedMessage, 'rejected')
-      else if (rebased === undefined) preserveDraft(conflictMessage, 'conflict')
+      else if (rebased === undefined) preserveDraft(`VS Code and Folio changed the same ${formatName()} ${state.format === 'docx' ? 'document' : 'text'}. Review both versions before continuing.`, 'conflict')
       else {
         desired = rebased
         if (desired !== state.source) checkpoint()
@@ -229,6 +246,7 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
       if (authoritative && state.revision === authoritative.revision && state.source !== authoritative.source) return
       authoritative = state
       desired = state.source
+      if (state.format === 'docx') refreshRecovery()
       if (conflict === undefined) message = undefined
     }
     flush()
@@ -273,7 +291,7 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
           if (entry.id === draft?.id) {
             draft = undefined
             conflict = undefined
-            message = authoritative?.available ? undefined : closedMessage
+            message = authoritative?.available ? undefined : closedMessage()
           }
           recoveryWarning = removed ? undefined : 'VS Code cleared its copy. Webview storage is unavailable, so its copy may appear again.'
           refreshRecovery()
@@ -306,7 +324,7 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
       return () => { listeners.delete(listener) }
     },
     edit(source) {
-      if (disposed || !authoritative?.available || conflict !== undefined) return
+      if (disposed || !authoritative?.available || authoritative.readOnly || conflict !== undefined) return
       const normalized = source.replace(/\r\n?/g, '\n')
       if (desired === normalized) return
       desired = normalized
@@ -316,7 +334,7 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
       publish()
     },
     run(command) {
-      if (disposed || !authoritative?.available || conflict !== undefined) return
+      if (disposed || !authoritative?.available || authoritative.readOnly || conflict !== undefined) return
       commands.push(command)
       flush()
       publish()
@@ -330,7 +348,7 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
           clearTimeout(timeout)
           copies.delete(id)
           if (copied) resolve()
-          else reject(new Error('Folio could not copy to the clipboard. Select the Markdown in the preview to copy it manually.'))
+          else reject(new Error(`Folio could not copy to the clipboard. Select the ${formatName()} draft in the preview to copy it manually.`))
         }
         copies.set(id, complete)
         try { transport.post({ type: 'copy', id, text }) } catch { complete(false) }
@@ -341,6 +359,24 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
       const entry = archived.find(item => item.id === id)
       if (!entry) return
       dismiss(entry, false)
+      publish()
+    },
+    restoreRecovery(id) {
+      if (disposed || authoritative?.format !== 'docx' || !authoritative.available || authoritative.readOnly || inFlight || conflict !== undefined) return
+      const entry = archived.find(item => item.id === id && item.uri === authoritative?.uri)
+      if (!entry) return
+      if (!entry.originalFingerprint || entry.originalFingerprint !== authoritative.originalFingerprint) {
+        message = 'This draft belongs to a different DOCX package. Copy it for manual recovery.'
+        publish()
+        return
+      }
+      try { readDocxSnapshot(entry.source) }
+      catch { message = 'This recovery record contains an invalid DOCX draft.'; publish(); return }
+      // Keep the archived record available until the user chooses to dismiss it.
+      message = undefined
+      desired = entry.source
+      if (desired !== authoritative.source) checkpoint()
+      flush()
       publish()
     },
     dispose() {

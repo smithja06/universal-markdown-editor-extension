@@ -106,7 +106,7 @@ export default function App({ host }: { host: FolioHost }) {
   const source = plainText || markdown && (mode === 'source' || split && doc.activePane === 'source')
   const started = !!editor && doc.status !== 'loading'
   const ready = started && !!doc.layout.activeId
-  const liveWritable = !!doc.liveState?.available && doc.liveState.conflict === undefined
+  const liveWritable = !!doc.liveState?.available && !doc.liveState.readOnly && doc.liveState.conflict === undefined
   const editable = ready && (!liveDocument || liveWritable) && (source || !doc.previewIssue)
   const splitLayout = useSplitLayout(appearance.splitRatio, ratio => setAppearance({ splitRatio: ratio }))
   useSplitScroll(split && ready && appearance.syncScroll && !doc.previewIssue, editor, visualScroll, doc.sourceView, doc.scrollAnchors, doc.file.id)
@@ -516,7 +516,9 @@ export default function App({ host }: { host: FolioHost }) {
       { label: 'Version History', icon: <History size={16} />, disabled: !ready, run: () => setDialog('history') },
       { label: '', divider: true },
     ]),
-    { id: 'document.save', label: localDraft ? 'Save draft' : 'Save', icon: <Download size={16} />, shortcut: 'Ctrl+S', disabled: !ready || (!!liveDocument && !liveWritable), run: () => void doc.save() },
+    { id: 'document.save', label: host.workspaceDocx ? 'Export DOCX copy…' : localDraft && !liveDocument ? 'Save draft' : 'Save', icon: <Download size={16} />, shortcut: 'Ctrl+S', disabled: !ready || (!!liveDocument && !liveWritable),
+      run: () => { if (host.workspaceDocx) void exportCopy(); else void doc.save() } },
+    ...(host.workspaceDocx && liveDocument ? [{ label: 'Revert to disk', disabled: !ready || !liveWritable, run: () => liveDocument.run('revert') }] : []),
     ...(liveDocument ? [] : [
       { id: 'document.save-as', label: docx ? 'Export DOCX copy…' : plainText ? 'Export TXT copy…' : 'Save as…', icon: <ArrowDownToLine size={16} />, shortcut: 'Ctrl+Shift+S', disabled: !ready,
         run: () => { if (localDraft) void exportCopy(); else void doc.save({ saveAs: true }) } },
@@ -534,7 +536,7 @@ export default function App({ host }: { host: FolioHost }) {
     { label: '', divider: true },
     { id: 'search.find', label: 'Find and replace', keywords: 'search text match', icon: <Search size={16} />, shortcut: 'Ctrl+F', disabled: !ready, run: () => showSearch() },
     { id: 'workspace.palette', label: 'Command Palette', shortcut: host.keyboard.handledByHost?.has('workspace.palette') ? undefined : 'Ctrl+Shift+P', run: () => setPalette(previous => previous ? null : 'all') },
-    ...(docx ? [] : [
+    ...(docx || plainText ? [] : [
       { label: 'Move block up', icon: <ArrowUp size={16} />, disabled: source || !editable, run: () => editor && moveSelectedBlock(editor, -1) },
       { label: 'Move block down', icon: <ArrowDown size={16} />, disabled: source || !editable, run: () => editor && moveSelectedBlock(editor, 1) },
     ]),
@@ -565,8 +567,8 @@ export default function App({ host }: { host: FolioHost }) {
     } catch (error) { notify(errorMessage(error)) }
   }
   const exportItems = registerItems(registry, platform, 'Export', 'export', localDraft ? [
-    { label: docx ? 'Export DOCX copy…' : 'Export TXT copy…', icon: <ArrowDownToLine size={16} />, disabled: !capabilities.exportCopy, run: () => void exportCopy() },
-    ...((doc.file.format === 'txt' || doc.file.format === 'docx') && doc.file.originalFile ? [{ label: 'Download original', icon: <Download size={16} />, run: () => report(doc.downloadOriginal()) }] : []),
+    ...(!liveDocument || host.workspaceDocx ? [{ label: docx ? 'Export DOCX copy…' : 'Export TXT copy…', icon: <ArrowDownToLine size={16} />, disabled: !capabilities.exportCopy || (!!liveDocument && !liveWritable), run: () => void exportCopy() }] : []),
+    ...(host.workspaceDocx || (doc.file.format === 'txt' || doc.file.format === 'docx') && doc.file.originalFile ? [{ label: 'Download original', icon: <Download size={16} />, run: () => report(doc.downloadOriginal()) }] : []),
     { label: '', divider: true },
     { label: 'Copy plain text', icon: <Copy size={16} />, run: () => void copy('text') },
   ] : [
@@ -614,6 +616,12 @@ export default function App({ host }: { host: FolioHost }) {
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
       if (event.isComposing || event.defaultPrevented || request || dialog || exportReview || exportingDocx) return
+      if (plainText && doc.liveState?.readOnly && (platform === 'mac' ? event.metaKey : event.ctrlKey) &&
+        !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
       const nativeHistory = liveDocument && event.target instanceof Element && event.target.closest('.tiptap, .cm-content')
       for (const id of nativeHistory ? [...windowCommands, ...historyCommands] : windowCommands) {
         if ((palette && id !== 'workspace.palette') || host.keyboard.handledByHost?.has(id)) continue
@@ -658,7 +666,7 @@ export default function App({ host }: { host: FolioHost }) {
   }).concat(docx ? [] : [['Insert menu', '/ on an empty line'], ['Indent list item', 'Tab']])
 
   const statusLabel = doc.liveState
-    ? doc.liveState.conflict !== undefined ? 'Sync paused' : !doc.liveState.available ? 'File unavailable' : doc.liveState.pending ? 'Syncing to VS Code…' : doc.liveState.dirty ? 'Unsaved in VS Code' : 'Saved in VS Code'
+    ? doc.liveState.conflict !== undefined ? 'Sync paused' : !doc.liveState.available ? 'File unavailable' : doc.liveState.readOnly ? 'Read-only' : doc.liveState.pending ? 'Syncing to VS Code…' : doc.liveState.dirty ? 'Unsaved in VS Code' : 'Saved in VS Code'
     : doc.status === 'loading' ? 'Opening workspace…' : !ready ? 'No open documents' : doc.status === 'pending' ? 'Saving draft…'
       : doc.status === 'unavailable' ? localDraft ? 'Draft could not be saved locally' : 'Local storage unavailable'
         : localDraft ? 'Draft saved locally' : 'Saved locally'
@@ -691,13 +699,13 @@ export default function App({ host }: { host: FolioHost }) {
             aria-label={label} title={label} aria-pressed={mode === choice} onClick={() => execute('view.mode.' + choice)}><Icon size={15} /><span>{short}</span></button>)}
         </div>}
         <IconButton label="Toggle document properties" active={sidebar} disabled={!ready} onClick={() => execute('view.properties')} className="sidebar-toggle"><PanelRight size={18} /></IconButton>
-        <Menu label={liveDocument ? 'Copy' : 'Export'} items={exportItems} align="right" disabled={!ready} className="export-menu">{liveDocument ? <Copy size={16} /> : <Download size={16} />}<span>{liveDocument ? 'Copy' : 'Export'}</span><ChevronDown size={12} /></Menu>
+        <Menu label={liveDocument && !host.workspaceDocx ? 'Copy' : 'Export'} items={exportItems} align="right" disabled={!ready} className="export-menu">{liveDocument && !host.workspaceDocx ? <><Copy size={16} /><span>Copy</span></> : <><Download size={16} /><span>Export</span></>}<ChevronDown size={12} /></Menu>
       </div>
     </header>
     {!liveDocument && <DocumentTabs tabs={doc.tabs} activeId={doc.layout.activeId} canReopen={doc.layout.closed.length > 0} disabled={!started}
       select={id => execute('navigation.open-document', id)} close={id => report(doc.closeTab(id))} closeOthers={id => report(doc.closeOtherTabs(id))} reopen={() => report(doc.reopenTab())} create={() => execute('document.new-document')} />}
     <Toolbar editor={editor} state={formatting} source={source} plainText={plainText} docx={docx} ready={editable} execute={execute} shortcut={commandShortcut} insertItems={actions} extraFormats={formatMenu.slice(docx ? 4 : 5)} styleItems={styleItems} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} sourceImageCommand={sourceImageCommand} hostHistory={liveDocument ? ready && liveWritable : undefined} />
-    {liveDocument && doc.liveState && <RecoveryNotice state={doc.liveState} copy={host.clipboard.writeText} discard={liveDocument.discardRecovery} notify={notify} />}
+    {liveDocument && doc.liveState && <RecoveryNotice state={doc.liveState} copy={host.clipboard.writeText} discard={liveDocument.discardRecovery} restore={liveDocument.restoreRecovery} notify={notify} />}
     {findPanel && doc.layout.activeId && <FindPanel panelRef={findRef} documentId={doc.layout.activeId} title={doc.file.title} mode={docx ? 'visual' : mode} startReplace={findPanel.replace}
       readOnly={!!liveDocument && !liveWritable} plainText={plainText} docx={docx}
       find={host.search} capture={doc.captureSearch} subscribe={doc.subscribeSearch} present={doc.presentSearch} replace={doc.applySearch}
@@ -764,7 +772,7 @@ export default function App({ host }: { host: FolioHost }) {
         {markdown && doc.warnings > 0 && !source && <button type="button" className="warning-link" onClick={() => doc.switchMode('source')} title="Open preserved syntax in Markdown source"><CircleAlert size={13} /> {doc.warnings} preserved {doc.warnings === 1 ? 'item' : 'items'}</button>}
         {importNotes.length > 0 && <button type="button" className={importLosses ? 'warning-link' : undefined} onClick={() => setDialog('docx-import')}>{importLosses ? <CircleAlert size={13} /> : <Info size={13} />} DOCX import notes</button>}
         {source && <span>Ln {location.line}, Col {location.column}</span>}
-        {!docx && <><span className="status-encoding">{plainText && doc.file.bom ? 'UTF-8 BOM' : 'UTF-8'}</span><span className="status-separator" /></>}<span>{docx ? 'DOCX' : plainText ? 'TXT' : 'Markdown'}</span>
+        {!docx && <><span className="status-encoding">{plainText && doc.liveState?.readOnly ? 'Native text buffer' : plainText && doc.file.bom ? 'UTF-8 BOM' : 'UTF-8'}</span><span className="status-separator" /></>}<span>{docx ? 'DOCX' : plainText ? 'TXT' : 'Markdown'}</span>
       </div>
     </footer>
     <input ref={fileInput} type="file" accept={liveDocument ? '.md,.markdown,text/markdown' : openFileTypes} hidden onChange={event => { const file = event.target.files?.[0]; if (file) void doc.importFile(file); event.target.value = '' }} />

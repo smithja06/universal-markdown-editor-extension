@@ -2,6 +2,9 @@
 
 ## 0.1.0 release candidate
 
+- Open TXT in the optional plain-text editor with native Save, Undo/Redo, and pending-edit recovery.
+- Open supported DOCX files in the optional visual editor with native history, Revert, and recovery. Review and export a validated copy while retaining the opened package.
+
 - Open Markdown files in the optional Visual, Source, and Split editor with VS Code Save and Undo/Redo.
 - Use native Folio commands and themes, preview existing workspace raster images, and follow workspace Markdown links.
 - Browse existing images in supported local Windows NTFS workspaces and insert portable Markdown references. A cancelled or undecodable replacement preserves the previous valid selection for revalidation when you insert it.

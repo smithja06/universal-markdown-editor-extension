@@ -1,7 +1,8 @@
 import type { FileInput } from '../../host/contracts'
 import { decodeMarkdown, encodeMarkdown, markdownFilename, sanitizeFilename } from '../files'
-import { makeDocxContent, newTextContent, type DocumentContent, type DocumentFormat, type DocxContent, type LineEnding, type MarkdownContent, type OriginalFile, type OriginalFileReference, type TxtContent } from './content'
+import { makeDocxContent, type DocumentContent, type DocumentFormat, type DocxContent, type LineEnding, type MarkdownContent, type OriginalFile, type OriginalFileReference, type TxtContent } from './content'
 import { docxMaxFileBytes, docxMimeType, type DocxCodec, type DocxIssue } from './docx/model'
+import { containsBinaryControls, decodeTxt, maxTxtImportBytes, TxtInputError } from './txt'
 
 export interface FormatDiagnostic {
   severity: 'info' | 'warning' | 'error'
@@ -16,7 +17,7 @@ type Rejected = { status: 'rejected'; diagnostics: [FormatDiagnostic] }
 type Imported = { status: 'editable'; content: DocumentContent; diagnostics: FormatDiagnostic[]; original?: OriginalFile } | Rejected
 type Prepared = { status: 'ready'; bytes: Uint8Array<ArrayBuffer> } | { status: 'needs-options'; diagnostics: [FormatDiagnostic] } |
   { status: 'needs-confirmation'; diagnostics: FormatDiagnostic[] } | Rejected
-export interface ExportSnapshot { id: string; revision: number; title: string; content: DocumentContent }
+export interface ExportSnapshot { id: string; revision: number; title: string; content: DocumentContent; nativeRevision?: number }
 type ExportOptions = { lineEnding?: LineEnding; confirmDocx?: boolean }
 type ReadOriginal = (id: string) => Promise<Blob | undefined>
 
@@ -29,19 +30,11 @@ interface FormatAdapter<Content extends DocumentContent> {
   filename(title: string): string
 }
 
-const maxTxtImportBytes = 16 * 1024 * 1024
 const maxTxtExportBytes = 32 * 1024 * 1024
-const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 const encoder = new TextEncoder()
 
 function reject(code: FormatDiagnostic['code'], message: string): Rejected {
   return { status: 'rejected', diagnostics: [{ severity: 'error', code, message }] }
-}
-
-// Tabs, newlines, vertical tabs and form feeds are valid plain-text whitespace.
-function containsBinaryControls(text: string) {
-  // eslint-disable-next-line no-control-regex -- Reject binary-looking controls, preserving text whitespace.
-  return /[\x00-\x08\x0e-\x1f\x7f]/.test(text)
 }
 
 const adapters: { markdown: FormatAdapter<MarkdownContent>; txt: FormatAdapter<TxtContent> } = {
@@ -54,14 +47,11 @@ const adapters: { markdown: FormatAdapter<MarkdownContent>; txt: FormatAdapter<T
   txt: {
     extensions: ['.txt'], mediaType: 'text/plain;charset=utf-8', capabilities: { richText: false, exportCopy: true },
     decode(bytes) {
-      if (bytes.length > maxTxtImportBytes) return reject('size-limit', 'TXT imports are limited to 16 MiB.')
-      const text = utf8.decode(bytes)
-      const bom = text.startsWith('\ufeff')
-      const body = bom ? text.slice(1) : text
-      if (containsBinaryControls(body)) return reject('invalid-text', 'The file appears to contain binary data.')
-      const lineEnding = (body.match(/\r\n|\r|\n/)?.[0] as LineEnding | undefined) ?? '\n'
-      const source = body.replace(/\r\n?/g, '\n')
-      return { ...newTextContent(), source, bom, lineEnding, mixedLineEndings: source.replace(/\n/g, lineEnding) !== body }
+      try { return decodeTxt(bytes) }
+      catch (error) {
+        if (error instanceof TxtInputError) return reject(error.code, error.message)
+        throw error
+      }
     },
     async encode(content, options, readOriginal) {
       if (/[\uD800-\uDFFF]/u.test(content.source) || containsBinaryControls(content.source)) {

@@ -1,8 +1,13 @@
 # Folio Markdown Editor
 
-Folio is an optional Markdown editor for VS Code. Open a `.md` or `.markdown` file, choose **Reopen Editor With…**, and select **Folio Markdown Editor**. The native Text Editor remains the default. VS Code owns the document, Save, Undo, and Redo.
+Folio offers optional VS Code editors for Markdown, plain text, and supported Word documents. Use **Reopen Editor With…** to select the Folio editor for the current file. VS Code's native Text Editor remains the default for Markdown and TXT.
 
 Use **Visual** for rich editing, **Markdown** for source, or **Split** to see both. Folio follows your VS Code theme and exposes mode changes, document properties, and heading navigation through the Command Palette and the editor title’s **Folio** submenu. Mode shortcuts are Ctrl+Alt+Shift+V/M/S on Windows and Linux and Cmd+Option+Shift+V/M/S on macOS. The shortcuts apply while Folio is active and an input does not have focus.
+
+## Plain text and Word documents
+
+- **Folio Plain Text Editor** opens `.txt` as literal text with find/replace, native Save, Undo/Redo and Revert. The qualified editing scope is local UTF-8 with optional BOM and uniform LF or CRLF, up to 16 MiB. Folio displays mixed and CR-only line endings read-only because VS Code's own Save can normalize them.
+- **Folio DOCX Editor** opens the supported `.docx` subset for visual editing, find/replace, native Undo/Redo, and recovery. Use **Export → Export DOCX copy…** to review fidelity changes and download a validated copy. **Download original** retrieves the opened package. **File → Revert to disk** loads the current file. Native Save and Save As report the copy workflow and leave the draft dirty. Complex or invalid packages open with an explanation.
 
 ## Install a VSIX
 
@@ -24,6 +29,8 @@ In Visual or the Visual pane of Split, open **Insert content → Image or image 
 If an interrupted edit or a conflict leaves a pending draft, reopen a Markdown file in the same VS Code workspace. **View pending Markdown** and **Copy pending draft** let you inspect and reconcile the change. Folio keeps the original file URI after a move or deletion and leaves reconciliation to you. A native Save writes edits that VS Code has received. In-app Save waits for Folio’s pending changes to settle first.
 
 Folio has no extension telemetry. The extension processes Markdown and image previews in VS Code and stores recovery copies in the webview’s local storage and VS Code’s workspace storage. Pending drafts can contain document text. A crash before either copy is stored, storage failures, or removal of profile data can limit recovery. VS Code manages its own telemetry settings.
+
+TXT offers the same manual review and copy of pending text. For DOCX, reopen the document and use **View pending DOCX → Restore draft as an edit** when the package matches. After an extension-host interruption, the old custom-editor tab may need to be closed first. VS Code hot exit can restore a DOCX backup that includes the original package. These backups and journals are local and can contain document content.
 
 ## Build from source
 

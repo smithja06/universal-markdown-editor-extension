@@ -1,9 +1,10 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
+import { promisify } from 'node:util'
 import { chromium, test as base, type Browser, type Page } from '@playwright/test'
 
 const prefix = 'folio-vscode-test-'
@@ -64,6 +65,8 @@ async function stageExtension(extensions: string, delayEdits: boolean) {
   await Promise.all([
     copyFile('extension/package.json', join(staged, 'package.json')),
     copyFile(join(build, 'extension.cjs'), join(dist, 'extension.cjs')),
+    ...(build === 'extension/dist' && existsSync(join(build, 'docx-codec.cjs'))
+      ? [copyFile(join(build, 'docx-codec.cjs'), join(dist, 'docx-codec.cjs'))] : []),
     cp(join(build, 'webview'), webview, { recursive: true }),
   ])
   if (process.env.FOLIO_BENCHMARK === '1') {
@@ -88,12 +91,26 @@ async function stageExtension(extensions: string, delayEdits: boolean) {
   ])
 }
 
-export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtualWorkspace: boolean; simpleFileDialog: boolean; secondWorkspace: boolean }>({
+async function installVsix(profile: string, extensions: string, vsix: string) {
+  const app = executable()
+  const cli = process.env.FOLIO_VSCODE_CLI_JS
+  if (!cli) throw new Error('Set FOLIO_VSCODE_CLI_JS to the desktop build’s resources/app/out/cli.js.')
+  const args = [resolve(cli), '--user-data-dir', profile, '--extensions-dir', extensions, '--shared-data-dir', join(profile, 'shared')]
+  const options = { windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }
+  const run = promisify(execFile)
+  await run(app, [...args, '--install-extension', resolve(vsix)], options)
+  const { stdout } = await run(app, [...args, '--list-extensions', '--show-versions'], options)
+  if (!stdout.includes('smithja06.folio-markdown-editor@0.1.0')) throw new Error('The expected VSIX was not installed.')
+}
+
+export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtualWorkspace: boolean; simpleFileDialog: boolean; secondWorkspace: boolean; hotExit: 'off' | 'onExitAndWindowClose'; restricted: boolean }>({
   delayEdits: [false, { option: true }],
   virtualWorkspace: [false, { option: true }],
   simpleFileDialog: [false, { option: true }],
   secondWorkspace: [false, { option: true }],
-  desktop: async ({ delayEdits, virtualWorkspace, simpleFileDialog, secondWorkspace }, use, testInfo) => {
+  hotExit: ['off', { option: true }],
+  restricted: [false, { option: true }],
+  desktop: async ({ delayEdits, virtualWorkspace, simpleFileDialog, secondWorkspace, hotExit, restricted }, use, testInfo) => {
     const temp = resolve(process.env.FOLIO_VSCODE_TEST_ROOT ?? tmpdir())
     if (process.env.FOLIO_VSCODE_TEST_ROOT) await mkdir(temp, { recursive: true })
     const directory = await mkdtemp(join(temp, prefix))
@@ -120,15 +137,18 @@ export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtual
     }
     try {
       await Promise.all([mkdir(workspace), mkdir(bridge), mkdir(join(profile, 'User'), { recursive: true }), mkdir(harness, { recursive: true })])
-      await Promise.all([stageExtension(extensions, delayEdits), copyFile('tests/vscode/host.cjs', join(harness, 'host.cjs')),
+      const vsix = process.env.FOLIO_TEST_VSIX
+      await Promise.all([vsix ? installVsix(profile, extensions, vsix) : stageExtension(extensions, delayEdits), copyFile('tests/vscode/host.cjs', join(harness, 'host.cjs')),
         writeFile(join(harness, 'package.json'), JSON.stringify({
           name: 'desktop-bridge', publisher: 'folio-test', version: '0.0.1', engines: { vscode: '^1.100.0' },
+          capabilities: { untrustedWorkspaces: { supported: true } },
           activationEvents: ['*'], main: './host.cjs',
         })), writeFile(join(profile, 'User', 'settings.json'), JSON.stringify({
-        'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': false,
+        'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': restricted,
+        'security.workspace.trust.startupPrompt': 'never',
         'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': false,
         'extensions.autoCheckUpdates': false, 'chat.disableAIFeatures': true,
-        'files.autoSave': 'off', 'files.hotExit': 'off',
+        'files.autoSave': 'off', 'files.hotExit': hotExit,
         'files.simpleDialog.enable': simpleFileDialog,
       }))])
       const env: NodeJS.ProcessEnv = { ...process.env }
@@ -143,6 +163,7 @@ export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtual
       }
       child = spawn(executable(), [
         '--user-data-dir=' + profile, '--extensions-dir=' + extensions,
+        '--shared-data-dir=' + join(profile, 'shared'),
         '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', '--skip-welcome', '--new-window', windowWorkspace,
       ], { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
       child.once('error', error => messages.push({ kind: 'spawn error', text: error.message }))

@@ -18,8 +18,8 @@ import { highlightSourceSearch, highlightVisualSearch, VisualSearchDecorations }
 import { splitAnchors, type BlockAnchor } from './splitScroll'
 import { openMarkdown, rebaseMarkdown, setFrontMatter, writeMarkdown, type MarkdownSession } from '../document/markdown'
 import type { WritableMarkdownHandle } from '../document/files'
-import { newTextContent, originalReference, sameContent, type DocxContent, type DocumentFormat, type LineEnding } from '../document/formats/content'
-import { canonicalDocx, docxMimeType, docxText } from '../document/formats/docx/model'
+import { makeDocxContent, newTextContent, originalReference, sameContent, type DocxContent, type DocumentContent, type DocumentFormat, type LineEnding } from '../document/formats/content'
+import { canonicalDocx, docxMaxWorkspaceSnapshot, docxMimeType, docxText, readDocxSnapshot } from '../document/formats/docx/model'
 import { exportDocument, importDocument, originalFileBytes, type ExportSnapshot } from '../document/formats/registry'
 import { WorkspaceRestoreConflict, type FileInput, type FolioHost, type LiveDocumentSnapshot } from '../host/contracts'
 import { documentInfo, plainDocumentInfo, type Heading } from '../document/metadata'
@@ -41,7 +41,7 @@ interface TabSession {
 
 export function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error) }
 
-export function useDocument(notify: (message: string) => void, visualScroll: RefObject<HTMLDivElement | null>, { storage, files, docx, liveDocument, resources }: FolioHost, viewSettings: WorkspaceView) {
+export function useDocument(notify: (message: string) => void, visualScroll: RefObject<HTMLDivElement | null>, { storage, files, docx, workspaceDocx, liveDocument, resources }: FolioHost, viewSettings: WorkspaceView) {
   const collection = useDocumentCollection(storage)
   const { workspace, documents, drafts, persisted, writing, enqueue, changeLayout, loadCollection, loadFile, persist, insertImported, cache: cacheFile, opened, updateSummary, forget } = collection
   const [file, setFile] = useState<DocumentFile>(() => newDocument('Getting started', { source: welcomeSource, lineEnding: '\n', bom: false }))
@@ -108,6 +108,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
         if (fileRef.current.format !== 'docx') return true
         try {
           const document = canonicalDocx(transaction.doc.toJSON())
+          if (workspaceDocx && JSON.stringify(document).length > docxMaxWorkspaceSnapshot) throw new Error('The DOCX draft exceeds Folio’s workspace editing limit.')
           richProjection.current = { node: transaction.doc, content: { document, source: docxText(document) } }
           return true
         } catch (error) { notify(errorMessage(error)); return false }
@@ -390,12 +391,16 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     if (liveDocument) {
       try {
         // setSource already received the serialized CodeMirror document for this transaction.
-        const source = origin === 'source' ? fileRef.current.source : project().source
+        const current = origin === 'source' ? fileRef.current : project()
+        const source = current.format === 'docx' ? JSON.stringify(current.document) : current.source
         liveSource.current = source
         liveDocument.edit(source)
         window.clearTimeout(summaryTimer.current)
         summaryTimer.current = window.setTimeout(() => {
-          if (version === editVersion.current) summarize(parseSource(source))
+          if (version !== editVersion.current) return
+          if (current.format === 'txt') setInfo(plainDocumentInfo(source))
+          else if (current.format === 'docx' && editor) setInfo(documentInfo(editor.state.doc))
+          else summarize(parseSource(source))
         }, 300)
       } catch (error) { notify(errorMessage(error)) }
     } else {
@@ -413,7 +418,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
         else notify(errorMessage(error))
       }
     }, 140)
-  }, [liveDocument, notify, parseSource, project, refreshSearch, schedule, setIssue, summarize, synchronize, viewSettings])
+  }, [editor, liveDocument, notify, parseSource, project, refreshSearch, schedule, setIssue, summarize, synchronize, viewSettings])
 
   visualUpdate.current = () => {
     if (!canEdit() || viewSettings.getState().mode === 'source' || issue.current) return
@@ -633,37 +638,51 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     if (liveDocument) {
       const receive = (state: LiveDocumentSnapshot) => {
         setLiveState(state)
-        const readOnly = !state.available || state.conflict !== undefined
+        const readOnly = !state.available || !!state.readOnly || state.conflict !== undefined
         liveReadOnly.current = readOnly
-        const next: DocumentFile = { id: state.id, title: state.title, source: state.source, lineEnding: state.lineEnding,
-          bom: false, savedSource: state.source, savedTitle: state.title, updated: Date.now() }
+        if (!state.id) return
         try {
-          if (!session.current) {
-            const view: TabView = { id: next.id, mode: 'visual' }
+          const text = { source: state.source, lineEnding: state.lineEnding, bom: !!state.bom }
+          const content: DocumentContent = state.format === 'txt' ? { ...newTextContent(), ...text }
+            : state.format === 'docx' ? makeDocxContent(readDocxSnapshot(state.source), state.issues ?? []) : { ...text, format: 'markdown' }
+          const next: DocumentFile = { ...content, id: state.id, title: state.title,
+            savedSource: content.source, savedTitle: state.title, updated: Date.now() }
+          if (workspace.current.activeId !== next.id) {
+            const view: TabView = { id: next.id, mode: next.format === 'txt' ? 'source' : 'visual' }
             loadCollection([draftSummary(next)], { activeId: next.id, tabs: [view], closed: [] })
             showTab(next, view)
           } else {
-            if (liveSource.current !== next.source) {
+            if (liveSource.current !== state.source) {
               ++editVersion.current
               window.clearTimeout(mirrorTimer.current)
               window.clearTimeout(summaryTimer.current)
-              // Native edits can change Markdown delimiters without changing the visual tree.
-              history.current = []
-              authority.current = 'source'
-              replaceSource(sourceView.current, next.source, 'host', false)
-              const diagnostic = validateSource(next.source)[0]
-              if (diagnostic) {
-                setIssue(diagnostic.message)
-                summarize(parseSource(next.source))
+              if (next.format === 'docx') {
+                applyRichDocument(editor.schema.nodeFromJSON(next.document))
                 refreshSearch()
               } else {
-                applySession(parseSource(next.source), 'host')
-                setIssue(null)
+                replaceSource(sourceView.current, next.source, 'host', false)
+                if (next.format === 'txt') {
+                  setInfo(plainDocumentInfo(next.source))
+                  refreshSearch()
+                } else {
+                  // Native edits can change Markdown delimiters without changing the visual tree.
+                  history.current = []
+                  authority.current = 'source'
+                  const diagnostic = validateSource(next.source)[0]
+                  if (diagnostic) {
+                    setIssue(diagnostic.message)
+                    summarize(parseSource(next.source))
+                    refreshSearch()
+                  } else {
+                    applySession(parseSource(next.source), 'host')
+                    setIssue(null)
+                  }
+                }
               }
             }
             replaceFile(next)
           }
-          liveSource.current = next.source
+          liveSource.current = state.source
           const editable = !readOnly && !issue.current
           if (editor.isEditable !== editable) editor.setEditable(editable, false)
           setStatus(readOnly ? 'unavailable' : state.pending ? 'pending' : 'saved')
@@ -714,7 +733,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     }
     void restore().catch(error => { if (active) { setStatus('unavailable'); notify(errorMessage(error)) } })
     return () => { active = false }
-  }, [editor, applySession, cacheFile, liveDocument, loadCollection, loadFile, markStatus, notify, opened, parseSource, persistDraft, queueVersion, refreshSearch, replaceFile, saveLayout, setIssue, showTab, storage, summarize])
+  }, [editor, applyRichDocument, applySession, cacheFile, liveDocument, loadCollection, loadFile, markStatus, notify, opened, parseSource, persistDraft, queueVersion, refreshSearch, replaceFile, saveLayout, setIssue, showTab, storage, summarize, workspace])
 
   useEffect(() => {
     const onHidden = (event: Event) => {
@@ -1005,16 +1024,34 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
 
   function captureExport(): ExportSnapshot {
     const content = project()
-    return { id: content.id, revision: editVersion.current, title: content.title, content }
+    return { id: content.id, revision: editVersion.current, title: content.title, content, nativeRevision: workspaceDocx ? liveDocument?.read().revision : undefined }
   }
 
   function exportCopy(snapshot: ExportSnapshot, lineEnding?: LineEnding, signal?: AbortSignal, confirmDocx?: boolean) {
-    return exportDocument(snapshot, value => value.id === workspace.current.activeId && value.revision === editVersion.current,
-      storage.readOriginal, files.download, { lineEnding, confirmDocx }, signal, docx)
+    const native = liveDocument?.read()
+    const codec = workspaceDocx && native ? {
+      read: async () => { throw new Error('Open a DOCX file through VS Code.') },
+      write: async () => {
+        if (snapshot.nativeRevision === undefined || native.pending || native.conflict || native.readOnly) {
+          throw new Error('Wait for VS Code to acknowledge the current draft and start the export again.')
+        }
+        return workspaceDocx.file('copy', snapshot.nativeRevision, signal)
+      },
+    } : docx
+    return exportDocument(snapshot, value => value.id === workspace.current.activeId && value.revision === editVersion.current &&
+      (!workspaceDocx || value.nativeRevision === liveDocument?.read().revision),
+      storage.readOriginal, files.download, { lineEnding, confirmDocx }, signal, codec)
   }
 
   async function downloadOriginal() {
     const current = project()
+    const revision = liveDocument?.read().revision
+    if (current.format === 'docx' && workspaceDocx && revision !== undefined) {
+      const bytes = await workspaceDocx.file('original', revision)
+      files.download(current.title, bytes, docxMimeType)
+      notify('Original download requested')
+      return
+    }
     const reference = originalReference(current)
     if (!reference) return
     const bytes = await originalFileBytes(reference, storage.readOriginal)
