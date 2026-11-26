@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CsvDialect, Workbook } from '../../document/formats/spreadsheet/model'
 import { SpreadsheetEditor, type SpreadsheetExportRequest } from '../../ui/spreadsheet/SpreadsheetEditor'
 import { sourceChange, type ClientMessage, type HostMessage } from './protocol'
-import { isRecord } from './recovery'
+import { pendingDraft, pendingRecord } from './spreadsheetJournal'
 import { isSpreadsheetClientMessage, readSpreadsheetSnapshot, type SpreadsheetState } from './spreadsheetProtocol'
 import { ColorPopover } from '../../ui/ColorControls'
 import { useWebviewColors } from './appearance'
@@ -16,26 +16,24 @@ interface Snapshot { workbook: Workbook; source: string }
 type FileRequest = Extract<ClientMessage, { type: 'spreadsheetExport' | 'spreadsheetOriginal' | 'spreadsheetCsvDialect' }>
 type FileResult = Extract<HostMessage, { type: 'spreadsheetFileResult' }>
 type Edit = Extract<ClientMessage, { type: 'spreadsheetEdit' }>
-const maxLocalDraft = 2 * 1024 * 1024
-
 function readPending(state: SpreadsheetState): Snapshot | undefined {
   try {
     const saved = localStorage.getItem('folio.spreadsheet.pending.' + state.uri)
-    if (!saved || saved.length > maxLocalDraft + 1024) return
-    const value: unknown = JSON.parse(saved)
-    if (!isRecord(value) || value.fingerprint !== state.fingerprint || typeof value.source !== 'string' || value.source === state.source) return
-    return { source: value.source, workbook: readSpreadsheetSnapshot(value.source) }
+    const source = saved ? pendingDraft(saved, state.source, state.fingerprint) : undefined
+    if (source !== undefined) return { source, workbook: readSpreadsheetSnapshot(source) }
   } catch { /* Native checkpoints remain available when webview storage is disabled. */ }
 }
 
-function storePending(state: SpreadsheetState, draft?: Snapshot) {
+/** Returns false when this draft has no webview copy, so the UI does not imply it is recoverable before the host acknowledges it. */
+function storePending(state: SpreadsheetState, draft?: Snapshot, base?: Snapshot) {
   const key = 'folio.spreadsheet.pending.' + state.uri
   try {
-    if (!draft) localStorage.removeItem(key)
-    else if (state.fingerprint && draft.source.length <= maxLocalDraft) {
-      localStorage.setItem(key, JSON.stringify({ fingerprint: state.fingerprint, source: draft.source }))
-    }
-  } catch { /* The native host owns acknowledged drafts. */ }
+    if (!draft) { localStorage.removeItem(key); return true }
+    const record = state.fingerprint ? pendingRecord(base?.source, draft.source, state.fingerprint) : undefined
+    if (!record) { localStorage.removeItem(key); return false }
+    localStorage.setItem(key, record)
+    return true
+  } catch { return false }
 }
 
 export function SpreadsheetWorkspace({ transport }: { transport: SpreadsheetTransport }) {
@@ -43,6 +41,7 @@ export function SpreadsheetWorkspace({ transport }: { transport: SpreadsheetTran
   const [state, setState] = useState<SpreadsheetState>()
   const [snapshot, setSnapshot] = useState<Snapshot>()
   const [editing, setEditing] = useState(false)
+  const [unjournaled, setUnjournaled] = useState(false)
   const [recovery, setRecovery] = useState<Snapshot>()
   const [result, setResult] = useState<{ message: string; alert: boolean }>()
   const [fileActive, setFileActive] = useState('')
@@ -68,6 +67,7 @@ export function SpreadsheetWorkspace({ transport }: { transport: SpreadsheetTran
       next.current = undefined
       storePending(native)
       setEditing(false)
+      setUnjournaled(false)
       return
     }
     const message = { type: 'spreadsheetEdit' as const, id: ++seq.current, revision: native.revision, change }
@@ -127,6 +127,7 @@ export function SpreadsheetWorkspace({ transport }: { transport: SpreadsheetTran
           committed.current = installed
           setSnapshot(installed)
           setEditing(false)
+          setUnjournaled(false)
         } catch (error) {
           setResult({ message: error instanceof Error ? error.message : 'The workspace draft could not be opened.', alert: true })
         }
@@ -156,7 +157,7 @@ export function SpreadsheetWorkspace({ transport }: { transport: SpreadsheetTran
     next.current = draft
     setSnapshot(draft)
     setEditing(true)
-    storePending(native, draft)
+    setUnjournaled(!storePending(native, draft, committed.current))
     sendEdit()
   }
 
@@ -213,11 +214,15 @@ export function SpreadsheetWorkspace({ transport }: { transport: SpreadsheetTran
     return deliver({ type: 'spreadsheetCsvDialect', id: ++seq.current, revision: native.revision, delimiter })
   }
 
-  function command(command: 'undo' | 'redo' | 'revert') {
+  function command(command: 'save' | 'undo' | 'redo' | 'revert') {
     if (!pending.current) transport.post({ type: 'spreadsheetCommand', command })
   }
 
   const format = state?.format
+  const nativeSave = !!state?.nativeSave
+  const status = editing ? unjournaled ? 'Syncing · not yet recoverable' : 'Syncing draft…'
+    : state?.dirty ? nativeSave ? 'Unsaved · draft recoverable' : 'Draft only · not saved to file'
+      : nativeSave ? 'Saved to file' : 'Opened from disk'
   return <main className="app spreadsheet-native" data-theme={colors.theme} data-host-colors={colors.hostColors ? '' : undefined} style={colors.style}>
     {state?.failure ? <p className="opening-state" role="alert">Folio could not open this workbook. {state.failure}</p>
       : !snapshot || !state || !format ? <p className="opening-state" role="status">Opening workbook in VS Code…</p>
@@ -231,14 +236,18 @@ export function SpreadsheetWorkspace({ transport }: { transport: SpreadsheetTran
             <button type="button" className="secondary-button" onClick={() => { setRecovery(undefined); apply(recovery) }}>Restore pending edit</button>
             <button type="button" className="secondary-button" onClick={() => { storePending(state); setRecovery(undefined) }}>Discard pending edit</button>
           </div>}
-          <SpreadsheetEditor key={state.uri + '#' + (state.fingerprint ?? '')}
+          <SpreadsheetEditor key={state.uri + '#' + (state.session ?? state.fingerprint ?? '')}
             workbook={snapshot.workbook} format={format} title={state.title}
             onChange={workbook => apply({ workbook, source: JSON.stringify(workbook) })}
             readOnly={!!recovery}
-            status={editing ? 'Syncing draft…' : state.dirty ? 'Draft saved locally' : 'Opened from disk'}
-            saveLabel="Save draft" onSave={() => setResult({ message: editing ? 'Waiting for VS Code to finish syncing this draft.'
-              : state.dirty ? 'The draft is recoverable in VS Code. Export a copy to create a new workbook file.'
-                : 'Export a copy to create a separate workbook file.', alert: false })}
+            status={status}
+            saveLabel={nativeSave ? 'Save' : 'Draft status'} onSave={() => {
+              if (nativeSave && !editing) return command('save')
+              setResult({ message: editing ? 'Waiting for VS Code to finish syncing this draft.'
+                : state.dirty ? 'This draft is recoverable in VS Code but is not saved to the file. Export a copy to create a workbook file.'
+                  : 'Export a copy to create a separate workbook file.', alert: false })
+            }}
+            onCalculationChange={allowed => transport.post({ type: 'spreadsheetCalculation', allowed })}
             onOriginal={saveOriginal} onExport={exportFile}
             onCsvDialect={format === 'csv' && !state.dirty ? reinterpretDelimiter : undefined}
             onUndo={() => command('undo')} onRedo={() => command('redo')}

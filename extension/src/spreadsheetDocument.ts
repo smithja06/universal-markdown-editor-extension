@@ -9,7 +9,6 @@ import { runSpreadsheetWorker } from './spreadsheetWorker'
 
 const backupName = /^folio-spreadsheet-[\da-f-]+\.backup$/i
 const backupLimit = 96 * 1024 * 1024
-export const spreadsheetCopyNotice = 'Folio keeps workbook edits in a recoverable draft. Export a copy to save a separate file.'
 export const spreadsheetExternalNotice = 'The workbook on disk changed or became unavailable. Folio kept the opened workbook and its draft. Revert from disk to load the current file.'
 
 export interface WorkbookOriginal {
@@ -61,6 +60,16 @@ export class SpreadsheetDocument implements vscode.CustomDocument {
   external = false
   dirty = false
   restored = false
+  /** SHA-256 the file on disk must still have for an in-place Save. It differs from the original after an interrupted save. */
+  disk?: string
+  /** Draft source that matches the file on disk. */
+  clean?: string
+  nativeSave = false
+  saveNotice?: string
+  /** Whether the webview has local calculation enabled, so Save may refresh supported formula caches. */
+  calculationAllowed = false
+  /** Increments when the workbook is loaded from disk. */
+  session = 1
   private operations = Promise.resolve()
 
   constructor(readonly uri: vscode.Uri, readonly format: SpreadsheetFormat) {
@@ -74,8 +83,13 @@ export class SpreadsheetDocument implements vscode.CustomDocument {
     this.original = original
     this.source = source
     this.workbook = workbook
+    this.disk = original.fingerprint
+    this.clean = original.source
     this.failure = undefined
   }
+
+  /** Whether the draft differs from the file Folio last read or wrote. */
+  get unsaved() { return this.source !== this.clean || this.disk !== this.original?.fingerprint }
 
   serialize<T>(operation: () => Promise<T>) {
     const result = this.operations.then(operation)

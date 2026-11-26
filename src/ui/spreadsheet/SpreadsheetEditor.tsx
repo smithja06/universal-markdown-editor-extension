@@ -30,6 +30,8 @@ interface Props {
   canUndo?: boolean
   canRedo?: boolean
   onCsvDialect?: (delimiter: CsvDialect['delimiter']) => Promise<void>
+  /** Reports whether local calculation is enabled, so a host Save can refresh supported formula caches. */
+  onCalculationChange?: (allowed: boolean) => void
   /** Host controls placed beside the workbook actions. */
   headerActions?: ReactNode
 }
@@ -147,7 +149,7 @@ function currencyFormat(locale: string) {
 }
 
 export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly = false, status, onSave, saveLabel = 'Save draft', onOriginal, onExport,
-  onUndo, onRedo, canUndo, canRedo, onCsvDialect, headerActions }: Props) {
+  onUndo, onRedo, canUndo, canRedo, onCsvDialect, onCalculationChange, headerActions }: Props) {
   const [sheetId, setSheetId] = useState(workbook.sheets[0].id)
   const sheet = workbook.sheets.find(item => item.id === sheetId) ?? workbook.sheets[0]
   const [selection, setSelection] = useState<Selection>({ anchor: initialPoint, end: initialPoint })
@@ -187,6 +189,10 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
   const cancelCalculation = useRef<AbortController>(undefined)
   const bounds = useMemo(() => bounding(sheet), [sheet])
   const disabled = readOnly
+
+  const reportCalculation = useRef(onCalculationChange)
+  useEffect(() => { reportCalculation.current = onCalculationChange })
+  useEffect(() => { reportCalculation.current?.(allowedCalculation) }, [allowedCalculation])
 
   useEffect(() => {
     if (workbookRef.current !== workbook && !committed.current.has(workbook)) {

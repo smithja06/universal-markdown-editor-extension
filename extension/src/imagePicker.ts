@@ -1,33 +1,19 @@
-import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { stat } from 'node:fs/promises'
-import { join } from 'node:path'
-import { promisify } from 'node:util'
 import * as vscode from 'vscode'
 import { attachmentReference } from '../../src/host/vscode/attachmentPath'
+import { isFixedNtfs, localWindowsDrive } from './localVolume'
 import { canonicalPickerRoot, verifyPickedImage, workspaceImageExtensions } from './resources'
 
-const run = promisify(execFile)
 const unsupported = 'Browsing requires a local Windows workspace on a fixed NTFS drive. You can enter a relative image reference manually.'
 
 async function pickerRoot(document: vscode.TextDocument) {
   const { uri } = document
-  const drive = /^\/([a-z]:)\//i.exec(uri.path)?.[1]
-  if (process.platform !== 'win32' || vscode.env.remoteName || uri.scheme !== 'file' || uri.authority || !drive) {
-    throw new Error(unsupported)
-  }
+  const drive = localWindowsDrive(uri)
+  if (!drive) throw new Error(unsupported)
   const root = vscode.workspace.getWorkspaceFolder(uri)?.uri
   if (!root) throw new Error('Open the Markdown document in a workspace folder to browse its images.')
-  const systemRoot = process.env.SystemRoot
-  if (!systemRoot) throw new Error(unsupported)
-  // Node statfs does not expose the Windows filesystem type. Query just the initiating volume.
-  const shell = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-  const query = `SELECT DeviceID FROM Win32_LogicalDisk WHERE DeviceID='${drive}' AND DriveType=3 AND FileSystem='NTFS'`
-  const result = await run(shell, ['-NoProfile', '-NonInteractive', '-Command',
-    `(Get-CimInstance -Query "${query}" -ErrorAction Stop).DeviceID`], { windowsHide: true, timeout: 5000 }).catch(() => undefined)
-  if (result?.stdout.trim().toLowerCase() !== drive.toLowerCase() || !await canonicalPickerRoot(root).catch(() => undefined)) {
-    throw new Error(unsupported)
-  }
+  if (!await isFixedNtfs(drive) || !await canonicalPickerRoot(root).catch(() => undefined)) throw new Error(unsupported)
   return root
 }
 

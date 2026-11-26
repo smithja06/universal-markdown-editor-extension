@@ -19,7 +19,8 @@ export type SpreadsheetClientMessage =
   | { type: 'spreadsheetCsvDialect'; id: number; revision: number; delimiter: CsvDialect['delimiter'] }
   | SpreadsheetExport
   | { type: 'spreadsheetCancel'; id: number }
-  | { type: 'spreadsheetCommand'; command: 'undo' | 'redo' | 'revert' }
+  | { type: 'spreadsheetCommand'; command: 'save' | 'undo' | 'redo' | 'revert' }
+  | { type: 'spreadsheetCalculation'; allowed: boolean }
 
 export interface SpreadsheetStateMeta {
   revision: number
@@ -37,6 +38,10 @@ export interface SpreadsheetState extends SpreadsheetStateMeta {
   fingerprint?: string
   failure?: string
   notice?: string
+  /** True when native Save writes the workbook in place on this host. */
+  nativeSave?: boolean
+  /** Changes only when the workbook is loaded from disk, so a native Save keeps the grid session. */
+  session?: number
 }
 
 export type SpreadsheetHostMessage =
@@ -75,7 +80,8 @@ export function isSpreadsheetPng(bytes: ArrayBuffer) {
 
 export function isSpreadsheetClientMessage(value: unknown): value is SpreadsheetClientMessage {
   if (!isRecord(value)) return false
-  if (value.type === 'spreadsheetCommand') return has(value.command, ['undo', 'redo', 'revert'])
+  if (value.type === 'spreadsheetCommand') return has(value.command, ['save', 'undo', 'redo', 'revert'])
+  if (value.type === 'spreadsheetCalculation') return bool(value.allowed)
   if (!isGeneration(value.id)) return false
   if (value.type === 'spreadsheetCancel') return true
   if (!isGeneration(value.revision)) return false
@@ -108,6 +114,7 @@ export function isSpreadsheetHostMessage(value: unknown): value is SpreadsheetHo
   return isRecord(state) && isUri(state.uri) && text(state.title, 1024) && has(state.format, ['xlsx', 'csv']) &&
     optional(state.source, source => text(source, spreadsheetSnapshotLimit)) && optional(state.fingerprint, isFingerprint) &&
     optional(state.failure, failure => text(failure, 1024)) && optional(state.notice, notice => text(notice, 1024)) && isMeta(state) &&
+    optional(state.nativeSave, bool) && optional(state.session, isGeneration) &&
     optional(value.rejected, rejected => isRecord(rejected) && isGeneration(rejected.id) && text(rejected.message, 1024))
 }
 

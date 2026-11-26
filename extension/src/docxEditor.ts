@@ -3,8 +3,10 @@ import * as vscode from 'vscode'
 import { docxMaxFileBytes, docxMaxWorkspaceSnapshot, readDocxSnapshot } from '../../src/document/formats/docx/model'
 import { connectionMessage, isClientMessage, sourceChange, spliceSource, type ClientMessage, type DocumentState, type HostMessage } from '../../src/host/vscode/protocol'
 import { isRecoveryDraft, recoveryPrefix, type RecoveryDraft } from '../../src/host/vscode/recovery'
-import { cancellation, DocxDocument, docxCopyNotice, docxExternalNotice, fingerprint, loadDocxPackage, restoreDocxBackup, retireDocxBackup, writeDocxBackup } from './docxDocument'
+import { BinarySaveError, externalRefusal, interruptedNotice, saveUnavailable, type BinarySaver } from './binarySave'
+import { cancellation, DocxDocument, docxExternalNotice, fingerprint, importPackage, loadDocxPackage, restoreDocxBackup, retireDocxBackup, writeDocxBackup } from './docxDocument'
 import { isLocalDocumentFile, readLocalDocument } from './localDocumentFile'
+import { isSameSpreadsheetFile as isSameFile } from './spreadsheetCopy'
 import { runDocxWorker } from './docxWorker'
 import { attachAppearance } from './appearance'
 import { webviewHtml } from './webview'
@@ -13,7 +15,8 @@ import { savePdfCopy } from './pdfCopy'
 export const docxViewType = 'folio.docx'
 const prefix = recoveryPrefix + 'docx.'
 const stale = 'The DOCX changed. Start again from the current revision.'
-const copyRequired = 'This DOCX opens as an editable draft. Use Export DOCX copy in Folio to review changes and save a separate file.'
+const copyRequired = saveUnavailable('DOCX')
+const journalConflict = 'An earlier Folio save of this DOCX was interrupted and the file changed afterwards. Folio opened the current file and kept the save journal.'
 
 type Edit = Extract<ClientMessage, { type: 'edit' }>
 type FileRequest = Extract<ClientMessage, { type: 'docxFile' }>
@@ -36,6 +39,10 @@ interface View {
   client?: Client
 }
 
+function docxLosses(issues: { feature: string; location?: string; effect: string }[]) {
+  return [...new Set(issues.filter(issue => issue.effect !== 'preserved').map(issue => issue.feature + (issue.location ? ` (${issue.location})` : '')))]
+}
+
 const errorMessage = (error: unknown) => error instanceof Error ? error.message.slice(0, 1024) : 'VS Code could not complete this DOCX operation.'
 
 export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocument> {
@@ -45,7 +52,7 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
   readonly onDidChangeCustomDocument = this.changed.event
 
   constructor(private readonly assets: vscode.Uri, private readonly recovery: vscode.Memento, private readonly scope: string,
-    private readonly backupRoot: vscode.Uri) {}
+    private readonly backupRoot: vscode.Uri, private readonly saver: BinarySaver) {}
 
   dispose() {
     this.changed.dispose()
@@ -68,7 +75,23 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
         }
         document.revision++
         await this.checkExternal(document, signal)
-      } else document.install(await loadDocxPackage(uri, signal))
+      } else {
+        const bytes = await readLocalDocument(uri, docxMaxFileBytes, signal)
+        const journal = await this.saver.recover(uri, bytes)
+        if (journal?.state === 'interrupted') {
+          // Reopen the last complete file as the original and the content being saved as an unsaved draft.
+          const previous = await importPackage(journal.journal.previous, signal)
+          const draft = await importPackage(journal.journal.replacement, signal)
+          document.install(previous, draft.source, draft.document)
+          document.disk = journal.disk
+          document.dirty = document.fromBackup = true
+          document.saveNotice = interruptedNotice('DOCX')
+        } else {
+          document.install(await importPackage(bytes, signal))
+          if (journal) document.saveNotice = journalConflict
+        }
+      }
+      document.nativeSave = await this.saver.available(uri)
     } catch (error) {
       signal.throwIfAborted()
       // A failed hot-exit restore must stay retryable. VS Code still owns its backup id.
@@ -110,7 +133,7 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
         }
         if (document.fromBackup && document.original) {
           document.fromBackup = false
-          this.emitHistory(document, document.original.source, document.source, false, 'Recover DOCX draft')
+          this.emitHistory(document, document.original.source, document.source, 'Recover DOCX draft')
         }
         this.sendStatus(document, view, view.client)
         if (document.original) verify()
@@ -142,7 +165,8 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
         void this.receiveEdit(document, view, client, message)
       }
       if (message.type === 'command' && panel.active && document.original) {
-        if (message.command === 'save') this.post(view, client, { type: 'error', message: copyRequired })
+        if (message.command === 'save' && !document.nativeSave) this.post(view, client, { type: 'error', message: copyRequired })
+        else if (message.command === 'save') void Promise.resolve(vscode.commands.executeCommand('workbench.action.files.save')).catch(() => undefined)
         else if (message.command === 'revert' && !document.dirty) void this.revert(document, document.lifetime.signal).catch(() => undefined)
         else void Promise.resolve(vscode.commands.executeCommand(message.command === 'revert' ? 'workbench.action.files.revert' : message.command)).catch(error => {
           this.post(view, client, { type: 'error', message: errorMessage(error) })
@@ -170,13 +194,14 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
   }
 
   private state(document: DocxDocument): DocumentState {
-    const notice = document.external ? docxExternalNotice : docxCopyNotice
+    const notice = [document.external ? docxExternalNotice : undefined, document.saveNotice,
+      document.nativeSave || document.failure ? undefined : copyRequired, document.revertError].filter(Boolean).join(' ')
     return {
       uri: document.uri.toString(), title: document.uri.path.split('/').at(-1) || 'DOCX',
       source: document.source, revision: document.revision, dirty: document.dirty, available: !!document.rich,
       eol: '\n', format: 'docx', issues: document.original?.issues, readOnly: document.failure,
-      originalFingerprint: document.original?.fingerprint,
-      notice: document.failure ? undefined : document.revertError ? notice + ' ' + document.revertError : notice,
+      originalFingerprint: document.original?.fingerprint, nativeSave: document.nativeSave,
+      notice: document.failure || !notice ? undefined : notice,
     }
   }
 
@@ -241,10 +266,12 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
     }
   }
 
-  private async commit(document: DocxDocument, source: string, dirty: boolean) {
+  private async commit(document: DocxDocument, source: string) {
     const rich = readDocxSnapshot(source)
     document.lifetime.signal.throwIfAborted()
     const revision = document.revision + 1
+    // Dirty state follows content, so undoing past a save keeps a recovery checkpoint for a draft that differs from disk.
+    const dirty = source !== document.clean || document.disk !== document.original?.fingerprint
     const record: RecoveryDraft | undefined = dirty
       ? { id: document.journalId, uri: document.uri.toString(), generation: revision, source, eol: '\n', bom: false,
         reason: 'interrupted', originalFingerprint: document.original?.fingerprint }
@@ -276,9 +303,8 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
       }
       const after = spliceSource(before, change)
       if (before === after) return reject('This DOCX edit did not change the document.')
-      const wasDirty = document.dirty
-      await this.commit(document, after, true)
-      this.emitHistory(document, before, after, wasDirty, 'Edit DOCX')
+      await this.commit(document, after)
+      this.emitHistory(document, before, after, 'Edit DOCX')
       const { source: _verified, ...metadata } = this.state(document)
       const reply: Ack = { type: 'accepted', state: metadata, edit: { id } }
       client.acknowledgement = reply
@@ -287,7 +313,7 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
     } catch (error) { reject(errorMessage(error)) }
   }
 
-  private emitHistory(document: DocxDocument, before: string, after: string, wasDirty: boolean, label: string) {
+  private emitHistory(document: DocxDocument, before: string, after: string, label: string) {
     const forward = sourceChange(before, after)
     const reverse = sourceChange(after, before)
     if (!forward || !reverse) return
@@ -295,22 +321,22 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
     const beforeFingerprint = fingerprint(before)
     const afterFingerprint = fingerprint(after)
     // Native history holds inverse ranges rather than a full package per transaction.
-    const history = (patch: typeof forward, expected: string, dirty: boolean) => document.serialize(async () => {
+    const history = (patch: typeof forward, expected: string) => document.serialize(async () => {
       if (document.historyEpoch !== epoch || fingerprint(document.source) !== expected) {
         void vscode.window.showErrorMessage('Folio kept the DOCX draft because the native history entry was stale.')
         throw new Error(stale)
       }
-      await this.commit(document, spliceSource(document.source, patch), dirty)
+      await this.commit(document, spliceSource(document.source, patch))
       this.publish(document)
     })
-    this.changed.fire({ document, label, undo: () => history(reverse, afterFingerprint, wasDirty), redo: () => history(forward, beforeFingerprint, true) })
+    this.changed.fire({ document, label, undo: () => history(reverse, afterFingerprint), redo: () => history(forward, beforeFingerprint) })
   }
 
   private async checkExternal(document: DocxDocument, signal: AbortSignal) {
     const original = document.original
     if (!original || signal.aborted) return
     let changed: boolean
-    try { changed = fingerprint(await readLocalDocument(document.uri, docxMaxFileBytes, signal)) !== original.fingerprint }
+    try { changed = fingerprint(await readLocalDocument(document.uri, docxMaxFileBytes, signal)) !== (document.disk ?? original.fingerprint) }
     catch { changed = true }
     if (signal.aborted || original !== document.original || changed === document.external) return
     document.external = changed
@@ -351,19 +377,70 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
     finally { client.pdfExport = undefined }
   }
 
-  async saveCustomDocument(document: DocxDocument, token: vscode.CancellationToken) {
-    this.rejectSave(document, token)
+  saveCustomDocument(document: DocxDocument, token: vscode.CancellationToken) {
+    return document.serialize(() => this.save(document, token))
   }
 
-  async saveCustomDocumentAs(document: DocxDocument, _destination: vscode.Uri, token: vscode.CancellationToken) {
-    this.rejectSave(document, token)
+  saveCustomDocumentAs(document: DocxDocument, destination: vscode.Uri, token: vscode.CancellationToken) {
+    return document.serialize(async () => {
+      if (isSameFile(destination, document.uri)) return this.save(document, token)
+      const { rich, original } = this.writable(document, token)
+      const { signal, dispose } = cancellation(token, document.lifetime.signal)
+      try {
+        if (!await this.saver.available(destination)) throw new BinarySaveError(copyRequired)
+        await this.saver.confirm(original.fingerprint, document.uri.path.split('/').at(-1) || 'DOCX', docxLosses(original.issues), true)
+        const { bytes } = await runDocxWorker({ operation: 'write', document: rich }, signal)
+        if (token.isCancellationRequested) throw new vscode.CancellationError()
+        await this.saver.saveAs(destination, bytes, 'docx')
+      } catch (error) { this.reportSave(document, error) }
+      finally { dispose() }
+    })
   }
 
-  private rejectSave(document: DocxDocument, token: vscode.CancellationToken): never {
+  private writable(document: DocxDocument, token: vscode.CancellationToken) {
     if (token.isCancellationRequested) throw new vscode.CancellationError()
-    const view = this.views.get(document)
-    if (view?.client) this.post(view, view.client, { type: 'error', message: copyRequired })
-    throw new Error(copyRequired)
+    const { rich, original } = document
+    if (!rich || !original) throw new Error('The DOCX document is unavailable.')
+    if (!document.nativeSave) this.reportSave(document, new BinarySaveError(copyRequired))
+    return { rich, original }
+  }
+
+  private reportSave(document: DocxDocument, error: unknown): never {
+    if (!(error instanceof vscode.CancellationError)) {
+      if (error instanceof BinarySaveError && error.conflict) document.external = true
+      document.saveNotice = errorMessage(error)
+      this.publish(document)
+      const view = this.views.get(document)
+      if (view?.client) this.post(view, view.client, { type: 'error', message: errorMessage(error) })
+    }
+    throw error
+  }
+
+  /** Writes the draft over the opened file only while the file still has the fingerprint Folio expects. */
+  private async save(document: DocxDocument, token: vscode.CancellationToken) {
+    const { rich, original } = this.writable(document, token)
+    const expected = document.disk
+    if (!document.unsaved || !expected) return
+    if (document.external) this.reportSave(document, new BinarySaveError(externalRefusal, true))
+    const source = document.source
+    const { signal, dispose } = cancellation(token, document.lifetime.signal)
+    try {
+      await this.saver.confirm(expected, document.uri.path.split('/').at(-1) || 'DOCX', [
+        'Word page layout, styles and fonts. Folio uses its own page defaults and styles.', ...docxLosses(original.issues)])
+      const { bytes } = await runDocxWorker({ operation: 'write', document: rich }, signal)
+      const saved = await importPackage(bytes, signal)
+      const written = await this.saver.replace(document.uri, expected, bytes, token)
+      this.saver.remember(written)
+      document.original = saved
+      document.disk = written
+      document.clean = source
+      document.dirty = document.external = false
+      document.saveNotice = document.revertError = undefined
+      await this.recovery.update(prefix + document.journalId, undefined).then(undefined, () => undefined)
+      this.publish(document)
+      await retireDocxBackup(document)
+    } catch (error) { this.reportSave(document, error) }
+    finally { dispose() }
   }
 
   revertCustomDocument(document: DocxDocument, token: vscode.CancellationToken) {
@@ -380,6 +457,7 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
         document.install(original)
         document.dirty = false
         document.external = false
+        document.saveNotice = undefined
         document.revision++
         document.historyEpoch++
         this.publish(document)
@@ -389,7 +467,7 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
         // VS Code clears custom editor history before the asynchronous provider revert returns.
         if (document.dirty && document.original) {
           document.historyEpoch++
-          this.emitHistory(document, document.original.source, document.source, false, 'Preserve DOCX draft after failed revert')
+          this.emitHistory(document, document.original.source, document.source, 'Preserve DOCX draft after failed revert')
         }
         document.revertError = 'Folio kept the DOCX draft because it could not revert. ' + errorMessage(error)
         this.publish(document)

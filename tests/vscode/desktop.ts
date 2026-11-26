@@ -104,14 +104,16 @@ async function installVsix(profile: string, extensions: string, vsix: string) {
   if (!stdout.includes('smithja06.folio-markdown-editor@0.1.0')) throw new Error('The expected VSIX was not installed.')
 }
 
-export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtualWorkspace: boolean; simpleFileDialog: boolean; secondWorkspace: boolean; hotExit: 'off' | 'onExitAndWindowClose'; restricted: boolean }>({
+export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtualWorkspace: boolean; simpleFileDialog: boolean; secondWorkspace: boolean; hotExit: 'off' | 'onExitAndWindowClose'; restricted: boolean; customDialogs: boolean }>({
   delayEdits: [false, { option: true }],
   virtualWorkspace: [false, { option: true }],
   simpleFileDialog: [false, { option: true }],
   secondWorkspace: [false, { option: true }],
   hotExit: ['off', { option: true }],
   restricted: [false, { option: true }],
-  desktop: async ({ delayEdits, virtualWorkspace, simpleFileDialog, secondWorkspace, hotExit, restricted }, use, testInfo) => {
+  // Renders modal dialogs in the workbench DOM so tests can answer them. Native Windows message boxes are not scriptable.
+  customDialogs: [false, { option: true }],
+  desktop: async ({ delayEdits, virtualWorkspace, simpleFileDialog, secondWorkspace, hotExit, restricted, customDialogs }, use, testInfo) => {
     const temp = resolve(process.env.FOLIO_VSCODE_TEST_ROOT ?? tmpdir())
     if (process.env.FOLIO_VSCODE_TEST_ROOT) await mkdir(temp, { recursive: true })
     const directory = await mkdtemp(join(temp, prefix))
@@ -151,6 +153,7 @@ export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtual
         'extensions.autoCheckUpdates': false, 'chat.disableAIFeatures': true,
         'files.autoSave': 'off', 'files.hotExit': hotExit,
         'files.simpleDialog.enable': simpleFileDialog,
+        ...(customDialogs ? { 'window.dialogStyle': 'custom' } : {}),
       }))])
       const env: NodeJS.ProcessEnv = { ...process.env }
       delete env.ELECTRON_RUN_AS_NODE

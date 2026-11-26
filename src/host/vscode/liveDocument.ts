@@ -56,7 +56,7 @@ export function createLiveDocumentClient(transport: LiveDocumentTransport, journ
       available, dirty: !!authoritative?.dirty || source !== nativeSource,
       format: authoritative?.format, bom: authoritative?.bom, readOnly: authoritative?.readOnly,
       notice: authoritative?.notice, issues: authoritative?.issues,
-      originalFingerprint: authoritative?.originalFingerprint,
+      originalFingerprint: authoritative?.originalFingerprint, nativeSave: authoritative?.nativeSave,
       pending: authoritative ? optimistic && (!!inFlight || source !== nativeSource) : message === undefined,
       conflict, message, recovery: archived, recoveryWarning,
     }

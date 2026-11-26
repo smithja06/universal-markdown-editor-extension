@@ -32,6 +32,8 @@ interface DocumentMetadata {
   notice?: string
   issues?: DocxIssue[]
   originalFingerprint?: string
+  /** True when native Save writes the binary document in place on this host. */
+  nativeSave?: boolean
 }
 
 export interface DocumentState extends DocumentMetadata {
@@ -145,6 +147,7 @@ function isDocumentMetadata(value: unknown): value is DocumentMetadata {
     (value.format === undefined || value.format === 'markdown' || value.format === 'txt' || value.format === 'docx') &&
     (value.readOnly === undefined || typeof value.readOnly === 'string') &&
     (value.notice === undefined || typeof value.notice === 'string') &&
+    (value.nativeSave === undefined || typeof value.nativeSave === 'boolean') &&
     (value.originalFingerprint === undefined || isFingerprint(value.originalFingerprint)) &&
     (value.issues === undefined || Array.isArray(value.issues) && value.issues.every(issue => record(issue) &&
       typeof issue.code === 'string' && typeof issue.feature === 'string' && typeof issue.message === 'string' &&
