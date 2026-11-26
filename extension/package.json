@@ -1,7 +1,7 @@
 {
   "name": "folio-markdown-editor",
   "displayName": "Folio Markdown Editor",
-  "description": "Edit Markdown in Visual, Source, or synchronized Split view with VS Code Save and Undo/Redo.",
+  "description": "Opt-in editors for Markdown, plain text, and supported Word documents.",
   "version": "0.1.0",
   "publisher": "smithja06",
   "license": "MIT",
@@ -15,7 +15,7 @@
   "main": "./dist/extension.cjs",
   "extensionKind": ["workspace"],
   "capabilities": { "virtualWorkspaces": true, "untrustedWorkspaces": { "supported": false } },
-  "files": ["dist/extension.cjs", "dist/webview", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "EPL-1.0.txt"],
+  "files": ["dist/extension.cjs", "dist/docx-codec.cjs", "dist/DOCX_THIRD_PARTY_NOTICES.txt", "dist/webview", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "EPL-1.0.txt"],
   "contributes": {
     "commands": [
       { "command": "folio.showVisual", "title": "Show Visual Editor", "category": "Folio", "enablement": "activeCustomEditorId == folio.markdown" },
@@ -57,6 +57,18 @@
         "viewType": "folio.markdown",
         "displayName": "Folio Markdown Editor",
         "selector": [{ "filenamePattern": "*.md" }, { "filenamePattern": "*.markdown" }],
+        "priority": "option"
+      },
+      {
+        "viewType": "folio.txt",
+        "displayName": "Folio Plain Text Editor",
+        "selector": [{ "filenamePattern": "*.txt" }],
+        "priority": "option"
+      },
+      {
+        "viewType": "folio.docx",
+        "displayName": "Folio DOCX Editor",
+        "selector": [{ "filenamePattern": "*.docx" }],
         "priority": "option"
       }
     ]

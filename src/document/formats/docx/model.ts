@@ -17,6 +17,14 @@ export const docxMimeType = 'application/vnd.openxmlformats-officedocument.wordp
 export const docxMaxFileBytes = 24 * 1024 * 1024
 export const docxMaxXmlPartBytes = 8 * 1024 * 1024
 export const docxMaxXmlElements = 240_000
+export const docxMaxWorkspaceSnapshot = 12 * 1024 * 1024
+
+export function readDocxSnapshot(source: string): JSONContent {
+  if (source.length > docxMaxWorkspaceSnapshot) throw new Error('The DOCX draft exceeds Folio’s workspace editing limit.')
+  const document = canonicalDocx(JSON.parse(source))
+  if (JSON.stringify(document) !== source) throw new Error('Folio received an invalid DOCX draft.')
+  return document
+}
 
 export function safeDocxLink(value: string) {
   // eslint-disable-next-line no-control-regex -- Do not accept ambiguous URL controls or ASCII whitespace.

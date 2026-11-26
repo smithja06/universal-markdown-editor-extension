@@ -1,7 +1,7 @@
 // @vitest-environment node
 import 'fake-indexeddb/auto'
 import { expect, test } from 'vitest'
-import { canonicalDocx, safeDocxLink } from './model'
+import { canonicalDocx, docxMaxWorkspaceSnapshot, readDocxSnapshot, safeDocxLink } from './model'
 import { newDocument } from '../../workspace'
 import { insertDraft, readDraft, readOriginal, writeDraft } from '../../workspaceStorage'
 import { readVersion, recordVersion, restoreVersion } from '../../versions'
@@ -29,6 +29,13 @@ test('rejects unsupported formatting, nested content and unsafe destinations', (
   expect(safeDocxLink('javascript:alert(1)')).toBe(false)
   expect(safeDocxLink('https://user@example.com')).toBe(false)
   expect(safeDocxLink('//example.com')).toBe(false)
+})
+
+test('workspace snapshot validation rejects oversized and noncanonical transactions', () => {
+  expect(readDocxSnapshot(JSON.stringify(body))).toEqual(body)
+  expect(() => readDocxSnapshot(JSON.stringify({ ...body, metadata: 'unknown' }))).toThrow('invalid DOCX draft')
+  expect(() => readDocxSnapshot(JSON.stringify({ type: 'doc', content: [{ type: 'image' }] }))).toThrow('supported subset')
+  expect(() => readDocxSnapshot(' '.repeat(docxMaxWorkspaceSnapshot + 1))).toThrow('workspace editing limit')
 })
 
 test('stores rich version changes independently of text and recovers the original relationship', async () => {

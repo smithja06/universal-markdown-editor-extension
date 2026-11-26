@@ -1,7 +1,7 @@
 import type { Command, ShortcutPlatform } from '../core/commands'
 import type { MarkdownFile, WritableMarkdownHandle } from '../document/files'
-import type { OriginalFile } from '../document/formats/content'
-import type { DocxCodec } from '../document/formats/docx/model'
+import type { DocumentFormat, OriginalFile } from '../document/formats/content'
+import type { DocxCodec, DocxIssue } from '../document/formats/docx/model'
 import type { Appearance, DocumentFile, DocumentSummary, WorkspaceLayout } from '../document/workspace'
 import type { DocumentVersion, VersionResult, VersionSummary, VersionTrigger } from '../document/versions'
 import type { SearchOptions, TextMatch } from '../core/search'
@@ -45,6 +45,12 @@ export interface LiveDocumentSnapshot {
   id: string
   title: string
   source: string
+  format?: DocumentFormat
+  bom?: boolean
+  readOnly?: string
+  notice?: string
+  issues?: DocxIssue[]
+  originalFingerprint?: string
   revision?: number
   lineEnding: '\n' | '\r\n'
   dirty: boolean
@@ -60,14 +66,16 @@ export interface LiveDocument {
   read(): LiveDocumentSnapshot
   subscribe(listener: (state: LiveDocumentSnapshot) => void): () => void
   edit(source: string): void
-  run(command: 'save' | 'undo' | 'redo'): void
+  run(command: 'save' | 'undo' | 'redo' | 'revert'): void
   discardRecovery(id: string): void
+  restoreRecovery?(id: string): void
 }
 
 export interface FolioHost {
   storage: DocumentStorage
   files: FileOperations
   docx?: DocxCodec
+  workspaceDocx?: { file(kind: 'original' | 'copy', revision: number, signal?: AbortSignal): Promise<Uint8Array<ArrayBuffer>> }
   liveDocument?: LiveDocument
   appearance: AppearancePreferences
   clipboard: { writeText(text: string | (() => Promise<string>)): Promise<void> }

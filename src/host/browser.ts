@@ -4,17 +4,9 @@ import { listVersions, readVersion, recordVersion, restoreVersion } from '../doc
 import { normalizeAppearance } from '../document/workspace'
 import { browserSearch } from './browserSearch'
 import type { AppearancePreferences, FileOperations, FolioHost } from './contracts'
+import { downloadFile as download } from './download'
 
 type FilePicker = (options: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<WritableMarkdownHandle>
-
-const download: FileOperations['download'] = (filename, data, mediaType) => {
-  const url = URL.createObjectURL(new Blob([data], { type: mediaType }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
 
 const browserFiles: FileOperations = {
   download,

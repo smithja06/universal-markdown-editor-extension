@@ -14,6 +14,7 @@ const qualificationPath = /^\/project\/media\/qualification-[a-z0-9-]+\.(?:stage
 class HeapProbe {}
 let attachmentFault
 let attachmentWriteOptions
+let saveAsOutcome
 
 function fileStat(type, size = 0) { return { type, size, ctime: 0, mtime: 0 } }
 function virtualFile(uri) {
@@ -23,7 +24,7 @@ function virtualFile(uri) {
 }
 
 function uri(file, virtual = false) {
-  if (typeof file !== 'string' || !/^(?:[a-z0-9-]+\/)*[a-z0-9-]+\.(md|markdown)$/.test(file)) throw new Error('Invalid test document name.')
+  if (typeof file !== 'string' || !/^(?:[a-z0-9-]+\/)*[a-z0-9-]+\.(md|markdown|txt|docx)$/.test(file)) throw new Error('Invalid test document name.')
   return vscode.Uri.joinPath(virtual ? vscode.Uri.joinPath(virtualRoot, 'docs') : vscode.workspace.workspaceFolders[0].uri, file)
 }
 
@@ -53,10 +54,15 @@ const operations = {
   async open({ file, editor, column, virtual }) {
     const options = { viewColumn: column ?? vscode.ViewColumn.One, preview: false }
     if (editor === 'folio') await vscode.commands.executeCommand('vscode.openWith', uri(file, virtual), 'folio.markdown', options)
+    else if (editor === 'folio.txt' || editor === 'folio.docx') await vscode.commands.executeCommand('vscode.openWith', uri(file, virtual), editor, options)
     else if (editor === 'default') await vscode.commands.executeCommand('vscode.open', uri(file, virtual), options)
     else await vscode.window.showTextDocument(uri(file, virtual), options)
   },
   activeNativeUri: () => vscode.window.activeTextEditor?.document.uri.toString() ?? null,
+  activeTabDirty: () => vscode.window.tabGroups.activeTabGroup.activeTab?.isDirty ?? null,
+  workspaceTrust: () => vscode.workspace.isTrusted,
+  folioActive: () => vscode.extensions.getExtension('smithja06.folio-markdown-editor')?.isActive ?? false,
+  editorChoices() { void vscode.commands.executeCommand('workbench.action.reopenWithEditor') },
   activeNativeLine: () => vscode.window.activeTextEditor?.selection.active.line ?? null,
   async read({ file, virtual }) {
     const document = await vscode.workspace.openTextDocument(uri(file, virtual))
@@ -69,6 +75,15 @@ const operations = {
     if (!await vscode.workspace.applyEdit(edit)) throw new Error('VS Code refused the native test edit.')
   },
   save: () => vscode.commands.executeCommand('workbench.action.files.save'),
+  saveAs() {
+    saveAsOutcome = 'pending'
+    void vscode.commands.executeCommand('workbench.action.files.saveAs').then(
+      () => { saveAsOutcome = 'completed' },
+      error => { saveAsOutcome = String(error) },
+    )
+  },
+  saveAsOutcome: () => saveAsOutcome,
+  revert: () => vscode.commands.executeCommand('workbench.action.files.revert'),
   theme: ({ theme }) => vscode.workspace.getConfiguration('workbench').update('colorTheme', theme, vscode.ConfigurationTarget.Global),
   showPalette: () => vscode.commands.executeCommand('workbench.action.showCommands'),
   addVirtualWorkspace({ markdown, pixel, file = 'source.md' }) {

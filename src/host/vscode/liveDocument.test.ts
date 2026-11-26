@@ -107,6 +107,23 @@ it('retries a stale proposal against a newer disjoint native edit', () => {
   expect(client.read().pending).toBe(false)
 })
 
+it('keeps both rich snapshots when disjoint DOCX wire edits race', () => {
+  const { client, state, receive, sent } = connection(createRecoveryJournal(() => localStorage))
+  const uri = 'file:///notes.docx'
+  const docx = (left: string, right: string) => JSON.stringify({ type: 'doc', content: [left, right].map(text =>
+    ({ type: 'paragraph', content: [{ type: 'text', text }] })) })
+  const native = docx('left', 'right native')
+  const draft = docx('left Folio', 'right')
+  receive({ type: 'recovery', scope, id: journalId, active: [journalId], drafts: [] })
+  state({ uri, format: 'docx', source: docx('left', 'right') })
+  client.edit(draft)
+  state({ uri, format: 'docx', source: native, revision: 2 }, { id: 1, accepted: false })
+  expect(client.read()).toMatchObject({ source: native, conflict: draft, pending: false })
+  expect(client.read().recovery?.[0]).toMatchObject({ reason: 'conflict', source: draft, native: { source: native } })
+  expect(sent.filter(message => message.type === 'edit')).toHaveLength(1)
+  client.dispose()
+})
+
 it('rebases unsent input when a newer native snapshot arrives before an earlier accepted acknowledgement', () => {
   const { client, sent, state } = connection()
   state()

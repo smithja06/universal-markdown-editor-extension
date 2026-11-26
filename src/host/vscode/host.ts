@@ -2,11 +2,13 @@ import type { ShortcutPlatform } from '../../core/commands'
 import { normalizeAppearance, type Appearance } from '../../document/workspace'
 import { createSearch } from '../browserSearch'
 import type { DocumentStorage, FileOperations, FolioHost } from '../contracts'
+import { downloadFile } from '../download'
 import SearchWorker from '../searchWorker.ts?worker&inline'
 import { createLiveDocumentClient, type LiveDocumentTransport } from './liveDocument'
 import type { RecoveryJournal } from './recovery'
 import { createWorkspaceResources } from './resources'
 import { onWebviewTheme } from './theme'
+import { createWorkspaceDocx } from './workspaceDocx'
 
 function unavailable() {
   return new Error('This operation is unavailable in the VS Code editor.')
@@ -39,15 +41,17 @@ const files: FileOperations = {
 
 const search = createSearch(() => new SearchWorker())
 
-export function createWebviewHost(transport: LiveDocumentTransport, platform: ShortcutPlatform, theme: Appearance['theme'], journal: RecoveryJournal) {
+export function createWebviewHost(transport: LiveDocumentTransport, platform: ShortcutPlatform, theme: Appearance['theme'], journal: RecoveryJournal, format = 'Markdown') {
   const liveDocument = createLiveDocumentClient(transport, journal)
-  const resources = createWorkspaceResources(transport)
+  const resources = format === 'Markdown' ? createWorkspaceResources(transport) : undefined
+  const workspaceDocx = format === 'DOCX' ? createWorkspaceDocx(transport) : undefined
   let settings = normalizeAppearance({ theme })
   let recent: string[] = []
   return {
     liveDocument,
     storage,
-    files,
+    files: workspaceDocx ? { ...files, download: downloadFile } : files,
+    workspaceDocx,
     keyboard: { platform, handledByHost: new Set(['workspace.palette']) },
     appearance: {
       read: () => settings,
@@ -72,6 +76,6 @@ export function createWebviewHost(transport: LiveDocumentTransport, platform: Sh
       read: () => recent,
       write(ids) { recent = ids },
     },
-    dispose() { resources.dispose(); liveDocument.dispose() },
+    dispose() { workspaceDocx?.dispose(); resources?.dispose(); liveDocument.dispose() },
   } satisfies FolioHost & { dispose(): void }
 }

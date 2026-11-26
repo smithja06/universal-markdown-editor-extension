@@ -12,6 +12,7 @@ export interface RecoveryDraft extends RecoveryText {
   generation: number
   reason: 'pending' | 'conflict' | 'rejected' | 'unavailable' | 'interrupted'
   native?: RecoveryText
+  originalFingerprint?: string
 }
 
 export interface RecoveryJournal {
@@ -27,6 +28,7 @@ export const isId = (value: unknown): value is string =>
 export const isUri = (value: unknown): value is string => typeof value === 'string' && /^[a-z][\w+.-]*:[^\s]/i.test(value)
 export const isGeneration = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+export const isFingerprint = (value: unknown): value is string => typeof value === 'string' && /^[\da-f]{64}$/.test(value)
 
 function isRecoveryText(value: unknown): value is RecoveryText {
   return isRecord(value) && typeof value.source === 'string' && !value.source.includes('\r') &&
@@ -37,7 +39,8 @@ export function isRecoveryDraft(value: unknown): value is RecoveryDraft {
   return isRecord(value) && isId(value.id) && isUri(value.uri) && isGeneration(value.generation) &&
     (value.reason === 'pending' || value.reason === 'conflict' || value.reason === 'rejected' ||
       value.reason === 'unavailable' || value.reason === 'interrupted') &&
-    (value.native === undefined || isRecoveryText(value.native)) && isRecoveryText(value)
+    (value.native === undefined || isRecoveryText(value.native)) &&
+    (value.originalFingerprint === undefined || isFingerprint(value.originalFingerprint)) && isRecoveryText(value)
 }
 
 export function recoveryMarkdown({ source, eol, bom }: RecoveryText): string {

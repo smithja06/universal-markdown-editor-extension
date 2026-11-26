@@ -1,5 +1,7 @@
-import { isGeneration, isId, isRecord, isRecoveryDraft, isUri, type RecoveryDraft } from './recovery'
+import { isFingerprint, isGeneration, isId, isRecord, isRecoveryDraft, isUri, type RecoveryDraft } from './recovery'
 import { isNativeAction, type NativeAction } from './nativeCommands'
+import type { DocumentFormat } from '../../document/formats/content'
+import { docxMaxFileBytes, type DocxIssue } from '../../document/formats/docx/model'
 
 interface DocumentMetadata {
   uri: string
@@ -9,6 +11,11 @@ interface DocumentMetadata {
   eol: '\n' | '\r\n'
   bom?: boolean
   available: boolean
+  format?: DocumentFormat
+  readOnly?: string
+  notice?: string
+  issues?: DocxIssue[]
+  originalFingerprint?: string
 }
 
 export interface DocumentState extends DocumentMetadata {
@@ -30,7 +37,9 @@ export type ClientMessage =
   | { type: 'dismiss'; id: string; generation: number }
   | { type: 'status' }
   | { type: 'abandon'; id: number }
-  | { type: 'command'; command: 'save' | 'undo' | 'redo' }
+  | { type: 'command'; command: 'save' | 'undo' | 'redo' | 'revert' }
+  | { type: 'docxFile'; id: number; kind: 'original' | 'copy'; revision: number }
+  | { type: 'cancelDocxFile'; id: number }
   | { type: 'copy'; id: number; text: string }
   | { type: 'resource'; id: number; operation: 'image' | 'open'; reference: string }
   | { type: 'cancelResource'; id: number }
@@ -46,6 +55,8 @@ export type HostMessage =
   | { type: 'stored'; id: string; generation: number; stored: boolean }
   | { type: 'dismissed'; id: string; generation: number; dismissed: boolean }
   | { type: 'copied'; id: number; copied: boolean }
+  | { type: 'docxFileResult'; id: number; bytes: ArrayBuffer }
+  | { type: 'docxFileResult'; id: number; error: string }
   | { type: 'action'; action: NativeAction }
   | { type: 'resourceResult'; id: number; ok: boolean; image?: string }
   | { type: 'imagePickerResult'; id: number; reference?: string; preview?: string; error?: string }
@@ -73,6 +84,8 @@ export function isClientMessage(value: unknown): value is ClientMessage {
   if (value.type === 'dismiss') return isId(value.id) && isGeneration(value.generation)
   if (value.type === 'abandon') return isGeneration(value.id)
   if (value.type === 'copy') return isGeneration(value.id) && typeof value.text === 'string'
+  if (value.type === 'docxFile') return isGeneration(value.id) && integer(value.revision) && (value.kind === 'original' || value.kind === 'copy')
+  if (value.type === 'cancelDocxFile') return isGeneration(value.id)
   if (value.type === 'resource') return isGeneration(value.id) && (value.operation === 'image' || value.operation === 'open') &&
     typeof value.reference === 'string' && value.reference.length > 0 && value.reference.length <= 4096
   if (value.type === 'cancelResource') return isGeneration(value.id)
@@ -80,14 +93,22 @@ export function isClientMessage(value: unknown): value is ClientMessage {
     (value.previousSelection === undefined || (isGeneration(value.previousSelection) && value.previousSelection < value.id))
   if (value.type === 'confirmWorkspaceImage') return isGeneration(value.id) && integer(value.revision) && isGeneration(value.selection)
   if (value.type === 'cancelWorkspaceImage') return isGeneration(value.id)
-  return value.type === 'command' && (value.command === 'save' || value.command === 'undo' || value.command === 'redo')
+  return value.type === 'command' && (value.command === 'save' || value.command === 'undo' || value.command === 'redo' || value.command === 'revert')
 }
 
 function isDocumentMetadata(value: unknown): value is DocumentMetadata {
   return record(value) && isUri(value.uri) &&
     typeof value.title === 'string' && integer(value.revision) &&
     (value.bom === undefined || typeof value.bom === 'boolean') &&
-    typeof value.dirty === 'boolean' && typeof value.available === 'boolean' && (value.eol === '\n' || value.eol === '\r\n')
+    typeof value.dirty === 'boolean' && typeof value.available === 'boolean' && (value.eol === '\n' || value.eol === '\r\n') &&
+    (value.format === undefined || value.format === 'markdown' || value.format === 'txt' || value.format === 'docx') &&
+    (value.readOnly === undefined || typeof value.readOnly === 'string') &&
+    (value.notice === undefined || typeof value.notice === 'string') &&
+    (value.originalFingerprint === undefined || isFingerprint(value.originalFingerprint)) &&
+    (value.issues === undefined || Array.isArray(value.issues) && value.issues.every(issue => record(issue) &&
+      typeof issue.code === 'string' && typeof issue.feature === 'string' && typeof issue.message === 'string' &&
+      (issue.location === undefined || typeof issue.location === 'string') &&
+      (issue.effect === 'preserved' || issue.effect === 'approximated' || issue.effect === 'omitted')))
 }
 
 function isDocumentState(value: unknown): value is DocumentState {
@@ -104,6 +125,9 @@ export function isHostMessage(value: unknown): value is HostMessage {
   if (value.type === 'stored') return isId(value.id) && isGeneration(value.generation) && typeof value.stored === 'boolean'
   if (value.type === 'dismissed') return isId(value.id) && isGeneration(value.generation) && typeof value.dismissed === 'boolean'
   if (value.type === 'copied') return isGeneration(value.id) && typeof value.copied === 'boolean'
+  if (value.type === 'docxFileResult') return isGeneration(value.id) &&
+    ('bytes' in value ? !('error' in value) && value.bytes instanceof ArrayBuffer && value.bytes.byteLength <= docxMaxFileBytes
+      : typeof value.error === 'string' && value.error.length <= 1024)
   if (value.type === 'accepted') return record(value.state) && !('source' in value.state) &&
     isDocumentMetadata(value.state) && value.state.available && record(value.edit) && isGeneration(value.edit.id)
   if (value.type === 'action') return isNativeAction(value.action)
@@ -154,7 +178,7 @@ export function sourceChange(before: string, after: string): Splice | undefined 
 
 export function spliceSource(source: string, change: Splice): string {
   if (change.from < 0 || change.to < change.from || change.to > source.length) {
-    throw new RangeError('The Markdown edit range is outside the document.')
+    throw new RangeError('The edit range is outside the document.')
   }
   return source.slice(0, change.from) + change.text + source.slice(change.to)
 }

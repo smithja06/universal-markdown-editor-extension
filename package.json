@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "build:extension": "tsc --noEmit && tsc --project extension/tsconfig.json && vite build --config vite.webview.config.ts && esbuild extension/src/extension.ts --bundle --platform=node --target=node20 --external:vscode --outfile=extension/dist/extension.cjs",
+    "build:extension": "tsc --noEmit && tsc --project extension/tsconfig.json && vite build --config vite.webview.config.ts && esbuild extension/src/extension.ts extension/src/docx-codec.ts --bundle --platform=node --target=node20 --external:vscode --outdir=extension/dist --out-extension:.js=.cjs && node -e \"require('node:fs').copyFileSync('public/DOCX_THIRD_PARTY_NOTICES.txt','extension/dist/DOCX_THIRD_PARTY_NOTICES.txt')\"",
     "package:extension": "npm run build:extension && cd extension && vsce package --no-dependencies --out dist/folio.vsix",
     "lint": "eslint . --max-warnings 0",
     "preview": "vite preview",

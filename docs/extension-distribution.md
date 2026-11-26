@@ -1,8 +1,14 @@
 # Folio VSIX distribution record
 
+## Phase 7C extension DOCX worker
+
+The VSIX includes `dist/docx-codec.cjs`, a separate Node worker built from `extension/src/docx-codec.ts` and the same codec entry used by the standalone worker. The host resolves it from its own installed directory when DOCX open, revert, or reviewed-copy generation requires the codec. Markdown and TXT load the existing webview and no DOCX ZIP or XML engine. The standalone browser worker remains separate.
+
+The VSIX allowlist includes `dist/DOCX_THIRD_PARTY_NOTICES.txt`. The extension build copies the same pinned `fflate`, `saxes` and `xmlchars` notices distributed by standalone Folio. No new dependency versions or licenses were introduced. Packaging checks compare the notices and worker in the archive against the build, and the installed smoke opens and exports DOCX from the actual VSIX. [Phase 7C verification](extension-qualification.md#phase-7c-multi-format-qualification)
+
 ## Standalone DOCX worker dependencies
 
-Phase 7B uses `fflate` 0.8.3 (MIT) for DEFLATE and ZIP writing and `saxes` 6.0.0 (ISC) for namespace-aware XML events. `saxes` uses `xmlchars` 2.2.0 (MIT). The lockfile pins these inputs. The browser host builds the worker only for the standalone bundle. The VS Code build uses its existing host and notice inventory. [fflate license](https://github.com/101arrowz/fflate/blob/v0.8.3/LICENSE) · [saxes license](https://github.com/lddubeau/saxes/blob/v6.0.0/LICENSE) · [xmlchars license](https://github.com/lddubeau/xmlchars/blob/v2.2.0/LICENSE)
+Phase 7B introduced `fflate` 0.8.3 (MIT) for DEFLATE and ZIP writing and `saxes` 6.0.0 (ISC) for namespace-aware XML events. `saxes` uses `xmlchars` 2.2.0 (MIT). The lockfile pins these inputs. The standalone bundle uses a browser worker. [fflate license](https://github.com/101arrowz/fflate/blob/v0.8.3/LICENSE) · [saxes license](https://github.com/lddubeau/saxes/blob/v6.0.0/LICENSE) · [xmlchars license](https://github.com/lddubeau/xmlchars/blob/v2.2.0/LICENSE)
 
 The standalone build copies `DOCX_THIRD_PARTY_NOTICES.txt` from `public/` into `dist/`. It includes the exact locked license texts and attributions. The saxes npm archive omits its license file, so the notice uses the upstream v6.0.0 tag. Retain the notice beside the standalone worker when distributing that artifact, and check the final bundle and notice together. [Standalone DOCX notices](../public/DOCX_THIRD_PARTY_NOTICES.txt) · [Codec and limits](phase-7-multiformat-foundation.md#phase-7b-codec-and-limits)
 
