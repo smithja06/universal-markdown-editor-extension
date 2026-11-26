@@ -111,9 +111,14 @@ export default function App({ host }: { host: FolioHost }) {
   const formatting = useFormatting(editor)
   const { mode, sidebar, setSidebar, appearance, setAppearance } = useStore(workspaceView)
   const themeFromHost = host.appearance.themeFromHost
-  useEffect(() => themeFromHost?.(theme => {
+  // Host colors are a choice: Light or Dark keep the Folio palette even inside VS Code.
+  const hostColors = !!themeFromHost && appearance.hostColors
+  useEffect(() => hostColors ? themeFromHost?.(theme => {
     if (workspaceView.getState().appearance.theme !== theme) setAppearance({ theme })
-  }), [setAppearance, themeFromHost, workspaceView])
+  }) : undefined, [hostColors, setAppearance, themeFromHost, workspaceView])
+  const subscribeAppearance = host.appearance.subscribe
+  useEffect(() => subscribeAppearance?.(update => workspaceView.setState(state => ({ appearance: { ...state.appearance, ...update } }))),
+    [subscribeAppearance, workspaceView])
   const accents = useMemo(() => accentTheme(appearance.accentColor, appearance.theme), [appearance.accentColor, appearance.theme])
   const split = markdown && mode === 'split'
   const source = plainText || markdown && (mode === 'source' || split && doc.activePane === 'source')
@@ -762,8 +767,8 @@ export default function App({ host }: { host: FolioHost }) {
       : doc.status === 'unavailable' ? localDraft ? 'Draft could not be saved locally' : 'Local storage unavailable'
         : localDraft ? 'Draft saved locally' : 'Saved locally'
   const StatusIcon = doc.status === 'unavailable' ? CloudOff : doc.status === 'saved' ? Check : LoaderCircle
-  const style = { ...(!themeFromHost && accents), '--writing-font': fonts[appearance.font], '--writing-size': appearance.fontSize + 'px', '--writing-leading': appearance.lineHeight } as CSSProperties
-  return <div ref={root} className="app" data-theme={appearance.theme} style={style} onClickCapture={event => {
+  const style = { ...(!hostColors && accents), '--writing-font': fonts[appearance.font], '--writing-size': appearance.fontSize + 'px', '--writing-leading': appearance.lineHeight } as CSSProperties
+  return <div ref={root} className="app" data-theme={appearance.theme} data-host-colors={hostColors ? '' : undefined} style={style} onClickCapture={event => {
     if (document.activeElement === titleInput.current && event.target !== titleInput.current) titleInput.current?.blur()
   }}>
     <header className={'topbar' + (spreadsheet ? ' spreadsheet-topbar' : '')}>

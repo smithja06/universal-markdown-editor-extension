@@ -18,6 +18,7 @@
   "files": ["dist/extension.cjs", "dist/docx-codec.cjs", "dist/spreadsheet-codec.cjs", "dist/spreadsheet.wasm", "dist/DOCX_THIRD_PARTY_NOTICES.txt", "dist/PDF_THIRD_PARTY_NOTICES.txt", "dist/SPREADSHEET_THIRD_PARTY_NOTICES.txt", "dist/webview", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "EPL-1.0.txt"],
   "contributes": {
     "commands": [
+      { "command": "folio.openWith", "title": "Open with Folio", "category": "Folio" },
       { "command": "folio.showVisual", "title": "Show Visual Editor", "category": "Folio", "enablement": "activeCustomEditorId == folio.markdown" },
       { "command": "folio.showMarkdown", "title": "Show Markdown Source", "category": "Folio", "enablement": "activeCustomEditorId == folio.markdown" },
       { "command": "folio.showSplit", "title": "Show Split Editor", "category": "Folio", "enablement": "activeCustomEditorId == folio.markdown" },
@@ -27,12 +28,19 @@
     ],
     "menus": {
       "commandPalette": [
+        { "command": "folio.openWith", "when": "resourceExtname =~ /^\\.(md|markdown|txt|docx|pdf|xlsx|csv)$/i" },
         { "command": "folio.showVisual", "when": "activeCustomEditorId == folio.markdown" },
         { "command": "folio.showMarkdown", "when": "activeCustomEditorId == folio.markdown" },
         { "command": "folio.showSplit", "when": "activeCustomEditorId == folio.markdown" },
         { "command": "folio.toggleProperties", "when": "activeCustomEditorId == folio.markdown" },
         { "command": "folio.goToHeading", "when": "activeCustomEditorId == folio.markdown" },
         { "command": "folio.showCommands", "when": "activeCustomEditorId == folio.markdown" }
+      ],
+      "explorer/context": [
+        { "command": "folio.openWith", "when": "!explorerResourceIsFolder && resourceExtname =~ /^\\.(md|markdown|txt|docx|pdf|xlsx|csv)$/i", "group": "navigation@19" }
+      ],
+      "editor/title/context": [
+        { "command": "folio.openWith", "when": "resourceExtname =~ /^\\.(md|markdown|txt|docx|pdf|xlsx|csv)$/i", "group": "1_open@1" }
       ],
       "editor/title": [
         { "submenu": "folio.editorActions", "when": "activeCustomEditorId == folio.markdown", "group": "1_view" }

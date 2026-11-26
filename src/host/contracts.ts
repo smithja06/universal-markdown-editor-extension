@@ -40,6 +40,8 @@ export interface AppearancePreferences {
   read(): Appearance
   write(appearance: Appearance): void
   themeFromHost?: (listener: (theme: Appearance['theme']) => void) => () => void
+  /** Appearance changes made by another editor on the same host. */
+  subscribe?: (listener: (update: Partial<Appearance>) => void) => () => void
 }
 
 export interface LiveDocumentSnapshot {

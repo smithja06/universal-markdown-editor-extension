@@ -1,10 +1,10 @@
-import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { ArrowDownToLine, Check, ChevronDown, CircleAlert, FileSpreadsheet, Globe2, HelpCircle, List, LoaderCircle, Plus, Sigma, X } from 'lucide-react'
 import { applyEditorText, cellAddress, cellInput, createSheet, editorText, enterCell, normalizeRange, parseAddress, parseRange, rangeAddress, rangeSize,
   spreadsheetLimits, type Border, type Cell, type CellStyle, type CellValue, type CsvDialect, type Point, type Range, type Sheet,
   type SpreadsheetFormat, type Workbook } from '../../document/formats/spreadsheet/model'
 import { IconButton, Menu, Modal, type Item } from '../controls'
-import { axisMetrics, contains, defaultHeight, defaultWidth, intersects, rewriteSheetReferences, shiftCsvRows, shiftSheet } from './display'
+import { axisMetrics, contains, defaultHeight, defaultWidth, fitSizes, intersects, rewriteSheetReferences, shiftCsvRows, shiftSheet } from './display'
 import { clipboardCharacterLimit, decodeTypedClipboard, encodeTypedClipboard, typedClipboardMime } from './clipboard'
 import { SpreadsheetGrid, type GridEditing } from './Grid'
 import { SpreadsheetToolbar, type BorderMode, type ToolDialog } from './Toolbar'
@@ -30,6 +30,8 @@ interface Props {
   canUndo?: boolean
   canRedo?: boolean
   onCsvDialect?: (delimiter: CsvDialect['delimiter']) => Promise<void>
+  /** Host controls placed beside the workbook actions. */
+  headerActions?: ReactNode
 }
 
 const initialPoint = { row: 1, col: 1 }
@@ -145,7 +147,7 @@ function currencyFormat(locale: string) {
 }
 
 export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly = false, status, onSave, saveLabel = 'Save draft', onOriginal, onExport,
-  onUndo, onRedo, canUndo, canRedo, onCsvDialect }: Props) {
+  onUndo, onRedo, canUndo, canRedo, onCsvDialect, headerActions }: Props) {
   const [sheetId, setSheetId] = useState(workbook.sheets[0].id)
   const sheet = workbook.sheets.find(item => item.id === sheetId) ?? workbook.sheets[0]
   const [selection, setSelection] = useState<Selection>({ anchor: initialPoint, end: initialPoint })
@@ -595,6 +597,22 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     const key = axis === 'row' ? 'heights' : 'widths'
     replaceSheet({ ...sheet, [key]: { ...sheet[key], [index]: size } })
   }
+  function autoFit(axis: Axis, index: number) {
+    const start = axis === 'row' ? range.row : range.col
+    const end = axis === 'row' ? range.endRow : range.endCol
+    const whole = axis === 'row' ? range.col === 1 && range.endCol === spreadsheetLimits.cols : range.row === 1 && range.endRow === spreadsheetLimits.rows
+    const hidden = new Set(axis === 'row' ? sheet.hiddenRows : sheet.hiddenCols)
+    const indices = whole && start <= index && index <= end
+      ? Array.from({ length: end - start + 1 }, (_, offset) => start + offset).filter(item => item === index || !hidden.has(item)) : [index]
+    const key = axis === 'row' ? 'heights' : 'widths'
+    const next = { ...sheet[key] }
+    for (const [item, size] of fitSizes(sheet, axis, indices, { locale: workbook.locale, date1904: workbook.date1904,
+      calculated: sheetCalculation, header: workbook.csv?.header })) {
+      if (size === undefined) delete next[item]
+      else next[item] = size
+    }
+    replaceSheet({ ...sheet, [key]: next })
+  }
   function structure(axis: Axis, index: number, insert: boolean) {
     if (formulaCount) { setNotice('Row and column insertion and deletion require a workbook without formulas.'); return }
     const limit = axis === 'row' ? spreadsheetLimits.rows : spreadsheetLimits.cols
@@ -635,6 +653,7 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
       { label: 'Insert ' + name + (axis === 'row' ? ' above' : ' to the left'), disabled, run: () => structure(axis, index, true) },
       { label: 'Delete ' + name, disabled, run: () => structure(axis, index, false) },
       { label: 'Resize ' + name + '…', disabled, run: () => { setResize({ axis, index }); setDialog('resize') } },
+      { label: (axis === 'row' ? 'Auto-fit row height' : 'Auto-fit column width'), disabled, run: () => autoFit(axis, index) },
       { label: 'Hide ' + name, disabled, run: () => toggleHidden(axis, index) },
       { label: 'Show all ' + name + 's', disabled, run: () => toggleHidden(axis) },
       { label: 'Freeze through this ' + name, disabled: disabled || index > 80, run: () => replaceSheet({ ...sheet, [frozen]: index }) },
@@ -664,6 +683,7 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
       </div>
       <div className="folio-sheet-actions">
         {status && <span className="folio-sheet-status" role="status"><Check size={12} />{status}</span>}
+        {headerActions}
         {hasWarnings && <IconButton label="Workbook compatibility" onClick={() => setDialog('warnings')}><CircleAlert size={17} /></IconButton>}
         <IconButton label="Formula reference" onClick={() => setDialog('reference')}><HelpCircle size={18} /></IconButton>
         <Menu label="Export copies" align="right" chevron className="folio-sheet-export" items={[
@@ -711,7 +731,7 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
         onSelect={select} onSelectAxis={selectAxis} onBeginEdit={beginEditing}
         onEdit={value => setEditing(previous => previous && { ...previous, value: applyEditorText(previous.value, value) })}
         onCommit={commitEditing} onCancel={() => { setEditing(undefined); focus() }} onKey={key}
-        onCopy={copy} onPaste={paste} onResize={resizeAxis} onContext={openContext} />
+        onCopy={copy} onPaste={paste} onResize={resizeAxis} onAutoFit={autoFit} onContext={openContext} />
       {notice && <div role="status" className="folio-sheet-toast"><span>{notice}</span><IconButton label="Dismiss message" onClick={() => setNotice('')}><X size={14} /></IconButton></div>}
     </div>
     <footer className="folio-sheet-footer">

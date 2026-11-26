@@ -60,6 +60,11 @@ const operations = {
     else if (editor === 'default') await vscode.commands.executeCommand('vscode.open', uri(file, virtual), options)
     else await vscode.window.showTextDocument(uri(file, virtual), options)
   },
+  openWithFolio: ({ file }) => vscode.commands.executeCommand('folio.openWith', uri(file)),
+  openWithFolioMenus() {
+    const { menus } = vscode.extensions.getExtension('smithja06.folio-markdown-editor').packageJSON.contributes
+    return ['explorer/context', 'editor/title/context', 'commandPalette'].map(menu => menus[menu].find(item => item.command === 'folio.openWith')?.when ?? null)
+  },
   activeNativeUri: () => vscode.window.activeTextEditor?.document.uri.toString() ?? null,
   activeTabDirty: () => vscode.window.tabGroups.activeTabGroup.activeTab?.isDirty ?? null,
   activeCustomEditor() {

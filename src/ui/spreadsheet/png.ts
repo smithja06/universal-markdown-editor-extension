@@ -1,6 +1,5 @@
 import { cellAddress, rangeSize, spreadsheetLimits, type Border, type CellValue, type Range, type Sheet, type Workbook } from '../../document/formats/spreadsheet/model'
-import { axisMetrics, contains, defaultHeight, defaultWidth, displayCell, ruleAppearance, wrapHeights } from './display'
-import { fontFamily } from './Grid'
+import { axisMetrics, contains, defaultHeight, defaultWidth, displayCell, fontFamily, ruleAppearance, wrapHeights } from './display'
 
 export const pngLimits = { side: 8192, pixels: 16_000_000 } as const
 

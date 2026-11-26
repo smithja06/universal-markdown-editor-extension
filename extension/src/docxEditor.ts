@@ -6,6 +6,7 @@ import { isRecoveryDraft, recoveryPrefix, type RecoveryDraft } from '../../src/h
 import { cancellation, DocxDocument, docxCopyNotice, docxExternalNotice, fingerprint, loadDocxPackage, restoreDocxBackup, retireDocxBackup, writeDocxBackup } from './docxDocument'
 import { isLocalDocumentFile, readLocalDocument } from './localDocumentFile'
 import { runDocxWorker } from './docxWorker'
+import { attachAppearance } from './appearance'
 import { webviewHtml } from './webview'
 import { savePdfCopy } from './pdfCopy'
 
@@ -157,6 +158,7 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
       if (this.views.get(document) === view) this.views.delete(document)
       this.activeJournals.delete(document.journalId)
     })
+    attachAppearance(panel)
     panel.webview.html = html
   }
 

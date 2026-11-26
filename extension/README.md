@@ -1,8 +1,12 @@
 # Folio Markdown Editor
 
-Folio offers optional VS Code editors for Markdown, plain text, and supported Word documents, and a read-only PDF viewer. Use **Reopen Editor With…** to select the Folio editor for the current file. VS Code's native Text Editor remains the default for Markdown and TXT.
+Folio offers optional VS Code editors for Markdown, plain text, supported Word documents, XLSX workbooks and CSV files, and a read-only PDF viewer. Right-click a supported file in the Explorer or an editor tab and choose **Open with Folio**, run **Folio: Open with Folio** from the Command Palette, or use **Reopen Editor With…**. VS Code's native editors remain the default.
 
-Use **Visual** for rich editing, **Markdown** for source, or **Split** to see both. Folio follows your VS Code theme and exposes mode changes, document properties, and heading navigation through the Command Palette and the editor title’s **Folio** submenu. Mode shortcuts are Ctrl+Alt+Shift+V/M/S on Windows and Linux and Cmd+Option+Shift+V/M/S on macOS. The shortcuts apply while Folio is active and an input does not have focus.
+Use **Visual** for rich editing, **Markdown** for source, or **Split** to see both. Folio exposes mode changes, document properties, and heading navigation through the Command Palette and the editor title’s **Folio** submenu. Mode shortcuts are Ctrl+Alt+Shift+V/M/S on Windows and Linux and Cmd+Option+Shift+V/M/S on macOS. The shortcuts apply while Folio is active and an input does not have focus.
+
+## Appearance
+
+Folio matches your VS Code color theme by default. To use Folio's own palette, open **Document properties → Appearance** in the Markdown, TXT and DOCX editors, or select the **Appearance** button in the spreadsheet and PDF editors. Then choose **Light** or **Dark** and drag the **Accent color** bar. Your choice applies to every open Folio editor and is kept for later sessions. Choose **Match VS Code** to return to the workbench colors.
 
 ## Plain text and Word documents
 

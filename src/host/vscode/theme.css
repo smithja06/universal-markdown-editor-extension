@@ -1,5 +1,5 @@
-/* The workbench updates these variables in place when its color theme changes. */
-body:is(.vscode-light, .vscode-dark, .vscode-high-contrast, .vscode-high-contrast-light) .app {
+/* With the VS Code color choice, the workbench updates these variables in place when its color theme changes. */
+body:is(.vscode-light, .vscode-dark, .vscode-high-contrast, .vscode-high-contrast-light) .app[data-host-colors] {
   --ui: var(--vscode-editor-background);
   --paper: var(--vscode-editor-background);
   --canvas: var(--vscode-sideBar-background, var(--paper));
@@ -25,31 +25,31 @@ body:is(.vscode-light, .vscode-dark, .vscode-high-contrast, .vscode-high-contras
   --accent-fill-border: var(--vscode-button-border, var(--line));
 }
 
-.app :focus-visible { outline-color: var(--vscode-focusBorder, var(--accent)); }
-.app ::selection {
+.app[data-host-colors] :focus-visible { outline-color: var(--vscode-focusBorder, var(--accent)); }
+.app[data-host-colors] ::selection {
   background-color: var(--vscode-editor-selectionBackground);
   color: var(--vscode-editor-selectionForeground, inherit);
 }
-.app .source-editor .cm-selectionBackground {
+.app[data-host-colors] .source-editor .cm-selectionBackground {
   background: var(--vscode-editor-inactiveSelectionBackground, var(--vscode-editor-selectionBackground));
 }
-.app .source-editor .cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+.app[data-host-colors] .source-editor .cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
   background: var(--vscode-editor-selectionBackground);
 }
-.app .dropdown {
+.app[data-host-colors] :is(.dropdown, .color-popover-panel) {
   background: var(--vscode-menu-background, var(--quiet));
   border-color: var(--vscode-contrastBorder, var(--vscode-menu-border, var(--line)));
 }
-.app .dropdown button { color: var(--vscode-menu-foreground, var(--text)); }
-.app .dropdown button:is(:hover:not(:disabled), :focus-visible, [aria-selected="true"]) {
+.app[data-host-colors] .dropdown button { color: var(--vscode-menu-foreground, var(--text)); }
+.app[data-host-colors] .dropdown button:is(:hover:not(:disabled), :focus-visible, [aria-selected="true"]) {
   background: var(--vscode-menu-selectionBackground, var(--hover));
   color: var(--vscode-menu-selectionForeground, var(--text));
 }
-.app .palette-option[aria-selected="true"] {
+.app[data-host-colors] .palette-option[aria-selected="true"] {
   background: var(--vscode-quickInputList-focusBackground, var(--hover));
   color: var(--vscode-quickInputList-focusForeground, var(--text));
 }
-body:is(.vscode-high-contrast, .vscode-high-contrast-light) .app :is(.palette-option[aria-selected="true"], .dropdown button[aria-selected="true"], .mode-selector button[aria-pressed="true"]) {
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .app[data-host-colors] :is(.palette-option[aria-selected="true"], .dropdown button[aria-selected="true"], .mode-selector button[aria-pressed="true"]) {
   outline: 1px solid var(--vscode-contrastActiveBorder, var(--vscode-focusBorder, var(--ink)));
   outline-offset: -1px;
 }

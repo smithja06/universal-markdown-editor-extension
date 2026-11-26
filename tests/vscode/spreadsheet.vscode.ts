@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { expect, type Page } from '@playwright/test'
 import { createSheet, createWorkbook } from '../../src/document/formats/spreadsheet/model'
 import { processSpreadsheet } from '../../src/document/formats/spreadsheet/xlsx'
+import { accentAtHue, accentHex } from '../../src/appearance'
 import { test } from './desktop'
 
 function folio(page: Page) {
@@ -216,4 +217,51 @@ test.describe('spreadsheet workspace trust', () => {
     await expect(choices.getByText('Text Editor', { exact: true })).toBeVisible()
     await expect(choices.getByText('Folio CSV Editor', { exact: true })).toHaveCount(0)
   })
+})
+
+test('Open with Folio opens XLSX and shares the chosen theme and accent with other Folio editors', async ({ desktop }) => {
+  const { page, workspace, command } = desktop
+  for (const when of await command<(string | null)[]>('openWithFolioMenus')) expect(when).toContain('xlsx')
+  const workbook = createWorkbook('xlsx')
+  workbook.sheets[0].cells.A1 = { kind: 'text', value: 'Themed' }
+  const wasm = new Uint8Array(await readFile('node_modules/@ironcalc/wasm-xlsx/wasm_bg.wasm'))
+  const written = processSpreadsheet({ operation: 'write', workbook }, wasm)
+  if (written.operation !== 'write') throw new Error(written.message)
+  await writeFile(join(workspace, 'themed.xlsx'), written.bytes)
+  await writeFile(join(workspace, 'notes.md'), '# Notes\n')
+
+  await command('openWithFolio', { file: 'themed.xlsx' })
+  await expect.poll(() => command('activeCustomEditor')).toBe('folio.xlsx')
+  const sheet = folio(page)
+  await expect(sheet.getByRole('gridcell', { name: 'A1 Themed' })).toBeVisible()
+  const sheetApp = sheet.locator('.app').first()
+  await expect(sheetApp).toHaveAttribute('data-host-colors', '')
+  await sheet.getByRole('button', { name: 'Appearance' }).click()
+  const popover = sheet.getByRole('dialog', { name: 'Appearance' })
+  await expect(popover.getByRole('combobox', { name: 'Theme' })).toHaveValue('host')
+  await popover.getByRole('combobox', { name: 'Theme' }).selectOption('dark')
+  await expect(sheetApp).toHaveAttribute('data-theme', 'dark')
+  await expect(sheetApp).not.toHaveAttribute('data-host-colors')
+  await expect(sheetApp).toHaveCSS('background-color', 'rgb(28, 36, 32)')
+  await popover.getByRole('slider', { name: 'Accent hue' }).fill('210')
+  const hex = accentHex(accentAtHue(210))
+  await expect(popover.getByLabel('Accent hex value')).toHaveText(hex)
+
+  await command('openWithFolio', { file: 'notes.md' })
+  await expect.poll(() => command('activeCustomEditor')).toBe('folio.markdown')
+  const markdown = folio(page)
+  const markdownApp = markdown.locator('.app').first()
+  await expect(markdownApp).toHaveAttribute('data-theme', 'dark')
+  await expect(markdownApp).not.toHaveAttribute('data-host-colors')
+  await markdown.getByRole('button', { name: 'Toggle document properties' }).click()
+  await markdown.getByRole('tab', { name: 'Appearance' }).click()
+  const theme = markdown.getByRole('combobox', { name: 'Theme' })
+  await expect(theme).toHaveValue('dark')
+  await expect(markdown.getByLabel('Accent hex value')).toHaveText(hex)
+  await theme.selectOption('host')
+  await expect(markdownApp).toHaveAttribute('data-host-colors', '')
+
+  await command('openWithFolio', { file: 'themed.xlsx' })
+  await expect.poll(() => command('activeCustomEditor')).toBe('folio.xlsx')
+  await expect(folio(page).locator('.app').first()).toHaveAttribute('data-host-colors', '')
 })

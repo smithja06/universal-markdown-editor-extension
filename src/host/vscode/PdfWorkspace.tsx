@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CircleAlert, FileText, Info, RefreshCw, X } from 'lucide-react'
-import type { Appearance } from '../../document/workspace'
 import { IconButton } from '../../ui/controls'
 import { PdfViewer } from '../../ui/pdf/PdfViewer'
 import type { ClientMessage, HostMessage, PdfViewState } from './protocol'
-import { onWebviewTheme } from './theme'
+import { ColorPopover } from '../../ui/ColorControls'
+import { useWebviewColors } from './appearance'
 
 export interface PdfTransport {
   post(message: ClientMessage): void
@@ -12,8 +12,8 @@ export interface PdfTransport {
 }
 
 /** The VS Code read-only PDF shell around the shared Folio viewer. */
-export function PdfWorkspace({ transport, initialTheme }: { transport: PdfTransport; initialTheme: Appearance['theme'] }) {
-  const [theme, setTheme] = useState(initialTheme)
+export function PdfWorkspace({ transport }: { transport: PdfTransport }) {
+  const colors = useWebviewColors()
   const [state, setState] = useState<PdfViewState>()
   const [document, setDocument] = useState<{ revision: number; bytes: Uint8Array }>()
   const [toast, setToast] = useState('')
@@ -27,7 +27,6 @@ export function PdfWorkspace({ transport, initialTheme }: { transport: PdfTransp
     timer.current = window.setTimeout(() => setToast(''), 4300)
   }, [])
 
-  useEffect(() => onWebviewTheme(setTheme), [])
   useEffect(() => {
     const stop = transport.listen(message => {
       if (message.type === 'pdfState') setState(message.state)
@@ -62,12 +61,13 @@ export function PdfWorkspace({ transport, initialTheme }: { transport: PdfTransp
   }), [transport])
 
   const current = document && state && document.revision === state.revision ? document : undefined
-  return <div className="app pdf-host" data-theme={theme}>
+  return <div className="app pdf-host" data-theme={colors.theme} data-host-colors={colors.hostColors ? '' : undefined} style={colors.style}>
     <header className="topbar">
       <div className="brand" role="img" aria-label="Folio"><span className="brand-icon"><FileText size={21} strokeWidth={1.9} /></span><span>folio<span className="brand-period">.</span></span></div>
       <div className="topbar-divider" />
       <div className="document-identity"><span className="workspace-title" title={state?.uri}>{state?.title ?? 'PDF'}</span></div>
-      <div className="topbar-actions"><span className="save-status status-saved" role="status">Read-only PDF</span></div>
+      <div className="topbar-actions"><span className="save-status status-saved" role="status">Read-only PDF</span>
+        <ColorPopover theme={colors.preferences.theme} accentColor={colors.preferences.accentColor} hostColors={colors.hostColors} onChange={colors.set} /></div>
     </header>
     {state && (state.changed || !state.available) && <div className="pdf-notices pdf-changed" role="alert">
       <span><CircleAlert size={13} aria-hidden="true" />{state.available ? 'This PDF changed on disk. Folio is showing the version that was opened.' : 'This PDF was moved or deleted. Folio is showing the version that was opened.'}</span>

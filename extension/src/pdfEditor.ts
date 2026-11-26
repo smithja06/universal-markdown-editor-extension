@@ -3,6 +3,7 @@ import * as vscode from 'vscode'
 import { looksLikePdf, pdfLimits } from '../../src/document/formats/pdf/model'
 import { connectionMessage, isClientMessage, type HostMessage, type PdfViewState } from '../../src/host/vscode/protocol'
 import { isLocalDocumentFile, readLocalDocument } from './localDocumentFile'
+import { attachAppearance } from './appearance'
 import { webviewHtml } from './webview'
 
 export const pdfViewType = 'folio.pdf'
@@ -157,6 +158,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<Pd
       view.connection = undefined
       if (!views.size) this.views.delete(document)
     })
+    attachAppearance(panel)
     panel.webview.html = html
   }
 }

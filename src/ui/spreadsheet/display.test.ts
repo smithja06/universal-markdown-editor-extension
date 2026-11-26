@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createSheet } from '../../document/formats/spreadsheet/model'
-import { axisMetrics, displayCell, rewriteSheetReferences, ruleAppearance, shiftCsvRows, shiftSheet } from './display'
+import { axisMetrics, displayCell, fitSizes, rewriteSheetReferences, ruleAppearance, shiftCsvRows, shiftSheet } from './display'
 
 describe('sheet display and structural edits', () => {
   it('finds visible coordinates across hidden and resized columns', () => {
@@ -62,5 +62,23 @@ describe('sheet display and structural edits', () => {
     expect(appearance({ row: 1, col: 2 }, { kind: 'number', value: 1 })).toEqual({})
     expect(appearance({ row: 2, col: 1 }, { kind: 'number', value: 1 })).toEqual({ color: '#445566' })
     expect(appearance({ row: 2, col: 2 }, { kind: 'text', value: '1' })).toEqual({})
+  })
+
+  it('fits column widths and row heights to cell contents', () => {
+    const sheet = createSheet('Fit')
+    sheet.cells.A1 = { kind: 'text', value: 'short' }
+    sheet.cells.A2 = { kind: 'text', value: 'a much longer value' }
+    sheet.cells.B1 = { kind: 'text', value: 'one two three four', style: { wrap: true } }
+    sheet.cells.C3 = { kind: 'text', value: 'merged across', }
+    sheet.merges.push({ row: 3, col: 3, endRow: 3, endCol: 4 })
+    sheet.widths[2] = 60
+    const options = { locale: 'en-US', date1904: false, measure: (text: string) => text.length * 7 }
+    const widths = fitSizes(sheet, 'col', [1, 3, 5], options)
+    expect(widths.get(1)).toBe(19 * 7 + 13)
+    expect(widths.get(3)).toBeUndefined()
+    expect(widths.get(5)).toBeUndefined()
+    const heights = fitSizes(sheet, 'row', [1, 2], options)
+    expect(heights.get(1)).toBe(Math.ceil(3 * (11 * 4 / 3) * 1.3 + 5))
+    expect(heights.get(2)).toBe(26)
   })
 })
