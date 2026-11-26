@@ -24,7 +24,7 @@ function virtualFile(uri) {
 }
 
 function uri(file, virtual = false) {
-  if (typeof file !== 'string' || !/^(?:[a-z0-9-]+\/)*[a-z0-9-]+\.(md|markdown|txt|docx|pdf)$/.test(file)) throw new Error('Invalid test document name.')
+  if (typeof file !== 'string' || !/^(?:[a-z0-9-]+\/)*[a-z0-9-]+\.(md|markdown|txt|docx|pdf|xlsx|csv)$/.test(file)) throw new Error('Invalid test document name.')
   return vscode.Uri.joinPath(virtual ? vscode.Uri.joinPath(virtualRoot, 'docs') : vscode.workspace.workspaceFolders[0].uri, file)
 }
 
@@ -54,7 +54,9 @@ const operations = {
   async open({ file, editor, column, virtual }) {
     const options = { viewColumn: column ?? vscode.ViewColumn.One, preview: false }
     if (editor === 'folio') await vscode.commands.executeCommand('vscode.openWith', uri(file, virtual), 'folio.markdown', options)
-    else if (editor === 'folio.txt' || editor === 'folio.docx' || editor === 'folio.pdf') await vscode.commands.executeCommand('vscode.openWith', uri(file, virtual), editor, options)
+    else if (['folio.txt', 'folio.docx', 'folio.pdf', 'folio.xlsx', 'folio.csv'].includes(editor)) {
+      await vscode.commands.executeCommand('vscode.openWith', uri(file, virtual), editor, options)
+    }
     else if (editor === 'default') await vscode.commands.executeCommand('vscode.open', uri(file, virtual), options)
     else await vscode.window.showTextDocument(uri(file, virtual), options)
   },

@@ -42,6 +42,10 @@ function dateRange(documentId: string, kind?: VersionKind) {
 function contentOf(file: DocumentFile): DocumentContent {
   const { source, bom, lineEnding } = file
   if (file.format === 'pdf') throw new Error('PDF documents are read-only and have no version history.')
+  if ('workbook' in file) {
+    const { format, schemaVersion, workbook, originalFile } = file
+    return { format, schemaVersion, workbook, source: '', lineEnding: '\n', bom: false, ...(originalFile ? { originalFile } : {}) }
+  }
   if (file.format === 'docx') {
     const { format, schemaVersion, document, issues, originalFile } = file
     return { format, schemaVersion, document, issues, source, bom: false, lineEnding: '\n', ...(originalFile ? { originalFile } : {}) }
@@ -80,7 +84,7 @@ async function appendVersion(transaction: IDBTransaction, file: DocumentFile, tr
 
   const version: VersionSummary = {
     id: crypto.randomUUID(), documentId: file.id, createdAt: Math.max(now, (latest?.createdAt ?? -1) + 1),
-    kind, title: file.title, bytes: content.format === 'docx' ? encoder.encode(JSON.stringify(content)).byteLength
+    kind, title: file.title, bytes: content.format === 'docx' || 'workbook' in content ? encoder.encode(JSON.stringify(content)).byteLength
       : encoder.encode(content.source).byteLength + encoder.encode(content.original?.text ?? '').byteLength,
   }
   if (kind === 'automatic') {

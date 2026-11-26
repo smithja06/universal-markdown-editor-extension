@@ -1,5 +1,9 @@
 # Folio in VS Code
 
+## Phase 9 spreadsheet editors
+
+Open a local file in a trusted workspace and choose **Reopen Editor With** to use Folio’s optional XLSX or CSV editor. It shares the standalone grid, workbook tools, formula bar and worksheets. The extension host owns revisions and checkpoints, reports native dirty state, provides undo and redo and supports revert and hot-exit backup. Export publishes a reviewed copy to a new local file. The original remains available after external changes and while recovering a backup. [Spreadsheet architecture](phase-9-spreadsheets.md) · [Desktop qualification](extension-qualification.md#phase-9-spreadsheet-qualification)
+
 ## Phase 8 PDF viewer and PDF copies
 
 `folio.pdf` is an optional `CustomReadonlyEditorProvider` registered in `extension/src/pdfEditor.ts`. It reads trusted local `file:` documents with the same bounded, change-checked reader as DOCX (64 MiB) and keeps the bytes and their SHA-256 in the custom document. The webview receives a transferable copy over the existing connection-tagged protocol (`pdfState`, `pdfBytes`, `pdfReload`, `copy`). Its `PdfWorkspace` shell renders the shared viewer without a native-text bridge, recovery journal or workspace resources. The provider never writes the workspace file and has no edit events, dirty state, Save or backup. A directory watcher and focus check compare the file's digest and show a banner after replacement or deletion. **Reload from disk** reads and validates the current file before replacing the displayed revision. Closing the editor disposes the watcher and listeners, and the webview's `pagehide` unmounts the viewer, which destroys the pdf.js document and worker.

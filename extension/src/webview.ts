@@ -3,14 +3,15 @@ import * as vscode from 'vscode'
 
 const assetAttribute = /\b(src|href)="\.\/(assets\/[\w./-]+)"/g
 
-export async function webviewHtml(webview: vscode.Webview, root: vscode.Uri, format: 'Markdown' | 'TXT' | 'DOCX' | 'PDF' = 'Markdown'): Promise<string> {
+export async function webviewHtml(webview: vscode.Webview, root: vscode.Uri, format: 'Markdown' | 'TXT' | 'DOCX' | 'PDF' | 'XLSX' | 'CSV' = 'Markdown'): Promise<string> {
   const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, 'index.html'))
   const template = new TextDecoder().decode(bytes)
   const nonce = randomBytes(18).toString('base64')
   const origin = webview.cspSource
+  const wasm = format === 'XLSX' || format === 'CSV' ? " 'wasm-unsafe-eval'" : ''
   const policy = [
     "default-src 'none'",
-    `script-src ${origin} 'nonce-${nonce}'`,
+    `script-src ${origin} 'nonce-${nonce}'${wasm}`,
     `style-src ${origin} 'unsafe-inline'`,
     `img-src ${origin} data: blob:`,
     `font-src ${origin} data:`,

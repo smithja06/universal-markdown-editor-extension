@@ -18,9 +18,10 @@ import { highlightSourceSearch, highlightVisualSearch, VisualSearchDecorations }
 import { splitAnchors, type BlockAnchor } from './splitScroll'
 import { openMarkdown, rebaseMarkdown, setFrontMatter, writeMarkdown, type MarkdownSession } from '../document/markdown'
 import type { WritableMarkdownHandle } from '../document/files'
-import { makeDocxContent, newTextContent, originalReference, sameContent, type DocxContent, type DocumentContent, type DocumentFormat, type LineEnding } from '../document/formats/content'
+import { makeDocxContent, newTextContent, originalReference, sameContent, spreadsheetContent, type DocxContent, type DocumentContent, type DocumentFormat, type LineEnding } from '../document/formats/content'
 import { canonicalDocx, docxMaxWorkspaceSnapshot, docxMimeType, docxText, readDocxSnapshot } from '../document/formats/docx/model'
-import { exportDocument, importDocument, originalFileBytes, type ExportSnapshot } from '../document/formats/registry'
+import { exportDocument, importDocument, originalFileBytes, spreadsheetMediaTypes, type ExportSnapshot } from '../document/formats/registry'
+import { createWorkbook, type CsvDialect, type Workbook } from '../document/formats/spreadsheet/model'
 import { WorkspaceRestoreConflict, type FileInput, type FolioHost, type LiveDocumentSnapshot } from '../host/contracts'
 import { documentInfo, plainDocumentInfo, type Heading } from '../document/metadata'
 import { availableTitle, draftSummary, emptyLayout, newDocument, welcomeSource, withoutTabs, type DocumentFile, type EditorMode, type EditorPane, type TabView, type WorkspaceLayout, type WorkspaceView } from '../document/workspace'
@@ -61,6 +62,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   const liveSource = useRef<string>(undefined)
   const fileRef = useRef(file)
   const tabSessions = useRef(new Map<string, TabSession>())
+  const workbookHistory = useRef(new Map<string, { undo: Workbook[]; redo: Workbook[] }>())
   const sourceRuntime = useRef<SourceRuntime | null>(null)
   const initialView = useRef<TabView | undefined>(undefined)
   const pendingScroll = useRef<TabView | undefined>(undefined)
@@ -123,7 +125,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   const project = useCallback(() => {
     const baseline = session.current
     const file = fileRef.current
-    if (file.format === 'pdf') return file
+    if (file.format === 'pdf' || 'workbook' in file) return file
     if (file.format === 'docx' && editor) {
       const node = editor.state.doc
       if (richProjection.current?.node !== node) {
@@ -266,9 +268,10 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       replaceFile(next)
       setVisualDirty(false)
       const plain = next.format === 'txt' ? plainDocumentInfo(next.source) : undefined
-      const words = plain?.statistics.words ?? documentInfo(authority.current === 'source' ? parseSource(next.source).document : editor.state.doc).statistics.words
+      const words = 'workbook' in next ? undefined : plain?.statistics.words ?? documentInfo(authority.current === 'source' ? parseSource(next.source).document : editor.state.doc).statistics.words
       const saved = persistDraft(next, checkpoint ? 'checkpoint' : 'interval', words)
       saveView()
+      if ('workbook' in next) return saved
       if (plain) setInfo(plain)
       else if (viewSettings.getState().mode === 'source' && !issue.current) summarize(parseSource(next.source))
       else if (!issue.current) {
@@ -483,9 +486,9 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     if (!editor) return
     const resumed = tabSessions.current.get(next.id)
     tabSessions.current.delete(next.id)
-    const baseline = next.format === 'txt' || next.format === 'docx' || next.format === 'pdf' ? null : resumed?.markdown ?? openMarkdown(next.source, editor.schema)
+    const baseline = next.format === 'txt' || next.format === 'docx' || next.format === 'pdf' || 'workbook' in next ? null : resumed?.markdown ?? openMarkdown(next.source, editor.schema)
     if (next.format === 'txt') view = { ...view, mode: 'source' }
-    if (next.format === 'docx' || next.format === 'pdf') view = { ...view, mode: 'visual' }
+    if (next.format === 'docx' || next.format === 'pdf' || 'workbook' in next) view = { ...view, mode: 'visual' }
     transition.current++
     editVersion.current++
     parsed.current = null
@@ -504,8 +507,8 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
         const { doc, tr } = editor.state
         editor.view.dispatch(tr.setSelection(TextSelection.between(doc.resolve(Math.min(view.visual.anchor, doc.content.size)), doc.resolve(Math.min(view.visual.head, doc.content.size)))).setMeta('addToHistory', false))
       }
-    } else if (next.format === 'pdf') {
-      // Release the previous rich document. The PDF viewer owns page content.
+    } else if (next.format === 'pdf' || 'workbook' in next) {
+      // The dedicated surface owns the document content.
       editor.view.updateState(EditorState.create({ schema: editor.schema, plugins: editor.state.plugins }))
       session.current = null
       paired.current = null
@@ -541,7 +544,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       editor.state.doc.descendants(node => { if (node.type.name === 'rawBlock' || node.type.name === 'rawInline') preserved++ })
       setWarnings(preserved)
     }
-    if (sourceRuntime.current && next.format !== 'docx' && next.format !== 'pdf') {
+    if (sourceRuntime.current && next.format !== 'docx' && next.format !== 'pdf' && !('workbook' in next)) {
       sourceRuntime.current.apply(resumed?.source ?? next.source)
       if (!resumed?.source) applySourceSelection(view)
     }
@@ -638,7 +641,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const known = drafts.current.get(id)
     if (pending || !known || !sameContent(current, known) || current.title !== known.title || saveStatusRef.current.get(id) === 'unavailable') {
       const next = { ...current, updated: Math.max(Date.now(), current.updated + 1) }
-      const words = (next.format === 'txt' ? plainDocumentInfo(next.source) : documentInfo(authority.current === 'source' ? parseSource(next.source).document : editor.state.doc)).statistics.words
+      const words = 'workbook' in next ? undefined : (next.format === 'txt' ? plainDocumentInfo(next.source) : documentInfo(authority.current === 'source' ? parseSource(next.source).document : editor.state.doc)).statistics.words
       void persistDraft(next, 'checkpoint', words)
       replaceFile(next)
     } else void queueVersion(current, 'checkpoint')
@@ -878,7 +881,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const current = workspace.current
     const view: TabView = current.tabs.find(tab => tab.id === next.id) ?? current.closed.find(tab => tab.id === next.id) ?? { id: next.id, mode: next.format === 'txt' ? 'source' : 'visual' }
     if (created) {
-      const words = next.format === 'pdf' ? 0 : (next.format === 'txt' ? plainDocumentInfo(next.source) : documentInfo(
+      const words = 'workbook' in next ? undefined : next.format === 'pdf' ? 0 : (next.format === 'txt' ? plainDocumentInfo(next.source) : documentInfo(
         next.format === 'docx' ? editor.schema.nodeFromJSON(next.document) : openMarkdown(next.source, editor.schema).document)).statistics.words
       void persistDraft(next, 'checkpoint', words, true)
     } else void queueVersion(next, 'checkpoint')
@@ -904,8 +907,13 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     displayFile(next)
   }
 
-  function createDocument(format: Exclude<DocumentFormat, 'docx'> = 'markdown') {
+  function createDocument(format: Exclude<DocumentFormat, 'docx' | 'pdf'> = 'markdown') {
     nextOpenIntent()
+    if (format === 'xlsx' || format === 'csv') {
+      const title = availableTitle('Untitled.' + format, documents.current.values())
+      displayFile(newDocument(title, spreadsheetContent(format, createWorkbook(format))), true)
+      return
+    }
     const title = availableTitle(format === 'txt' ? 'Untitled.txt' : 'Untitled document', documents.current.values())
     displayFile(newDocument(title, format === 'txt' ? newTextContent() : undefined), true)
   }
@@ -919,7 +927,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const next = { ...current, title: nextTitle, updated: Math.max(Date.now(), current.updated + 1) }
     if (workspace.current.activeId === id) {
       replaceFile(next)
-      if (next.format === 'txt' || next.format === 'docx' || next.format === 'pdf') { editVersion.current++; refreshSearch() }
+      if (next.format === 'txt' || next.format === 'docx' || next.format === 'pdf' || 'workbook' in next) { editVersion.current++; refreshSearch() }
     }
     await persistDraft(next)
     if (!workspace.current.tabs.some(tab => tab.id === id)) forget(id)
@@ -930,7 +938,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const original = workspace.current.activeId === id ? project() : await loadFile(id)
     if (!original) throw new Error('This document could not be found.')
     const { source, lineEnding, bom, original: encoding } = original
-    const extensionPattern = original.format === 'txt' ? /\.txt$/i : original.format === 'docx' ? /\.docx$/i : original.format === 'pdf' ? /\.pdf$/i : /\.(md|markdown)$/i
+    const extensionPattern = 'workbook' in original ? /\.(xlsx|csv)$/i : original.format === 'txt' ? /\.txt$/i : original.format === 'docx' ? /\.docx$/i : original.format === 'pdf' ? /\.pdf$/i : /\.(md|markdown)$/i
     const extension = extensionPattern.exec(original.title)?.[0] ?? ''
     const stem = extension ? original.title.slice(0, -extension.length) : original.title
     const copy = newDocument(availableTitle(stem + ' copy' + extension, documents.current.values()), original.format === 'pdf'
@@ -939,6 +947,8 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       ? { format: 'docx', schemaVersion: 1, source, lineEnding: '\n', bom: false, document: original.document, issues: original.issues, originalFile: original.originalFile }
       : original.format === 'txt'
       ? { format: 'txt', schemaVersion: original.schemaVersion, source, bom, lineEnding, mixedLineEndings: original.mixedLineEndings, originalFile: original.originalFile }
+      : 'workbook' in original
+      ? { ...spreadsheetContent(original.format, original.workbook), originalFile: original.originalFile }
       : { source, bom, lineEnding, original: encoding })
     if (intent === openIntent.current) displayFile(copy, true)
     else await persistDraft(copy, 'checkpoint', undefined, true)
@@ -990,6 +1000,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       }
       for (const id of ids) {
         tabSessions.current.delete(id)
+        workbookHistory.current.delete(id)
         forget(id)
         if (deleting) fileHandles.current.delete(id)
       }
@@ -1020,7 +1031,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       const title = availableTitle(input.name.replace(/\.md$/i, ''), documents.current.values())
       const next = newDocument(title, imported.content)
       const plain = next.format === 'txt' ? plainDocumentInfo(next.source) : undefined
-      const words = next.format === 'pdf' ? 0 : plain?.statistics.words ?? documentInfo(next.format === 'docx' ? editor.schema.nodeFromJSON(next.document) : openMarkdown(next.source, editor.schema).document).statistics.words
+      const words = 'workbook' in next ? undefined : next.format === 'pdf' ? 0 : plain?.statistics.words ?? documentInfo(next.format === 'docx' ? editor.schema.nodeFromJSON(next.document) : openMarkdown(next.source, editor.schema).document).statistics.words
       try { await insertImported(next, words, imported.original, controller.signal) }
       catch (error) {
         if (isCurrent()) notify('Could not save the imported draft. ' + errorMessage(error))
@@ -1039,6 +1050,51 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   function captureExport(): ExportSnapshot {
     const content = project()
     return { id: content.id, revision: editVersion.current, title: content.title, content, nativeRevision: liveDocument?.read().revision }
+  }
+
+  function replaceWorkbook(workbook: Workbook, record = true) {
+    const current = fileRef.current
+    if (!('workbook' in current) || !canEdit() || current.workbook === workbook) return
+    if (record) {
+      const history = workbookHistory.current.get(current.id) ?? { undo: [], redo: [] }
+      history.undo = [...history.undo.slice(-11), current.workbook]
+      history.redo = []
+      workbookHistory.current.set(current.id, history)
+    }
+    replaceFile({ ...current, workbook })
+    editVersion.current++
+    schedule()
+  }
+
+  function moveWorkbookHistory(direction: 'undo' | 'redo') {
+    const current = fileRef.current
+    if (!('workbook' in current) || !canEdit()) return
+    const history = workbookHistory.current.get(current.id)
+    const next = history?.[direction].pop()
+    if (!history || !next) return
+    history[direction === 'undo' ? 'redo' : 'undo'].push(current.workbook)
+    replaceWorkbook(next, false)
+  }
+
+  async function changeCsvDialect(delimiter: CsvDialect['delimiter']) {
+    const snapshot = captureExport()
+    const content = snapshot.content
+    if (!('workbook' in content) || content.format !== 'csv' || !content.originalFile || !content.workbook.csv) return
+    const bytes = await originalFileBytes(content.originalFile, storage.readOriginal)
+    const { readCsvInWorker } = await import('../document/formats/spreadsheet/csvWorker')
+    const before = await readCsvInWorker(bytes.slice(), content.workbook.csv.delimiter)
+    before.sheets[0].id = content.workbook.sheets[0].id
+    before.csv!.header = content.workbook.csv.header
+    const unchanged = before.sheets.length === content.workbook.sheets.length &&
+      JSON.stringify(before.sheets) === JSON.stringify(content.workbook.sheets)
+    if (!unchanged) throw new Error('The CSV draft contains edits. Reopen the original to change its import delimiter.')
+    const workbook = await readCsvInWorker(bytes, delimiter)
+    if (!isCurrentExport(snapshot)) throw new Error('The document changed. Choose a delimiter again.')
+    workbook.sheets[0].id = content.workbook.sheets[0].id
+    workbook.csv!.header = content.workbook.csv.header
+    workbook.locale = content.workbook.locale
+    workbook.timezone = content.workbook.timezone
+    replaceWorkbook(workbook)
   }
 
   /** True while the active document still has the captured editor and native revisions. */
@@ -1076,7 +1132,8 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const reference = originalReference(current)
     if (!reference) return
     const bytes = await originalFileBytes(reference, storage.readOriginal)
-    files.download(reference.filename, bytes, current.format === 'docx' ? docxMimeType : current.format === 'pdf' ? 'application/pdf' : 'text/plain;charset=utf-8')
+    files.download(reference.filename, bytes, 'workbook' in current ? spreadsheetMediaTypes[current.format]
+      : current.format === 'docx' ? docxMimeType : current.format === 'pdf' ? 'application/pdf' : 'text/plain;charset=utf-8')
     notify('Original download requested')
   }
 
@@ -1085,7 +1142,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     try {
       if (!workspace.current.activeId) return
       const next = project()
-      if (next.format === 'txt' || next.format === 'docx' || next.format === 'pdf') {
+      if (next.format === 'txt' || next.format === 'docx' || next.format === 'pdf' || 'workbook' in next) {
         await flush(true)
         return
       }
@@ -1104,7 +1161,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       notify(result.handle ? 'Saved to ' + result.filename : 'Downloaded ' + result.filename)
     } catch (error) {
       if (!(error instanceof DOMException && error.name === 'AbortError')) {
-        const target = originalReference(fileRef.current) || fileRef.current.format === 'txt' ? 'draft locally' : 'file'
+        const target = originalReference(fileRef.current) || fileRef.current.format === 'txt' || 'workbook' in fileRef.current ? 'draft locally' : 'file'
         notify(`Could not save the ${target}. ` + errorMessage(error))
       }
     }
@@ -1125,13 +1182,14 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     if (current.id !== version.documentId) throw new Error('This version belongs to another document.')
     const plain = version.content.format === 'txt' ? plainDocumentInfo(version.content.source) : undefined
     const rich = version.content.format === 'docx' ? editor.schema.nodeFromJSON(version.content.document) : undefined
-    const baseline = plain || rich ? undefined : openMarkdown(version.content.source, editor.schema)
+    const spreadsheet = 'workbook' in version.content
+    const baseline = plain || rich || spreadsheet ? undefined : openMarkdown(version.content.source, editor.schema)
     const pending = timer.current !== undefined
     window.clearTimeout(timer.current)
     timer.current = undefined
     restoring.current = true
     nextOpenIntent()
-    const words = plain?.statistics.words ?? documentInfo(rich ?? baseline!.document).statistics.words
+    const words = spreadsheet ? undefined : plain?.statistics.words ?? documentInfo(rich ?? baseline!.document).statistics.words
     const commit = enqueue(() => storage.restoreVersion(current, version.id, persisted.current.get(current.id), words))
     try {
       const next = await commit
@@ -1148,11 +1206,12 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       else if (rich) applyRichDocument(rich)
       else if (baseline) applySession(baseline)
       replaceFile(next)
-      if (!rich) sourceRuntime.current?.apply(next.source)
+      if (!rich && !spreadsheet) sourceRuntime.current?.apply(next.source)
       if (plain || rich) refreshSearch()
       cacheFile(next, words)
       persisted.current.set(next.id, next)
       tabSessions.current.delete(next.id)
+      workbookHistory.current.delete(next.id)
       saveView()
       setEditorEpoch(value => value + 1)
       setVisualDirty(false)
@@ -1171,7 +1230,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const normalized = title.trim() || 'Untitled document'
     if (normalized === fileRef.current.title) return
     replaceFile({ ...fileRef.current, title: normalized })
-    if (fileRef.current.format === 'txt' || fileRef.current.format === 'docx' || fileRef.current.format === 'pdf') { editVersion.current++; refreshSearch() }
+    if (fileRef.current.format === 'txt' || fileRef.current.format === 'docx' || fileRef.current.format === 'pdf' || 'workbook' in fileRef.current) { editVersion.current++; refreshSearch() }
     schedule()
   }
 
@@ -1238,13 +1297,14 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   }
 
   const dirty = liveState ? liveState.dirty || liveState.pending || liveState.conflict !== undefined
-    : file.format === 'txt' || file.format === 'docx' || file.format === 'pdf' ? status === 'pending' || status === 'unavailable' : visualDirty || file.source !== file.savedSource || file.title !== file.savedTitle
+    : file.format === 'txt' || file.format === 'docx' || file.format === 'pdf' || 'workbook' in file ? status === 'pending' || status === 'unavailable' : visualDirty || file.source !== file.savedSource || file.title !== file.savedTitle
   const tabs = collection.layout.tabs.map(tab => {
     const summary = documents.current.get(tab.id)
     const current = tab.id === collection.layout.activeId
     return { ...tab, title: current ? file.title : summary?.title ?? 'Untitled document', dirty: current ? dirty : Boolean(summary?.dirty), status: saveStatuses[tab.id] }
   })
   const recent = collection.library.filter(item => item.openedAt !== undefined && item.deletedAt === undefined).sort((first, second) => second.openedAt! - first.openedAt!).slice(0, 15)
+  const currentWorkbookHistory = workbookHistory.current.get(file.id)
 
   return {
     editor, file, recent, status, sourceView, registerSource, setSource, canEdit, trackView, info, metadata, warnings, activeHeading,
@@ -1253,6 +1313,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     editorEpoch, historyError, loadVersions, createVersion, restoreHistoryVersion,
     captureSearch, subscribeSearch, presentSearch, applySearch, clearSearch,
     project, switchMode, createDocument, openDocument, renameDocument, duplicateDocument, deleteDocument, restoreDocument, closeTab, closeOtherTabs, reopenTab,
-    importFile, save, captureExport, isCurrentExport, exportCopy, downloadOriginal, changeTitle, changeMetadata, jumpToHeading,
+    importFile, save, captureExport, isCurrentExport, exportCopy, downloadOriginal, changeTitle, changeMetadata, jumpToHeading, replaceWorkbook, changeCsvDialect,
+    moveWorkbookHistory, workbookCanUndo: !!currentWorkbookHistory?.undo.length, workbookCanRedo: !!currentWorkbookHistory?.redo.length,
   }
 }

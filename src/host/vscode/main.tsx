@@ -1,16 +1,20 @@
 import { createRoot } from 'react-dom/client'
+import { lazy, Suspense } from 'react'
 import '@fontsource-variable/inter'
 import '@fontsource-variable/manrope'
 import '../../styles.css'
 import './scrollbars.css'
 import './theme.css'
 import App from '../../App'
+import { LazyBoundary } from '../../LazyBoundary'
 import { createWebviewHost } from './host'
 import { connectionMessage, isHostMessage, type ClientMessage, type HostMessage } from './protocol'
 import { createRecoveryJournal } from './recovery'
 import { RecoveryNotice } from './RecoveryNotice'
 import { webviewTheme } from './theme'
 import { PdfWorkspace } from './PdfWorkspace'
+
+const SpreadsheetWorkspace = lazy(() => import('./SpreadsheetWorkspace').then(module => ({ default: module.SpreadsheetWorkspace })))
 
 declare function acquireVsCodeApi(): { postMessage(message: { connection: string; message: ClientMessage }): void }
 
@@ -46,6 +50,11 @@ if (container) {
     if (format === 'PDF') {
       // Read-only PDFs have no native text buffer, recovery journal or edit protocol.
       root.render(<PdfWorkspace transport={transport} initialTheme={theme} />)
+      window.addEventListener('pagehide', () => root.unmount(), { once: true })
+    } else if (format === 'XLSX' || format === 'CSV') {
+      root.render(<LazyBoundary fallback={loading('The Folio spreadsheet editor could not load. Reopen the workbook to retry.')}>
+        <Suspense fallback={loading()}><SpreadsheetWorkspace transport={transport} initialTheme={theme} /></Suspense>
+      </LazyBoundary>)
       window.addEventListener('pagehide', () => root.unmount(), { once: true })
     } else mountEditor()
     function mountEditor() {

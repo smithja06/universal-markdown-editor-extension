@@ -12,6 +12,7 @@ import { containsBinaryControls, decodeTxt, maxTxtImportBytes, TxtInputError } f
 import { isLocalDocumentFile, readLocalDocument } from './localDocumentFile'
 import { DocxEditorProvider, docxViewType } from './docxEditor'
 import { PdfEditorProvider, pdfViewType } from './pdfEditor'
+import { SpreadsheetEditorProvider, csvViewType, xlsxViewType } from './spreadsheetEditor'
 import { savePdfCopy } from './pdfCopy'
 
 const viewType = 'folio.markdown'
@@ -237,7 +238,9 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
           )
           return
         }
-        if (message.type === 'docxFile' || message.type === 'cancelDocxFile' || message.type === 'pdfReload') return
+        if (message.type === 'spreadsheetEdit' || message.type === 'spreadsheetCommand' || message.type === 'spreadsheetCancel' ||
+          message.type === 'spreadsheetExport' || message.type === 'spreadsheetOriginal' || message.type === 'spreadsheetCsvDialect' ||
+          message.type === 'docxFile' || message.type === 'cancelDocxFile' || message.type === 'pdfReload') return
         if (message.type === 'pdfExport') return void this.exportPdf(session, view, client, message)
         session.queued++
         session.operations = session.operations.then(() => {
@@ -628,6 +631,13 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.window.registerCustomEditorProvider(pdfViewType, new PdfEditorProvider(assets), {
     supportsMultipleEditorsPerDocument: true,
   }))
+  const backupRoot = context.storageUri ?? context.globalStorageUri
+  for (const [format, viewType] of [['xlsx', xlsxViewType], ['csv', csvViewType]] as const) {
+    const spreadsheet = new SpreadsheetEditorProvider(format, assets, context.workspaceState, backupRoot)
+    context.subscriptions.push(spreadsheet, vscode.window.registerCustomEditorProvider(viewType, spreadsheet, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }))
+  }
   for (const [command, action] of Object.entries(nativeCommands)) {
     context.subscriptions.push(vscode.commands.registerCommand(command, () => provider.runAction(action)))
   }

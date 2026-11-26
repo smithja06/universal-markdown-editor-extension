@@ -1,0 +1,266 @@
+import { readFile } from 'node:fs/promises'
+import { expect, test, type Page } from '@playwright/test'
+
+async function menu(page: Page, button: string, action: string) {
+  await page.getByRole('button', { name: button, exact: true }).click()
+  await page.getByRole('menuitem', { name: action, exact: true }).click()
+}
+
+const upload = (page: Page, name: string, buffer: Buffer) =>
+  page.locator('input[type=file]').first().setInputFiles({ name, mimeType: 'application/octet-stream', buffer })
+const cell = (page: Page, address: string) => page.getByRole('grid').locator('[data-address="' + address + '"]')
+
+async function enter(page: Page, address: string, input: string) {
+  await cell(page, address).click()
+  const formula = page.getByRole('textbox', { name: 'Formula bar' })
+  await formula.fill(input)
+  await formula.press('Enter')
+}
+
+async function exportCopy(page: Page, format: 'XLSX' | 'CSV' | 'PNG') {
+  const action = format === 'PNG' ? 'Export selected range as PNG…' : 'Export ' + format + ' copy…'
+  await menu(page, 'Export copies', action)
+  const review = page.getByRole('dialog', { name: format === 'PNG' ? 'Export range as PNG' : 'Export ' + format + ' copy' })
+  if (format === 'CSV') await review.getByLabel('Spreadsheet-safe copy').check()
+  const confirmation = review.getByRole('checkbox', { name: /I reviewed the copy options/ })
+  if (await confirmation.count()) await confirmation.check()
+  const pending = page.waitForEvent('download')
+  await review.getByRole('button', { name: 'Export copy', exact: true }).click()
+  const file = await pending
+  return { name: file.suggestedFilename(), bytes: await readFile(await file.path()) }
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByRole('textbox', { name: 'Visual document editor' })).toContainText('Welcome to Folio')
+})
+
+test('creates a workbook, edits cells and sheets, and reloads the recovered draft', async ({ page }) => {
+  await menu(page, 'File', 'New spreadsheet')
+  await expect(page.getByRole('grid', { name: 'Sheet1 worksheet' })).toBeVisible()
+  await enter(page, 'A1', 'Quarterly review')
+  await expect(cell(page, 'A1')).toContainText('Quarterly review')
+  await cell(page, 'A1').click()
+  await page.getByRole('button', { name: 'Bold', exact: true }).click()
+  await page.getByRole('button', { name: 'Add worksheet' }).click()
+  await expect(page.getByRole('tab', { name: 'Sheet2', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await enter(page, 'A1', 'Second sheet')
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+  await expect(page.getByText('Draft saved locally', { exact: true })).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('tab', { name: 'Sheet2', exact: true })).toBeVisible()
+  await page.getByRole('tab', { name: 'Sheet2', exact: true }).click()
+  await expect(cell(page, 'A1')).toContainText('Second sheet')
+  await page.getByRole('tab', { name: 'Sheet1', exact: true }).click()
+  await expect(cell(page, 'A1')).toContainText('Quarterly review')
+  await page.screenshot({ path: 'test-results/spreadsheet-editor.png' })
+})
+
+test('restores a structured spreadsheet version while preserving the earlier editable draft', async ({ page }) => {
+  await menu(page, 'File', 'New spreadsheet')
+  await enter(page, 'A1', 'Earlier value')
+  await menu(page, 'File', 'Version History')
+  const history = page.getByRole('dialog', { name: 'Version History' })
+  await history.getByRole('button', { name: 'Create version' }).click()
+  await expect(history.getByRole('region', { name: 'Spreadsheet version preview' })).toContainText('Earlier value')
+  await history.getByRole('button', { name: 'Close dialog' }).click()
+  await enter(page, 'A1', 'Later value')
+  await menu(page, 'File', 'Version History')
+  await history.getByRole('button', { name: /Preview version.*Manual/ }).click()
+  await history.getByRole('button', { name: 'Restore version' }).click()
+  await history.getByRole('button', { name: 'Confirm restore' }).click()
+  await expect(cell(page, 'A1')).toContainText('Earlier value')
+})
+
+test('retains live undo history while switching between open Folio document tabs', async ({ page }) => {
+  await menu(page, 'File', 'New spreadsheet')
+  await enter(page, 'A1', 'Before')
+  await enter(page, 'A1', 'After')
+  await page.getByRole('tab', { name: 'Getting started', exact: true }).click()
+  await page.getByRole('tab', { name: 'Untitled.xlsx', exact: true }).click()
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(cell(page, 'A1')).toContainText('Before')
+})
+
+test('imports literal CSV and exports a reviewed safe copy while retaining the original bytes', async ({ page }) => {
+  const original = Buffer.from('\ufeffid;note;\r\n00123;=SUM(1);\r\n')
+  await upload(page, 'identifiers.csv', original)
+  await expect(cell(page, 'A2')).toContainText('00123')
+  await expect(cell(page, 'B2')).toContainText('=SUM(1)')
+  const copied = await exportCopy(page, 'CSV')
+  expect(copied.bytes).toEqual(Buffer.from("\ufeffid;note;\r\n00123;'=SUM(1);\r\n"))
+  const pending = page.waitForEvent('download')
+  await menu(page, 'Export copies', 'Download original')
+  expect(await readFile(await (await pending).path())).toEqual(original)
+})
+
+test('retains embedded CSV record breaks while editing a multiline cell', async ({ page }) => {
+  await upload(page, 'multiline.csv', Buffer.from('a,"first\r\nsecond"\r\n'))
+  await cell(page, 'B1').click()
+  const formula = page.getByRole('textbox', { name: 'Formula bar' })
+  await expect(formula).toHaveValue('first\nsecond')
+  await formula.fill('first\nsecond!')
+  await formula.press('Enter')
+  await cell(page, 'B1').dblclick()
+  const inline = page.getByRole('textbox', { name: 'Edit B1' })
+  await expect(inline).toHaveValue('first\nsecond!')
+  await inline.fill('first\nsecond!!')
+  await inline.press('Enter')
+  expect((await exportCopy(page, 'CSV')).bytes.toString()).toBe('a,"first\r\nsecond!!"\r\n')
+})
+
+test('exports an XLSX copy through the browser worker and reopens the value and formula', async ({ page }) => {
+  await menu(page, 'File', 'New spreadsheet')
+  await enter(page, 'A1', '12')
+  await enter(page, 'A2', '=SUM(A1,3)')
+  const exported = await exportCopy(page, 'XLSX')
+  expect(exported.bytes.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]))
+  if (process.env.FOLIO_SPREADSHEET_QA_XLSX) {
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(process.env.FOLIO_SPREADSHEET_QA_XLSX, exported.bytes)
+  }
+  await upload(page, 'reopened.xlsx', exported.bytes)
+  await expect(page.getByRole('tab', { name: 'reopened.xlsx' })).toHaveAttribute('aria-selected', 'true')
+  await expect(cell(page, 'A1')).toContainText('12')
+  await cell(page, 'A2').click()
+  await expect(page.getByRole('textbox', { name: 'Formula bar' })).toHaveValue('=SUM(A1,3)')
+})
+
+test('renders a chosen grid range as a PNG without workbook controls', async ({ page }, info) => {
+  await menu(page, 'File', 'New spreadsheet')
+  await enter(page, 'A1', 'Range image')
+  const name = page.getByRole('textbox', { name: 'Name box' })
+  await name.fill('A1:B2')
+  await name.press('Enter')
+  const { bytes } = await exportCopy(page, 'PNG')
+  expect(bytes.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  expect(bytes.readUInt32BE(16)).toBeLessThan(500)
+  expect(bytes.readUInt32BE(20)).toBeLessThan(150)
+  await info.attach('range', { body: bytes, contentType: 'image/png' })
+})
+
+test('applies range formatting, paints a style, and restores changes with Undo and Redo', async ({ page }) => {
+  await menu(page, 'File', 'New spreadsheet')
+  await enter(page, 'A1', '0.2')
+  await enter(page, 'B1', '0.3')
+  const name = page.getByRole('textbox', { name: 'Name box' })
+  await name.fill('A1:B1')
+  await name.press('Enter')
+  await page.getByRole('button', { name: 'Percentage', exact: true }).click()
+  await expect(cell(page, 'A1')).toContainText('20.00%')
+  await expect(cell(page, 'B1')).toContainText('30.00%')
+  await page.getByRole('button', { name: 'Decrease decimal places' }).click()
+  await expect(cell(page, 'A1')).toContainText('20.0%')
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(cell(page, 'A1')).toContainText('20.00%')
+  await page.getByRole('button', { name: 'Redo', exact: true }).click()
+  await expect(cell(page, 'A1')).toContainText('20.0%')
+  await cell(page, 'A1').click()
+  await menu(page, 'Format painter', 'Copy styles')
+  await enter(page, 'C1', '0.5')
+  await cell(page, 'C1').click()
+  await menu(page, 'Format painter', 'Apply copied styles')
+  await expect(cell(page, 'C1')).toContainText('50.0%')
+  await menu(page, 'Clear cells', 'Clear formatting')
+  await expect(cell(page, 'C1')).toContainText('0.5')
+})
+
+test('keeps the active workbook when CSV import cannot commit its original', async ({ page }) => {
+  await menu(page, 'File', 'New spreadsheet')
+  await enter(page, 'A1', 'Keep this draft')
+  await page.evaluate(() => {
+    const add = IDBObjectStore.prototype.add
+    IDBObjectStore.prototype.add = function (this: IDBObjectStore, value, key) {
+      if (this.name === 'document-originals' && value.reference.filename === 'quota.csv') {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError')
+      }
+      return add.call(this, value, key)
+    }
+  })
+  await upload(page, 'quota.csv', Buffer.from('ID,Name\r\n0042,Example\r\n'))
+  await expect(page.getByText(/could not save the imported draft/i)).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'quota.csv' })).toHaveCount(0)
+  await expect(cell(page, 'A1')).toContainText('Keep this draft')
+})
+
+test('reviews conditional formatting, merges and locale without changing numeric inputs', async ({ page }) => {
+  await menu(page, 'File', 'New spreadsheet')
+  await enter(page, 'A1', '12.5')
+  await page.getByRole('button', { name: 'Conditional formatting', exact: true }).click()
+  const rule = page.getByRole('dialog', { name: 'Conditional formatting' })
+  await rule.getByLabel('Comparison value').fill('10')
+  await rule.getByRole('button', { name: 'Add rule' }).click()
+  await expect(cell(page, 'A1')).toHaveCSS('background-color', 'rgb(220, 236, 227)')
+  await page.getByRole('button', { name: 'Regional settings' }).click()
+  const region = page.getByRole('dialog', { name: 'Regional settings' })
+  await region.getByLabel('Locale').fill('fr-CA')
+  await region.getByLabel('Timezone').fill('America/Toronto')
+  await region.getByRole('button', { name: 'Apply', exact: true }).click()
+  await expect(cell(page, 'A1')).toContainText('12,5')
+  const name = page.getByRole('textbox', { name: 'Name box' })
+  await name.fill('A1:B1')
+  await name.press('Enter')
+  await menu(page, 'Merge cells', 'Merge and center')
+  await expect(cell(page, 'A1')).toHaveAttribute('aria-colspan', '2')
+  await menu(page, 'Merge cells', 'Unmerge cells')
+  await expect(cell(page, 'B1')).toBeVisible()
+  await cell(page, 'A1').click()
+  await expect(page.getByRole('textbox', { name: 'Formula bar' })).toHaveValue('12.5')
+})
+
+test('requires an explicit worksheet when exporting an XLSX draft as CSV', async ({ page }) => {
+  await menu(page, 'File', 'New spreadsheet')
+  await menu(page, 'Export copies', 'Export CSV copy…')
+  const review = page.getByRole('dialog', { name: 'Export CSV copy' })
+  await review.getByLabel('Preserve literal text').check()
+  await review.getByRole('checkbox', { name: /I reviewed the copy options/ }).check()
+  const confirm = review.getByRole('button', { name: 'Export copy', exact: true })
+  await expect(confirm).toBeDisabled()
+  await review.getByLabel('Worksheet').selectOption({ label: 'Sheet1' })
+  await review.getByRole('checkbox', { name: /I reviewed the copy options/ }).check()
+  await expect(confirm).toBeEnabled()
+})
+
+test('pastes a 12,000-cell range as one undoable edit', async ({ page }, info) => {
+  await menu(page, 'File', 'New spreadsheet')
+  const grid = page.getByRole('grid')
+  await grid.focus()
+  const started = performance.now()
+  await grid.evaluate(node => {
+    const text = Array.from({ length: 1200 }, (_, index) => Array(10).fill(String(index + 1)).join('\t')).join('\n')
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+  })
+  await expect(cell(page, 'A1')).toContainText('1')
+  const pasteMs = Math.round(performance.now() - started)
+  const name = page.getByRole('textbox', { name: 'Name box' })
+  await name.fill('J1200')
+  await name.press('Enter')
+  await expect(cell(page, 'J1200')).toContainText('1200')
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(cell(page, 'J1200')).toBeEmpty()
+  console.log('Spreadsheet 12,000-cell paste ' + pasteMs + ' ms')
+  await info.attach('spreadsheet-paste-measurement', { body: String(pasteMs), contentType: 'text/plain' })
+})
+
+test('navigates a 96,000-field CSV with a viewport-sized grid', async ({ page }, info) => {
+  const lines = Array.from({ length: 12_000 }, (_, i) =>
+    Array.from({ length: 8 }, (_, j) => 'Row ' + (i + 1) + ' value ' + (j + 1)).join(','))
+  const bytes = Buffer.from(lines.join('\n'))
+  const started = performance.now()
+  await upload(page, 'large-table.csv', bytes)
+  await expect(cell(page, 'A1')).toContainText('Row 1 value 1')
+  const openMs = performance.now() - started
+  const name = page.getByRole('textbox', { name: 'Name box' })
+  const navigationStarted = performance.now()
+  await name.fill('H12000')
+  await name.press('Enter')
+  await expect(cell(page, 'H12000')).toContainText('Row 12000 value 8')
+  const navigationMs = performance.now() - navigationStarted
+  const renderedCells = await page.getByRole('gridcell').count()
+  expect(renderedCells).toBeLessThan(3000)
+  const report = JSON.stringify({ inputBytes: bytes.length, openMs: Math.round(openMs), navigationMs: Math.round(navigationMs), renderedCells })
+  console.log('Spreadsheet CSV benchmark ' + report)
+  await info.attach('spreadsheet-csv-measurements', { body: report, contentType: 'application/json' })
+})

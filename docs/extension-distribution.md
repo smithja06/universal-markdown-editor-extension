@@ -1,5 +1,11 @@
 # Folio VSIX distribution record
 
+## Phase 9 spreadsheet runtime
+
+Phase 9 pins the IronCalc bindings at 0.9.1 and bundles the XLSX binding under the MIT option. The native codec runs separately and loads the bundled spreadsheet.wasm. The webview uses a lazy inline worker with the same WASM bytes. The published npm package carries notices generated from the Rust lockfile and the Unicode license for its CLDR data. Folio ships these alongside the MIT notice in the standalone build and the VSIX. [Spreadsheet notices](../public/SPREADSHEET_THIRD_PARTY_NOTICES.txt) · [Phase 9 architecture](phase-9-spreadsheets.md)
+
+The final Windows test VSIX contains 204 entries and is 8,270,611 bytes. SHA-256 is 9ca957adaf31873b62b01f532524ef0e8c8cf5c3c22c0734168e1e49aabd9241. Inventory checked archive CRCs, the manifest and files allowlist, every built webview file, and byte equality for the standalone notice and packed npm WASM. The packaged WASM is 2,546,925 bytes with SHA-256 03235ab1bccd87d0847dceba2c9defdd4f4ba9f47f9ddf098e53a423b3cc196c. The spreadsheet notice is 178,868 bytes. A Chromium production network probe saw zero XLSX worker requests on Markdown startup and zero out-of-origin requests while explicitly exercising local spreadsheet calculation.
+
 ## Phase 8 PDF dependencies
 
 Phase 8 adds three pinned runtime dependencies. All are loaded lazily, and Markdown startup requests none of them.

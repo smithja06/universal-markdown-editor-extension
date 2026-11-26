@@ -1,5 +1,11 @@
 # Folio project handoff
 
+## Phase 9 XLSX and CSV
+
+Folio has a shared spreadsheet grid in standalone and through the opt-in XLSX and CSV editors in VS Code. It uses IronCalc 0.9.1 for supported XLSX and calculation workflows. Standalone uses the existing draft and history stores. In VS Code the extension host owns recovered revisions and writes reviewed copies only to new local files. CSV defaults to VS Code’s text editor. Imported originals are retained. [Phase 9 architecture, limits and next chat starter](phase-9-spreadsheets.md) · [Spreadsheet capability matrix](release-capabilities.md#phase-9-spreadsheet-controls) · [Desktop qualification](extension-qualification.md#phase-9-spreadsheet-qualification)
+
+Phase 9 started from PR #18’s merge a04ee68, whose tree is identical to the brief’s Phase 8 checkpoint 4ce25c5. The merged Phase 8 commit was db80c72. Native XLSX and DOCX writes, DOCX widths and resizing, LibreOffice, image and table parity, PDF accessibility and missing-glyph handling, CSP/provider/platform qualification, and the ELK/MELK and pdfmake notice requirements stay open for Phase 10.
+
 ## Product
 
 Folio is an MIT-licensed, local-first editor for multiple document formats. Both hosts support Markdown with Visual, Source, and Split, literal TXT editing, visual editing for the documented DOCX subset, and read-only PDF viewing. Markdown, TXT and DOCX documents export to validated PDF copies after a fidelity review. Standalone Folio adds an IndexedDB library, version history, file import, and export. VS Code offers opt-in Folio editors through **Reopen Editor With**. Markdown and TXT use native text Save. DOCX uses a native custom document for editing and recovery and offers a reviewed copy export. PDF uses a read-only custom editor that never writes the file. Markdown retains Mermaid, KaTeX, workspace links, and the reference-only image picker on qualified local Windows workspaces.

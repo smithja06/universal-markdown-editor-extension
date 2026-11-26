@@ -65,8 +65,9 @@ async function stageExtension(extensions: string, delayEdits: boolean) {
   await Promise.all([
     copyFile('extension/package.json', join(staged, 'package.json')),
     copyFile(join(build, 'extension.cjs'), join(dist, 'extension.cjs')),
-    ...(build === 'extension/dist' && existsSync(join(build, 'docx-codec.cjs'))
-      ? [copyFile(join(build, 'docx-codec.cjs'), join(dist, 'docx-codec.cjs'))] : []),
+    ...['docx-codec.cjs', 'spreadsheet-codec.cjs', 'spreadsheet.wasm']
+      .filter(name => build === 'extension/dist' && existsSync(join(build, name)))
+      .map(name => copyFile(join(build, name), join(dist, name))),
     cp(join(build, 'webview'), webview, { recursive: true }),
   ])
   if (process.env.FOLIO_BENCHMARK === '1') {

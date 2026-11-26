@@ -2,7 +2,9 @@ import 'fake-indexeddb/auto'
 import { beforeAll, expect, it } from 'vitest'
 import { newDocument } from './workspace'
 import { loadLibrary, loadLayout, readDraft, insertDraft, writeDraft, trashDocument, recoverDocument, storeLayout } from './workspaceStorage'
-import { readVersion } from './versions'
+import { readVersion, recordVersion, restoreVersion } from './versions'
+import { spreadsheetContent } from './formats/content'
+import { createWorkbook } from './formats/spreadsheet/model'
 
 const legacy = { id: 'legacy-draft', title: 'Legacy', savedTitle: 'Legacy', source: '# Draft\n', savedSource: '', bom: true, lineEnding: '\r\n' as const, updated: 1 }
 
@@ -67,4 +69,24 @@ it('keeps the complete library and rejects stale edits based on an earlier saved
   const ids = new Set(summaries.map(item => item.id))
   expect(collection.every(file => ids.has(file.id))).toBe(true)
   expect(summaries.every(item => !('source' in item))).toBe(true)
+})
+
+it('stores spreadsheet cell edits and original bytes with recoverable history and rejects competing revisions', async () => {
+  const workbook = createWorkbook('csv')
+  workbook.sheets[0].cells.A1 = { kind: 'text', value: '0123' }
+  const bytes = new Blob(['0123'])
+  const reference = { id: crypto.randomUUID(), filename: 'catalog.csv', sha256: 'fixture', byteLength: bytes.size }
+  const first = newDocument(reference.filename, { ...spreadsheetContent('csv', workbook), originalFile: reference })
+  await insertDraft(first, undefined, { reference, bytes })
+  const initial = (await recordVersion(first, 'manual')).version
+  const revised = structuredClone(workbook)
+  revised.sheets[0].cells.A1.value = '0999'
+  const latest = { ...first, workbook: revised, updated: first.updated + 1 }
+  await writeDraft(latest, undefined, first)
+  const concurrent = structuredClone(first)
+  concurrent.updated += 100
+  await expect(writeDraft(concurrent, undefined, first)).rejects.toThrow('changed')
+  const restored = await restoreVersion(latest, initial.id, latest)
+  expect(restored).toMatchObject({ format: 'csv', workbook, originalFile: reference })
+  expect(await readDraft(first.id)).toEqual(restored)
 })
