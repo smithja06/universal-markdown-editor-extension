@@ -264,3 +264,16 @@ test('navigates a 96,000-field CSV with a viewport-sized grid', async ({ page },
   console.log('Spreadsheet CSV benchmark ' + report)
   await info.attach('spreadsheet-csv-measurements', { body: report, contentType: 'application/json' })
 })
+
+test('double-clicking a header boundary fits the column or row to its contents', async ({ page }) => {
+  await menu(page, 'File', 'New spreadsheet')
+  await enter(page, 'A1', 'A considerably longer value than the column allows')
+  const header = page.getByRole('columnheader').filter({ hasText: /^A$/ })
+  const before = (await header.boundingBox())!.width
+  await header.locator('.folio-sheet-resize').dblclick()
+  await expect.poll(async () => (await header.boundingBox())!.width).toBeGreaterThan(before + 100)
+  const text = await cell(page, 'A1').locator('.folio-sheet-cell-text').evaluate(node => node.scrollWidth <= node.clientWidth)
+  expect(text).toBe(true)
+  await page.getByRole('button', { name: 'Formula reference' }).first().click()
+  await page.screenshot({ path: 'test-results/spreadsheet-formula-reference.png' })
+})

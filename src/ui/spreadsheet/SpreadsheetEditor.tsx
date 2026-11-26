@@ -4,7 +4,7 @@ import { applyEditorText, cellAddress, cellInput, createSheet, editorText, enter
   spreadsheetLimits, type Border, type Cell, type CellStyle, type CellValue, type CsvDialect, type Point, type Range, type Sheet,
   type SpreadsheetFormat, type Workbook } from '../../document/formats/spreadsheet/model'
 import { IconButton, Menu, Modal, type Item } from '../controls'
-import { axisMetrics, contains, defaultHeight, defaultWidth, intersects, rewriteSheetReferences, shiftCsvRows, shiftSheet } from './display'
+import { axisMetrics, contains, defaultHeight, defaultWidth, fitSizes, intersects, rewriteSheetReferences, shiftCsvRows, shiftSheet } from './display'
 import { clipboardCharacterLimit, decodeTypedClipboard, encodeTypedClipboard, typedClipboardMime } from './clipboard'
 import { SpreadsheetGrid, type GridEditing } from './Grid'
 import { SpreadsheetToolbar, type BorderMode, type ToolDialog } from './Toolbar'
@@ -597,6 +597,22 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     const key = axis === 'row' ? 'heights' : 'widths'
     replaceSheet({ ...sheet, [key]: { ...sheet[key], [index]: size } })
   }
+  function autoFit(axis: Axis, index: number) {
+    const start = axis === 'row' ? range.row : range.col
+    const end = axis === 'row' ? range.endRow : range.endCol
+    const whole = axis === 'row' ? range.col === 1 && range.endCol === spreadsheetLimits.cols : range.row === 1 && range.endRow === spreadsheetLimits.rows
+    const hidden = new Set(axis === 'row' ? sheet.hiddenRows : sheet.hiddenCols)
+    const indices = whole && start <= index && index <= end
+      ? Array.from({ length: end - start + 1 }, (_, offset) => start + offset).filter(item => item === index || !hidden.has(item)) : [index]
+    const key = axis === 'row' ? 'heights' : 'widths'
+    const next = { ...sheet[key] }
+    for (const [item, size] of fitSizes(sheet, axis, indices, { locale: workbook.locale, date1904: workbook.date1904,
+      calculated: sheetCalculation, header: workbook.csv?.header })) {
+      if (size === undefined) delete next[item]
+      else next[item] = size
+    }
+    replaceSheet({ ...sheet, [key]: next })
+  }
   function structure(axis: Axis, index: number, insert: boolean) {
     if (formulaCount) { setNotice('Row and column insertion and deletion require a workbook without formulas.'); return }
     const limit = axis === 'row' ? spreadsheetLimits.rows : spreadsheetLimits.cols
@@ -637,6 +653,7 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
       { label: 'Insert ' + name + (axis === 'row' ? ' above' : ' to the left'), disabled, run: () => structure(axis, index, true) },
       { label: 'Delete ' + name, disabled, run: () => structure(axis, index, false) },
       { label: 'Resize ' + name + '…', disabled, run: () => { setResize({ axis, index }); setDialog('resize') } },
+      { label: (axis === 'row' ? 'Auto-fit row height' : 'Auto-fit column width'), disabled, run: () => autoFit(axis, index) },
       { label: 'Hide ' + name, disabled, run: () => toggleHidden(axis, index) },
       { label: 'Show all ' + name + 's', disabled, run: () => toggleHidden(axis) },
       { label: 'Freeze through this ' + name, disabled: disabled || index > 80, run: () => replaceSheet({ ...sheet, [frozen]: index }) },
@@ -714,7 +731,7 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
         onSelect={select} onSelectAxis={selectAxis} onBeginEdit={beginEditing}
         onEdit={value => setEditing(previous => previous && { ...previous, value: applyEditorText(previous.value, value) })}
         onCommit={commitEditing} onCancel={() => { setEditing(undefined); focus() }} onKey={key}
-        onCopy={copy} onPaste={paste} onResize={resizeAxis} onContext={openContext} />
+        onCopy={copy} onPaste={paste} onResize={resizeAxis} onAutoFit={autoFit} onContext={openContext} />
       {notice && <div role="status" className="folio-sheet-toast"><span>{notice}</span><IconButton label="Dismiss message" onClick={() => setNotice('')}><X size={14} /></IconButton></div>}
     </div>
     <footer className="folio-sheet-footer">

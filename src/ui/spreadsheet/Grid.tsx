@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type MouseEvent, type RefObject } from 'react'
 import { cellAddress, columnName, editorText, parseAddress, spreadsheetLimits, type CellStyle, type CellValue, type Point, type Range, type Sheet } from '../../document/formats/spreadsheet/model'
-import { axisMetrics, columnHeaderHeight, contains, defaultHeight, defaultWidth, displayCell, intersects, rowHeaderWidth, ruleAppearance, wrapHeights } from './display'
+import { axisMetrics, columnHeaderHeight, contains, defaultHeight, defaultWidth, displayCell, fontFamily, intersects, rowHeaderWidth, ruleAppearance, wrapHeights } from './display'
 
 export interface GridEditing { value: string; key: string }
 
@@ -26,10 +26,7 @@ interface GridProps {
   onPaste: (event: ClipboardEvent<HTMLDivElement>) => void
   onContext: (event: MouseEvent, point: Point, axis?: 'row' | 'col') => void
   onResize: (axis: 'row' | 'col', index: number, value: number) => void
-}
-
-export function fontFamily(font?: string) {
-  return font ? '"' + [...font].filter(char => char !== '"' && char !== '\\' && char.charCodeAt(0) >= 32).join('') + '", Arial, sans-serif' : undefined
+  onAutoFit: (axis: 'row' | 'col', index: number) => void
 }
 
 function cellStyle(style?: CellStyle): CSSProperties {
@@ -57,7 +54,7 @@ function cellStyle(style?: CellStyle): CSSProperties {
 const frozenViewLimit = 80
 
 export function SpreadsheetGrid({ sheet, locale, date1904, calculated, range, active, scrollRef, editing, readOnly, header,
-  onSelect, onSelectAxis, onBeginEdit, onEdit, onCommit, onCancel, onKey, onCopy, onPaste, onResize, onContext }: GridProps) {
+  onSelect, onSelectAxis, onBeginEdit, onEdit, onCommit, onCancel, onKey, onCopy, onPaste, onResize, onAutoFit, onContext }: GridProps) {
   const rows = useMemo(() => axisMetrics(spreadsheetLimits.rows, defaultHeight, wrapHeights(sheet, locale, date1904), sheet.hiddenRows), [sheet, locale, date1904])
   const cols = useMemo(() => axisMetrics(spreadsheetLimits.cols, defaultWidth, sheet.widths, sheet.hiddenCols), [sheet.widths, sheet.hiddenCols])
   const conditional = useMemo(() => ruleAppearance(sheet, calculated), [sheet, calculated])
@@ -237,7 +234,8 @@ export function SpreadsheetGrid({ sheet, locale, date1904, calculated, range, ac
           onPointerDown={event => { if (event.button === 0) { scrollRef.current?.focus({ preventScroll: true }); onSelectAxis('col', col, event.shiftKey) } }}
           onContextMenu={event => onContext(event, { row: active.row, col }, 'col')}>
           <span>{columnName(col)}</span>
-          {!readOnly && <span className="folio-sheet-resize col" onPointerDown={event => resize(event, 'col', col)} />}
+          {!readOnly && <span className="folio-sheet-resize col" title="Drag to resize. Double-click to fit contents."
+            onPointerDown={event => resize(event, 'col', col)} onDoubleClick={event => { event.stopPropagation(); onAutoFit('col', col) }} />}
         </div>)}
       </div>
       <div className="folio-sheet-row-band" style={{ left: viewport.left, top: viewport.top, width: rowHeaderWidth, height: viewport.height }}>
@@ -247,7 +245,8 @@ export function SpreadsheetGrid({ sheet, locale, date1904, calculated, range, ac
           onPointerDown={event => { if (event.button === 0) { scrollRef.current?.focus({ preventScroll: true }); onSelectAxis('row', row, event.shiftKey) } }}
           onContextMenu={event => onContext(event, { row, col: active.col }, 'row')}>
           <span>{row}</span>
-          {!readOnly && <span className="folio-sheet-resize row" onPointerDown={event => resize(event, 'row', row)} />}
+          {!readOnly && <span className="folio-sheet-resize row" title="Drag to resize. Double-click to fit contents."
+            onPointerDown={event => resize(event, 'row', row)} onDoubleClick={event => { event.stopPropagation(); onAutoFit('row', row) }} />}
         </div>)}
       </div>
       <div className="folio-sheet-corner" aria-hidden="true" style={{ left: viewport.left, top: viewport.top, width: rowHeaderWidth, height: columnHeaderHeight }} />

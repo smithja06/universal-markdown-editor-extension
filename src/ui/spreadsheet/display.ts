@@ -1,4 +1,4 @@
-import { cellAddress, parseAddress, rangeSize, spreadsheetLimits, type Cell, type CellValue, type ConditionalRule, type Point, type Range, type Sheet } from '../../document/formats/spreadsheet/model'
+import { cellAddress, parseAddress, rangeSize, spreadsheetLimits, type Cell, type CellStyle, type CellValue, type ConditionalRule, type Point, type Range, type Sheet } from '../../document/formats/spreadsheet/model'
 
 export const defaultWidth = 104
 export const defaultHeight = 26
@@ -143,6 +143,70 @@ export function wrapHeights(sheet: Sheet, locale: string, date1904: boolean) {
     heights[point.row] = Math.min(360, Math.max(heights[point.row] ?? defaultHeight, Math.ceil(lines * size * 1.3 + 6)))
   }
   return heights
+}
+
+export function fontFamily(font?: string) {
+  return font ? '"' + [...font].filter(char => char !== '"' && char !== '\\' &&char.charCodeAt(0) >= 32).join('') + '", Arial, sans-serif' : undefined
+}
+
+export type MeasureText = (text: string, font: string) => number
+
+let measureContext: CanvasRenderingContext2D | null | undefined
+export const measureText: MeasureText = (text, font) => {
+  measureContext ??= document.createElement('canvas').getContext('2d')
+  if (!measureContext) return text.length * 8
+  measureContext.font = font
+  return measureContext.measureText(text).width
+}
+
+function cellFont(style: CellStyle | undefined, header: boolean) {
+  const size = (style?.size ?? 11) * 4 / 3
+  const weight = style?.bold ? 700 : header ? 650 : 400
+  return { size, font: (style?.italic ? 'italic ' : '') + weight + ' ' + size + 'px ' + (fontFamily(style?.font) ?? 'Arial, sans-serif') }
+}
+
+function wrappedLines(text: string, font: string, width: number, measure: MeasureText) {
+  let lines = 1
+  let current = ''
+  for (const word of text.split(/(?<=\s)/)) {
+    if (measure((current + word).trimEnd(), font) <= width) { current += word; continue }
+    if (current) { lines++; current = '' }
+    for (const char of word) {
+      if (current && measure((current + char).trimEnd(), font) > width) { lines++; current = '' }
+      current += char
+    }
+  }
+  return lines
+}
+
+// Horizontal cell padding (5px per side) plus the 1px grid border, and vertical padding (2px per side) plus border.
+const fitPaddingX = 11
+const fitPaddingY = 5
+
+export interface FitOptions { locale: string; date1904: boolean; calculated?: Record<string, CellValue>; header?: boolean; measure?: MeasureText }
+
+/** Sizes that fit the content of each index; `undefined` marks an index with no content, which returns to the default size. */
+export function fitSizes(sheet: Sheet, axis: 'row' | 'col', indices: number[], { locale, date1904, calculated, header = false, measure = measureText }: FitOptions) {
+  const wanted = new Set(indices)
+  const sizes = new Map<number, number | undefined>(indices.map(index => [index, undefined]))
+  const spans = sheet.merges.filter(merge => axis === 'col' ? merge.col !== merge.endCol : merge.row !== merge.endRow)
+  for (const [address, cell] of Object.entries(sheet.cells)) {
+    const point = parseAddress(address)
+    if (!point || !wanted.has(point[axis]) || spans.some(merge => contains(merge, point.row, point.col))) continue
+    const text = displayCell(cell, locale, date1904, calculated?.[address])
+    if (!text) continue
+    const { size, font } = cellFont(cell.style, header && point.row === 1)
+    let fit: number
+    if (axis === 'col') {
+      fit = Math.ceil(Math.max(...text.split('\n').map(line => measure(line, font)))) + fitPaddingX + 2
+    } else {
+      const available = (sheet.widths[point.col] ?? defaultWidth) - fitPaddingX
+      const lines = text.split('\n').reduce((sum, line) => sum + (cell.style?.wrap && line ? wrappedLines(line, font, available, measure) : 1), 0)
+      fit = Math.max(defaultHeight, Math.ceil(lines * size * 1.3 + fitPaddingY))
+    }
+    sizes.set(point[axis], Math.min(1000, Math.max(fit, axis === 'col' ? 24 : 16, sizes.get(point[axis]) ?? 0)))
+  }
+  return sizes
 }
 
 export interface ConditionalAppearance { color?: string; bar?: number }
