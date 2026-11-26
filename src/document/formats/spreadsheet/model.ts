@@ -1,3 +1,5 @@
+import type { WorkbookTheme } from './themes'
+
 export type SpreadsheetFormat = 'xlsx' | 'csv'
 export type CellValue = string | number | boolean
 export type CellKind = 'text' | 'number' | 'boolean' | 'formula' | 'error' | 'date'
@@ -75,6 +77,8 @@ export interface Workbook {
   warnings: string[]
   coreProperties?: Partial<Record<XlsxCoreProperty, string>>
   csv?: CsvDialect
+  /** The XLSX workbook color theme. Cell colors are stored as resolved RGB, so changing the theme does not recolor cells. */
+  theme?: WorkbookTheme
 }
 
 export type XlsxCoreProperty = 'title' | 'subject' | 'creator' | 'description' | 'identifier' | 'language'

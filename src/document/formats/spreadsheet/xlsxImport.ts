@@ -1,4 +1,5 @@
 import { Model } from '@ironcalc/wasm-xlsx'
+import { isWorkbookTheme } from './themes'
 import { zipSync } from 'fflate'
 import { cellAddress, createSheet, parseAddress, parseRange, rangeSize, safeSpreadsheetLink, spreadsheetLimits, type Cell, type CellValue, type Sheet, type Workbook } from './model'
 import { conditionalRules, decodeStyle, isDateFormat } from './xlsxStyles'
@@ -269,6 +270,9 @@ export function importXlsx(bytes: Uint8Array<ArrayBuffer>): Workbook {
     compatibleRelationships.push({ ...relation, target })
   }
   sanitized['xl/_rels/workbook.xml.rels'] = writeRelations(compatibleRelationships)
+  // IronCalc keeps the theme color scheme. Note whether the original declares its own font scheme.
+  const themePart = sanitized['xl/theme/theme1.xml']
+  const themeFonts = themePart ? /<a:fontScheme[^>]*\bname="([^"]*)"/.exec(new TextDecoder().decode(themePart))?.[1] : undefined
   const model = Model.fromXlsx(zipSync(sanitized, { level: 0 }), 'Workbook', 'en', 'UTC', 'en')
   try {
     const props = model.getWorksheetsProperties()
@@ -307,6 +311,11 @@ export function importXlsx(bytes: Uint8Array<ArrayBuffer>): Workbook {
       }
       return sheet
     })
-    return { sheets: imported, date1904, imported: true, warnings: [...warnings], ...regional, ...(coreProperties ? { coreProperties } : {}) }
+    const theme = model.getTheme()
+    if (themeFonts && themeFonts !== theme.name && !/^Office\b/.test(themeFonts)) {
+      warnings.add('The workbook theme colors are kept. Theme fonts and effects are written with IronCalc defaults.')
+    }
+    return { sheets: imported, date1904, imported: true, warnings: [...warnings], ...regional, ...(coreProperties ? { coreProperties } : {}),
+      ...(isWorkbookTheme(theme) ? { theme: { ...theme } } : {}) }
   } finally { model.free() }
 }

@@ -3,6 +3,7 @@ import {
   type CsvDialect, type SpreadsheetFormat, type Workbook,
 } from '../../document/formats/spreadsheet/model'
 import { isFingerprint, isGeneration, isId, isRecord, isUri } from './recovery'
+import { isWorkbookTheme } from '../../document/formats/spreadsheet/themes'
 
 export const spreadsheetSnapshotLimit = 32 * 1024 * 1024
 export const spreadsheetPngLimit = 24 * 1024 * 1024
@@ -189,7 +190,7 @@ export function readSpreadsheetSnapshot(source: string): Workbook {
     candidate.sheets.length > spreadsheetLimits.sheets || !text(candidate.locale, 128) || !text(candidate.timezone, 128) ||
     !bool(candidate.date1904) || !bool(candidate.imported) || !Array.isArray(candidate.warnings) ||
     candidate.warnings.length > 256 || !candidate.warnings.every(warning => text(warning, 2048)) ||
-    !optional(candidate.csv, csvDialect)) throw invalid()
+    !optional(candidate.csv, csvDialect) || !optional(candidate.theme, isWorkbookTheme)) throw invalid()
   try { new Intl.DateTimeFormat(candidate.locale, { timeZone: candidate.timezone }) }
   catch { throw invalid() }
   const ids = new Set<string>()
