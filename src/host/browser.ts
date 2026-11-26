@@ -5,6 +5,7 @@ import { normalizeAppearance } from '../document/workspace'
 import { browserSearch } from './browserSearch'
 import type { AppearancePreferences, FileOperations, FolioHost } from './contracts'
 import { downloadFile as download } from './download'
+import { browserPdfRuntime, inspectPdf } from '../document/formats/pdf/engine'
 
 type FilePicker = (options: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<WritableMarkdownHandle>
 
@@ -68,6 +69,10 @@ export const browserHost: FolioHost = {
   docx: {
     async read(bytes, signal) { return (await import('../document/formats/docx/workerClient')).readDocxInWorker(bytes, signal) },
     async write(document, signal) { return (await import('../document/formats/docx/workerClient')).writeDocxInWorker(document, signal) },
+  },
+  pdf: {
+    // The engine module is small. pdf.js and its worker load only on first use.
+    async inspect(bytes, signal) { return inspectPdf(bytes, await browserPdfRuntime(), signal) },
   },
   appearance,
   clipboard: {

@@ -3,7 +3,7 @@ import * as vscode from 'vscode'
 
 const assetAttribute = /\b(src|href)="\.\/(assets\/[\w./-]+)"/g
 
-export async function webviewHtml(webview: vscode.Webview, root: vscode.Uri, format: 'Markdown' | 'TXT' | 'DOCX' = 'Markdown'): Promise<string> {
+export async function webviewHtml(webview: vscode.Webview, root: vscode.Uri, format: 'Markdown' | 'TXT' | 'DOCX' | 'PDF' = 'Markdown'): Promise<string> {
   const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, 'index.html'))
   const template = new TextDecoder().decode(bytes)
   const nonce = randomBytes(18).toString('base64')

@@ -41,7 +41,7 @@ interface TabSession {
 
 export function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error) }
 
-export function useDocument(notify: (message: string) => void, visualScroll: RefObject<HTMLDivElement | null>, { storage, files, docx, workspaceDocx, liveDocument, resources }: FolioHost, viewSettings: WorkspaceView) {
+export function useDocument(notify: (message: string) => void, visualScroll: RefObject<HTMLDivElement | null>, { storage, files, docx, pdf, workspaceDocx, liveDocument, resources }: FolioHost, viewSettings: WorkspaceView) {
   const collection = useDocumentCollection(storage)
   const { workspace, documents, drafts, persisted, writing, enqueue, changeLayout, loadCollection, loadFile, persist, insertImported, cache: cacheFile, opened, updateSummary, forget } = collection
   const [file, setFile] = useState<DocumentFile>(() => newDocument('Getting started', { source: welcomeSource, lineEnding: '\n', bom: false }))
@@ -123,6 +123,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   const project = useCallback(() => {
     const baseline = session.current
     const file = fileRef.current
+    if (file.format === 'pdf') return file
     if (file.format === 'docx' && editor) {
       const node = editor.state.doc
       if (richProjection.current?.node !== node) {
@@ -220,6 +221,8 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   }, [liveDocument, saveView, workspace])
 
   const automaticVersion = useCallback(async (candidate: DocumentFile, trigger: Exclude<VersionTrigger, 'manual'>) => {
+    // Imported PDFs are read-only, so their immutable original is the only revision.
+    if (candidate.format === 'pdf') return
     try {
       const result = await storage.recordVersion(candidate, trigger)
       if (fileRef.current.id === candidate.id && result.status !== 'deferred') setHistoryError('')
@@ -480,9 +483,9 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     if (!editor) return
     const resumed = tabSessions.current.get(next.id)
     tabSessions.current.delete(next.id)
-    const baseline = next.format === 'txt' || next.format === 'docx' ? null : resumed?.markdown ?? openMarkdown(next.source, editor.schema)
+    const baseline = next.format === 'txt' || next.format === 'docx' || next.format === 'pdf' ? null : resumed?.markdown ?? openMarkdown(next.source, editor.schema)
     if (next.format === 'txt') view = { ...view, mode: 'source' }
-    if (next.format === 'docx') view = { ...view, mode: 'visual' }
+    if (next.format === 'docx' || next.format === 'pdf') view = { ...view, mode: 'visual' }
     transition.current++
     editVersion.current++
     parsed.current = null
@@ -501,6 +504,15 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
         const { doc, tr } = editor.state
         editor.view.dispatch(tr.setSelection(TextSelection.between(doc.resolve(Math.min(view.visual.anchor, doc.content.size)), doc.resolve(Math.min(view.visual.head, doc.content.size)))).setMeta('addToHistory', false))
       }
+    } else if (next.format === 'pdf') {
+      // Release the previous rich document. The PDF viewer owns page content.
+      editor.view.updateState(EditorState.create({ schema: editor.schema, plugins: editor.state.plugins }))
+      session.current = null
+      paired.current = null
+      setInfo(emptyInfo)
+      setActiveHeading('')
+      setMetadata('')
+      setWarnings(0)
     } else if (!baseline) {
       session.current = null
       paired.current = null
@@ -529,7 +541,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
       editor.state.doc.descendants(node => { if (node.type.name === 'rawBlock' || node.type.name === 'rawInline') preserved++ })
       setWarnings(preserved)
     }
-    if (sourceRuntime.current && next.format !== 'docx') {
+    if (sourceRuntime.current && next.format !== 'docx' && next.format !== 'pdf') {
       sourceRuntime.current.apply(resumed?.source ?? next.source)
       if (!resumed?.source) applySourceSelection(view)
     }
@@ -866,7 +878,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const current = workspace.current
     const view: TabView = current.tabs.find(tab => tab.id === next.id) ?? current.closed.find(tab => tab.id === next.id) ?? { id: next.id, mode: next.format === 'txt' ? 'source' : 'visual' }
     if (created) {
-      const words = (next.format === 'txt' ? plainDocumentInfo(next.source) : documentInfo(
+      const words = next.format === 'pdf' ? 0 : (next.format === 'txt' ? plainDocumentInfo(next.source) : documentInfo(
         next.format === 'docx' ? editor.schema.nodeFromJSON(next.document) : openMarkdown(next.source, editor.schema).document)).statistics.words
       void persistDraft(next, 'checkpoint', words, true)
     } else void queueVersion(next, 'checkpoint')
@@ -907,7 +919,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const next = { ...current, title: nextTitle, updated: Math.max(Date.now(), current.updated + 1) }
     if (workspace.current.activeId === id) {
       replaceFile(next)
-      if (next.format === 'txt' || next.format === 'docx') { editVersion.current++; refreshSearch() }
+      if (next.format === 'txt' || next.format === 'docx' || next.format === 'pdf') { editVersion.current++; refreshSearch() }
     }
     await persistDraft(next)
     if (!workspace.current.tabs.some(tab => tab.id === id)) forget(id)
@@ -918,10 +930,12 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const original = workspace.current.activeId === id ? project() : await loadFile(id)
     if (!original) throw new Error('This document could not be found.')
     const { source, lineEnding, bom, original: encoding } = original
-    const extensionPattern = original.format === 'txt' ? /\.txt$/i : original.format === 'docx' ? /\.docx$/i : /\.(md|markdown)$/i
+    const extensionPattern = original.format === 'txt' ? /\.txt$/i : original.format === 'docx' ? /\.docx$/i : original.format === 'pdf' ? /\.pdf$/i : /\.(md|markdown)$/i
     const extension = extensionPattern.exec(original.title)?.[0] ?? ''
     const stem = extension ? original.title.slice(0, -extension.length) : original.title
-    const copy = newDocument(availableTitle(stem + ' copy' + extension, documents.current.values()), original.format === 'docx'
+    const copy = newDocument(availableTitle(stem + ' copy' + extension, documents.current.values()), original.format === 'pdf'
+      ? { format: 'pdf', schemaVersion: 1, pageCount: original.pageCount, features: original.features, pdfTitle: original.pdfTitle, source: '', lineEnding: '\n', bom: false, originalFile: original.originalFile }
+      : original.format === 'docx'
       ? { format: 'docx', schemaVersion: 1, source, lineEnding: '\n', bom: false, document: original.document, issues: original.issues, originalFile: original.originalFile }
       : original.format === 'txt'
       ? { format: 'txt', schemaVersion: original.schemaVersion, source, bom, lineEnding, mixedLineEndings: original.mixedLineEndings, originalFile: original.originalFile }
@@ -1000,13 +1014,13 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     importing.current = controller
     const isCurrent = () => openIntent.current === intent && !restoring.current && !controller.signal.aborted
     try {
-      const imported = await importDocument(input, controller.signal, docx)
+      const imported = await importDocument(input, controller.signal, docx, pdf?.inspect)
       if (!isCurrent()) return
       if (imported.status === 'rejected') { notify(imported.diagnostics.map(issue => issue.message).join(' ')); return }
       const title = availableTitle(input.name.replace(/\.md$/i, ''), documents.current.values())
       const next = newDocument(title, imported.content)
       const plain = next.format === 'txt' ? plainDocumentInfo(next.source) : undefined
-      const words = plain?.statistics.words ?? documentInfo(next.format === 'docx' ? editor.schema.nodeFromJSON(next.document) : openMarkdown(next.source, editor.schema).document).statistics.words
+      const words = next.format === 'pdf' ? 0 : plain?.statistics.words ?? documentInfo(next.format === 'docx' ? editor.schema.nodeFromJSON(next.document) : openMarkdown(next.source, editor.schema).document).statistics.words
       try { await insertImported(next, words, imported.original, controller.signal) }
       catch (error) {
         if (isCurrent()) notify('Could not save the imported draft. ' + errorMessage(error))
@@ -1024,7 +1038,14 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
 
   function captureExport(): ExportSnapshot {
     const content = project()
-    return { id: content.id, revision: editVersion.current, title: content.title, content, nativeRevision: workspaceDocx ? liveDocument?.read().revision : undefined }
+    return { id: content.id, revision: editVersion.current, title: content.title, content, nativeRevision: liveDocument?.read().revision }
+  }
+
+  /** True while the active document still has the captured editor and native revisions. */
+  function isCurrentExport(snapshot: ExportSnapshot) {
+    const native = liveDocument?.read()
+    return snapshot.id === workspace.current.activeId && snapshot.revision === editVersion.current &&
+      (!native || (!native.pending && native.available && native.conflict === undefined && snapshot.nativeRevision === native.revision))
   }
 
   function exportCopy(snapshot: ExportSnapshot, lineEnding?: LineEnding, signal?: AbortSignal, confirmDocx?: boolean) {
@@ -1055,7 +1076,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const reference = originalReference(current)
     if (!reference) return
     const bytes = await originalFileBytes(reference, storage.readOriginal)
-    files.download(reference.filename, bytes, current.format === 'docx' ? docxMimeType : 'text/plain;charset=utf-8')
+    files.download(reference.filename, bytes, current.format === 'docx' ? docxMimeType : current.format === 'pdf' ? 'application/pdf' : 'text/plain;charset=utf-8')
     notify('Original download requested')
   }
 
@@ -1064,7 +1085,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     try {
       if (!workspace.current.activeId) return
       const next = project()
-      if (next.format === 'txt' || next.format === 'docx') {
+      if (next.format === 'txt' || next.format === 'docx' || next.format === 'pdf') {
         await flush(true)
         return
       }
@@ -1150,7 +1171,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     const normalized = title.trim() || 'Untitled document'
     if (normalized === fileRef.current.title) return
     replaceFile({ ...fileRef.current, title: normalized })
-    if (fileRef.current.format === 'txt' || fileRef.current.format === 'docx') { editVersion.current++; refreshSearch() }
+    if (fileRef.current.format === 'txt' || fileRef.current.format === 'docx' || fileRef.current.format === 'pdf') { editVersion.current++; refreshSearch() }
     schedule()
   }
 
@@ -1217,7 +1238,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   }
 
   const dirty = liveState ? liveState.dirty || liveState.pending || liveState.conflict !== undefined
-    : file.format === 'txt' || file.format === 'docx' ? status === 'pending' || status === 'unavailable' : visualDirty || file.source !== file.savedSource || file.title !== file.savedTitle
+    : file.format === 'txt' || file.format === 'docx' || file.format === 'pdf' ? status === 'pending' || status === 'unavailable' : visualDirty || file.source !== file.savedSource || file.title !== file.savedTitle
   const tabs = collection.layout.tabs.map(tab => {
     const summary = documents.current.get(tab.id)
     const current = tab.id === collection.layout.activeId
@@ -1232,6 +1253,6 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
     editorEpoch, historyError, loadVersions, createVersion, restoreHistoryVersion,
     captureSearch, subscribeSearch, presentSearch, applySearch, clearSearch,
     project, switchMode, createDocument, openDocument, renameDocument, duplicateDocument, deleteDocument, restoreDocument, closeTab, closeOtherTabs, reopenTab,
-    importFile, save, captureExport, exportCopy, downloadOriginal, changeTitle, changeMetadata, jumpToHeading,
+    importFile, save, captureExport, isCurrentExport, exportCopy, downloadOriginal, changeTitle, changeMetadata, jumpToHeading,
   }
 }

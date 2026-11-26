@@ -65,13 +65,19 @@ Phase 7A completed steps 1 and 2. Phase 7B covers steps 3 and 4 for the document
 - TXT uses the Markdown-derived revision and recovery bridge over a native `TextDocument`, with literal CodeMirror and strict UTF-8 input checks reused from Phase 7A. Local files with uniform LF or CRLF and optional BOM support native saves. Folio uses a read-only preview for endings and encodings the native buffer cannot faithfully represent.
 - DOCX uses a native `CustomDocument` with Phase 7B's canonical model, original bytes, SHA-256, and import diagnostics. Format-tagged messages carry bounded edits against the current revision. The extension host validates the proposed tree and journals it before emitting a native history event. ZIP and XML processing run on open, revert, and reviewed copy export in a separately bundled worker. A native backup stores the package and the editable revision. If its revision lags an acknowledged journal, both remain available.
 - Workspace DOCX writes require a file operation that can enforce the expected destination identity through publication. Neither a preliminary fingerprint nor an overwrite option provides that operation on the generic API. Phase 7C delivers reviewed copy export with no workspace mutation and keeps the write gate open. [Host details](extension-readiness.md#phase-7c-text-and-binary-editors) · [Qualification](extension-qualification.md#phase-7c-multi-format-qualification)
-- Starting in Phase 8, implement the extension integration in the format's own phase. PDF can reuse the lazy host-worker and read-only capability boundaries with a page-oriented model. XLSX will need sheet-aware binary history and its own package and save qualification.
+- Starting in Phase 8, implement the extension integration in the format's own phase. Phase 8 delivered PDF as a read-only custom editor with no workspace writes, plus new-file-only PDF copies. XLSX will need sheet-aware binary history and its own package and save qualification.
 
 ## Phase 8 PDF boundary
 
 - Open PDFs in a read-only page viewer with page navigation, zoom and page rendering. Offer search, selection and copy where usable embedded text is available. Image-only pages can be viewed. OCR, PDF content editing, annotation or form authoring, redaction, signatures and encrypted files are deferred. Render locally with cancellation and bounded page work. Embedded scripts, forms and external actions are inert.
 - Export eligible Markdown, TXT and DOCX drafts to newly generated PDFs using a paginated rendering path. Preview page breaks and disclose unsupported content or rendering changes. An opened PDF stays a page-oriented document, with an exact-original download available. PDF-to-editable-text conversion and saving changes back into imported PDFs are deferred.
 - Keep page numbers and optional text positions in the PDF model. The common lifecycle needs read-only capabilities, cancellable page work and lazy viewport rendering without requiring every adapter to expose `source` or a rich-text tree.
+
+### Phase 8 implementation
+
+- `PdfContent` is a fourth discriminated payload. It carries page count, detected features and the immutable original reference, and its `source` is always empty. `formatCapabilities` reports `readOnly`. The registry identifies `.pdf`, validates the bytes with the viewer engine before committing, and rejects PDF export of an imported PDF. `recordVersion` refuses PDF content, and the standalone lifecycle skips automatic versions for it.
+- Text positions are not persisted. The viewer extracts a bounded per-page text index from the original and maps matches to pdf.js text-layer items. The shared `PdfViewer` serves standalone, the VS Code `CustomReadonlyEditorProvider` and the export preview.
+- PDF export is a target of the existing revision-bound export pattern rather than a new adapter. Markdown, TXT and DOCX build a print model from their own representation (rendered ProseMirror tree, literal text, structured DOCX model), never through Markdown for other formats. Generation and validation are local and bounded. [Phase 8 architecture](phase-8-pdf.md)
 
 ## Phase 9 CSV and XLSX boundary
 

@@ -2,6 +2,7 @@ import type { Command, ShortcutPlatform } from '../core/commands'
 import type { MarkdownFile, WritableMarkdownHandle } from '../document/files'
 import type { DocumentFormat, OriginalFile } from '../document/formats/content'
 import type { DocxCodec, DocxIssue } from '../document/formats/docx/model'
+import type { PdfInspector } from '../document/formats/pdf/model'
 import type { Appearance, DocumentFile, DocumentSummary, WorkspaceLayout } from '../document/workspace'
 import type { DocumentVersion, VersionResult, VersionSummary, VersionTrigger } from '../document/versions'
 import type { SearchOptions, TextMatch } from '../core/search'
@@ -75,6 +76,10 @@ export interface FolioHost {
   storage: DocumentStorage
   files: FileOperations
   docx?: DocxCodec
+  /** Validates PDF imports with the same local engine the viewer uses. */
+  pdf?: { inspect: PdfInspector }
+  /** VS Code saves reviewed PDF copies as new files. Standalone uses `files.download`. */
+  pdfExport?: { save(filename: string, bytes: Uint8Array, revision: number): Promise<{ status: 'saved'; name: string } | { status: 'cancelled' }> }
   workspaceDocx?: { file(kind: 'original' | 'copy', revision: number, signal?: AbortSignal): Promise<Uint8Array<ArrayBuffer>> }
   liveDocument?: LiveDocument
   appearance: AppearancePreferences

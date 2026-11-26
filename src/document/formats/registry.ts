@@ -3,10 +3,11 @@ import { decodeMarkdown, encodeMarkdown, markdownFilename, sanitizeFilename } fr
 import { makeDocxContent, type DocumentContent, type DocumentFormat, type DocxContent, type LineEnding, type MarkdownContent, type OriginalFile, type OriginalFileReference, type TxtContent } from './content'
 import { docxMaxFileBytes, docxMimeType, type DocxCodec, type DocxIssue } from './docx/model'
 import { containsBinaryControls, decodeTxt, maxTxtImportBytes, TxtInputError } from './txt'
+import { pdfLimits, pdfMimeType, PdfInputError, type PdfInspector } from './pdf/model'
 
 export interface FormatDiagnostic {
   severity: 'info' | 'warning' | 'error'
-  code: 'unsupported-format' | 'invalid-encoding' | 'invalid-text' | 'size-limit' | 'mixed-line-endings' | 'stale-export' | 'missing-original' | 'invalid-docx' | 'docx-fidelity'
+  code: 'unsupported-format' | 'invalid-encoding' | 'invalid-text' | 'size-limit' | 'mixed-line-endings' | 'stale-export' | 'missing-original' | 'invalid-docx' | 'docx-fidelity' | 'invalid-pdf' | 'encrypted-pdf' | 'pdf-content' | 'read-only'
   message: string
   feature?: string
   location?: string
@@ -91,6 +92,8 @@ const docxAdapter = {
   },
 }
 
+const pdfAdapter = { extensions: ['.pdf'], mediaType: pdfMimeType, capabilities: { richText: false, exportCopy: false, readOnly: true } }
+
 function docxIssue(issue: DocxIssue): FormatDiagnostic {
   return { ...issue, code: 'docx-fidelity', severity: issue.effect === 'preserved' ? 'info' : 'warning' }
 }
@@ -109,29 +112,38 @@ async function prepareDocx(content: DocxContent, options: ExportOptions, signal?
   }
 }
 
-export const openFileTypes = [...Object.values(adapters).flatMap(adapter => adapter.extensions), ...docxAdapter.extensions, 'text/markdown', 'text/plain', docxMimeType].join(',')
+export const openFileTypes = [...Object.values(adapters).flatMap(adapter => adapter.extensions), ...docxAdapter.extensions, ...pdfAdapter.extensions, 'text/markdown', 'text/plain', docxMimeType, pdfMimeType].join(',')
 
 export function identifyFormat(filename: string): DocumentFormat | undefined {
   const extension = /\.[^.]+$/.exec(filename.toLowerCase())?.[0]
   if (extension === '.docx') return 'docx'
+  if (extension === '.pdf') return 'pdf'
   return (Object.keys(adapters) as (keyof typeof adapters)[]).find(format => extension && adapters[format].extensions.includes(extension))
 }
 
-export function formatCapabilities(content: DocumentContent) {
-  return content.format === 'docx' ? docxAdapter.capabilities : adapters[content.format ?? 'markdown'].capabilities
+export function formatCapabilities(content: Pick<DocumentContent, 'format'>): { richText: boolean; exportCopy: boolean; readOnly?: boolean } {
+  return content.format === 'pdf' ? pdfAdapter.capabilities : content.format === 'docx' ? docxAdapter.capabilities : adapters[content.format ?? 'markdown'].capabilities
 }
 
-export async function importDocument(input: FileInput, signal?: AbortSignal, codec?: DocxCodec): Promise<Imported> {
+export async function importDocument(input: FileInput, signal?: AbortSignal, codec?: DocxCodec, inspectPdf?: PdfInspector): Promise<Imported> {
   const format = identifyFormat(input.name)
-  if (!format) return reject('unsupported-format', 'Choose a .md, .markdown, .txt or .docx file.')
+  if (!format) return reject('unsupported-format', 'Choose a .md, .markdown, .txt, .docx or .pdf file.')
   signal?.throwIfAborted()
   if (format === 'txt' && input.size !== undefined && input.size > maxTxtImportBytes) return reject('size-limit', 'TXT imports are limited to 16 MiB.')
   if (format === 'docx' && (input.size ?? 0) > docxMaxFileBytes) return reject('size-limit', 'DOCX imports are limited to 24 MiB.')
+  const pdfLimit = `PDF imports are limited to ${pdfLimits.fileBytes / 1024 / 1024} MiB.`
+  if (format === 'pdf' && (input.size ?? 0) > pdfLimits.fileBytes) return reject('size-limit', pdfLimit)
   const bytes = new Uint8Array(await input.arrayBuffer())
   signal?.throwIfAborted()
   let content: DocumentContent | Rejected
   try {
-    if (format === 'docx') {
+    if (format === 'pdf') {
+      if (bytes.byteLength > pdfLimits.fileBytes) return reject('size-limit', pdfLimit)
+      if (!inspectPdf) return reject('invalid-pdf', 'PDF viewing is unavailable in this host.')
+      const summary = await inspectPdf(bytes, signal)
+      content = { format: 'pdf', schemaVersion: 1, pageCount: summary.pageCount, features: summary.features,
+        ...(summary.title ? { pdfTitle: summary.title } : {}), source: '', lineEnding: '\n', bom: false }
+    } else if (format === 'docx') {
       if (bytes.byteLength > docxMaxFileBytes) return reject('size-limit', 'DOCX imports are limited to 24 MiB.')
       if (!codec) return reject('invalid-docx', 'DOCX import is available in standalone Folio.')
       const result = await codec.read(bytes, signal)
@@ -140,12 +152,14 @@ export async function importDocument(input: FileInput, signal?: AbortSignal, cod
   }
   catch (error) {
     signal?.throwIfAborted()
+    if (error instanceof PdfInputError) return reject(error.code === 'encrypted' ? 'encrypted-pdf' : error.code === 'size-limit' ? 'size-limit' : 'invalid-pdf', error.message)
+    if (format === 'pdf') return reject('invalid-pdf', 'The file is not a readable PDF document.')
     if (format === 'docx') return reject('invalid-docx', error instanceof Error ? error.message : 'The DOCX package could not be opened.')
     if (!(error instanceof TypeError)) throw error
     return reject('invalid-encoding', 'The file is not valid UTF-8.')
   }
   if ('status' in content) return content
-  if (content.format !== 'txt' && content.format !== 'docx') return { status: 'editable', content, diagnostics: [] }
+  if (content.format !== 'txt' && content.format !== 'docx' && content.format !== 'pdf') return { status: 'editable', content, diagnostics: [] }
   const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('')
   signal?.throwIfAborted()
   const reference = { id: crypto.randomUUID(), filename: input.name, sha256, byteLength: bytes.length }
@@ -158,6 +172,7 @@ export async function exportDocument(snapshot: ExportSnapshot, isCurrent: (snaps
   signal?.throwIfAborted()
   if (!isCurrent(snapshot)) return stale()
   const { content, title } = snapshot
+  if (content.format === 'pdf') return reject('read-only', 'Imported PDFs are read-only. Use Download original to save the exact file.')
   const adapter = content.format === 'docx' ? docxAdapter : adapters[content.format ?? 'markdown']
   const prepared = await (content.format === 'docx' ? prepareDocx(content, options, signal, codec)
     : content.format === 'txt' ? adapters.txt.encode(content, options, readOriginal) : adapters.markdown.encode(content, options, readOriginal))

@@ -41,6 +41,7 @@ function dateRange(documentId: string, kind?: VersionKind) {
 
 function contentOf(file: DocumentFile): DocumentContent {
   const { source, bom, lineEnding } = file
+  if (file.format === 'pdf') throw new Error('PDF documents are read-only and have no version history.')
   if (file.format === 'docx') {
     const { format, schemaVersion, document, issues, originalFile } = file
     return { format, schemaVersion, document, issues, source, bom: false, lineEnding: '\n', ...(originalFile ? { originalFile } : {}) }

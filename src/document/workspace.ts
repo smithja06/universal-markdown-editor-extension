@@ -30,7 +30,7 @@ export interface Appearance {
 const defaultAppearance: Appearance = { theme: 'light', accentColor: forestAccent, font: 'Default', fontSize: 16, lineHeight: 1.7, width: 'page', lineNumbers: true, wordWrap: true, splitRatio: 0.5, syncScroll: false }
 
 export function newDocument(title = 'Untitled document', file: DocumentContent = { source: '', lineEnding: '\n', bom: false }): DocumentFile {
-  const content: DocumentContent = file.format === 'txt' || file.format === 'docx' ? file : { ...file, format: 'markdown', schemaVersion: 1 }
+  const content: DocumentContent = file.format === 'txt' || file.format === 'docx' || file.format === 'pdf' ? file : { ...file, format: 'markdown', schemaVersion: 1 }
   return { ...content, title, id: crypto.randomUUID(), savedSource: file.source, savedTitle: title, updated: Date.now() }
 }
 
@@ -106,7 +106,7 @@ export const emptyLayout: WorkspaceLayout = { activeId: null, tabs: [], closed: 
 
 export function draftSummary(file: DocumentFile, existing?: DocumentSummary, words?: number): DocumentSummary {
   return { ...existing, id: file.id, title: file.title, ...(file.format ? { format: file.format } : {}), createdAt: existing?.createdAt ?? file.updated,
-    updated: file.updated, words: words ?? existing?.words, dirty: file.format !== 'txt' && file.format !== 'docx' && (file.source !== file.savedSource || file.title !== file.savedTitle) }
+    updated: file.updated, words: words ?? existing?.words, dirty: file.format !== 'txt' && file.format !== 'docx' && file.format !== 'pdf' && (file.source !== file.savedSource || file.title !== file.savedTitle) }
 }
 
 export function withoutTabs(layout: WorkspaceLayout, ids: Set<string>, remember: boolean): WorkspaceLayout {
@@ -121,7 +121,7 @@ export function withoutTabs(layout: WorkspaceLayout, ids: Set<string>, remember:
 export function availableTitle(requested: string, existing: Iterable<DocumentSummary>) {
   const key = (value: string) => value.normalize('NFKC').toLowerCase().replace(/\.(md|markdown)$/i, '')
   const titles = new Set(Array.from(existing).filter(item => item.deletedAt === undefined).map(item => key(item.title)))
-  const extension = /\.(?:md|markdown|txt|docx)$/i.exec(requested)?.[0] ?? ''
+  const extension = /\.(?:md|markdown|txt|docx|pdf)$/i.exec(requested)?.[0] ?? ''
   const stem = extension ? requested.slice(0, -extension.length) : requested
   let title = stem
   for (let suffix = 2; titles.has(key(title + extension)); suffix++) title = `${stem} (${suffix})`

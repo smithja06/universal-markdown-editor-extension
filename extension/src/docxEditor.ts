@@ -7,6 +7,7 @@ import { cancellation, DocxDocument, docxCopyNotice, docxExternalNotice, fingerp
 import { isLocalDocumentFile, readLocalDocument } from './localDocumentFile'
 import { runDocxWorker } from './docxWorker'
 import { webviewHtml } from './webview'
+import { savePdfCopy } from './pdfCopy'
 
 export const docxViewType = 'folio.docx'
 const prefix = recoveryPrefix + 'docx.'
@@ -26,6 +27,7 @@ interface Client {
   editing?: boolean
   acknowledgement?: Ack
   request?: { id: number; controller: AbortController }
+  pdfExport?: number
 }
 
 interface View {
@@ -125,6 +127,7 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
         return
       }
       if (message.type === 'docxFile') return void this.deliver(document, view, client, message)
+      if (message.type === 'pdfExport') return void this.exportPdf(document, view, client, message)
       if (message.type === 'copy') {
         const { id, text } = message
         if (text.length > docxMaxWorkspaceSnapshot) return this.post(view, client, { type: 'copied', id, copied: false })
@@ -330,6 +333,20 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
     } catch (error) {
       if (!signal.aborted) reply({ error: errorMessage(error) })
     } finally { if (client.request?.id === id) client.request = undefined }
+  }
+
+  /** Saves a reviewed PDF copy of the current draft revision without touching the DOCX. */
+  private async exportPdf(document: DocxDocument, view: View, client: Client, { id, revision, filename, bytes }: Extract<ClientMessage, { type: 'pdfExport' }>) {
+    const reply = (outcome: Omit<Extract<HostMessage, { type: 'pdfExportResult' }>, 'type' | 'id'>) => this.post(view, client, { type: 'pdfExportResult', id, ...outcome })
+    if (client.pdfExport !== undefined) return reply({ status: 'error', message: 'A PDF copy is already being saved.' })
+    const current = () => view.client === client && !!document.rich && document.revision === revision && !document.lifetime.signal.aborted
+    if (!current()) return reply({ status: 'error', message: stale })
+    client.pdfExport = id
+    try {
+      const result = await savePdfCopy(document.uri, filename, new Uint8Array(bytes), current)
+      reply(result.status === 'saved' ? { status: 'saved', name: result.name } : { status: 'cancelled' })
+    } catch (error) { reply({ status: 'error', message: errorMessage(error) }) }
+    finally { client.pdfExport = undefined }
   }
 
   async saveCustomDocument(document: DocxDocument, token: vscode.CancellationToken) {

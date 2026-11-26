@@ -11,6 +11,8 @@ import { confirmWorkspaceImage, pickWorkspaceImage, type WorkspaceImageSelection
 import { containsBinaryControls, decodeTxt, maxTxtImportBytes, TxtInputError } from '../../src/document/formats/txt'
 import { isLocalDocumentFile, readLocalDocument } from './localDocumentFile'
 import { DocxEditorProvider, docxViewType } from './docxEditor'
+import { PdfEditorProvider, pdfViewType } from './pdfEditor'
+import { savePdfCopy } from './pdfCopy'
 
 const viewType = 'folio.markdown'
 const txtViewType = 'folio.txt'
@@ -24,6 +26,7 @@ type Acknowledgement = Extract<HostMessage, { type: 'state' | 'accepted' }>
 type EditMessage = Extract<ClientMessage, { type: 'edit' }>
 type CommandMessage = Extract<ClientMessage, { type: 'command' }>
 type ImagePickerMessage = Extract<ClientMessage, { type: 'pickWorkspaceImage' | 'confirmWorkspaceImage' }>
+type PdfExportMessage = Extract<ClientMessage, { type: 'pdfExport' }>
 
 interface View {
   panel: vscode.WebviewPanel
@@ -40,6 +43,7 @@ interface Client {
   generation: number
   backupBase: { revision: number; source: string; encoded?: PackedRecovery['base'] }
   imageReads: number
+  pdfExport?: number
   navigation?: number
   imagePickerRequest?: number
   imageSelections?: { id: number; revision: number; image: WorkspaceImageSelection }[]
@@ -233,7 +237,8 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
           )
           return
         }
-        if (message.type === 'docxFile' || message.type === 'cancelDocxFile') return
+        if (message.type === 'docxFile' || message.type === 'cancelDocxFile' || message.type === 'pdfReload') return
+        if (message.type === 'pdfExport') return void this.exportPdf(session, view, client, message)
         session.queued++
         session.operations = session.operations.then(() => {
           if (view.client !== client) return
@@ -400,6 +405,23 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
       if (client.imagePickerRequest === id) client.imagePickerRequest = undefined
       if (browsing) this.imagePickerOpen = false
     }
+  }
+
+  /** Saves a reviewed PDF copy only while the native document still has the reviewed revision. */
+  private async exportPdf(session: Session, view: View, client: Client, { id, revision, filename, bytes }: PdfExportMessage) {
+    const reply = (outcome: Omit<Extract<HostMessage, { type: 'pdfExportResult' }>, 'type' | 'id'>) =>
+      this.post(view, { type: 'pdfExportResult', id, ...outcome }, client)
+    if (client.pdfExport !== undefined) return reply({ status: 'error', message: 'A PDF copy is already being saved.' })
+    const current = () => !view.disposed && view.client === client && session.state.available && !session.document.isClosed &&
+      session.document.version === revision
+    if (!current()) return reply({ status: 'error', message: 'The document changed after the PDF preview was generated. Export again from the current revision.' })
+    client.pdfExport = id
+    try {
+      const result = await savePdfCopy(session.document.uri, filename, new Uint8Array(bytes), current)
+      reply(result.status === 'saved' ? { status: 'saved', name: result.name } : { status: 'cancelled' })
+    } catch (error) {
+      reply({ status: 'error', message: error instanceof Error ? error.message.slice(0, 900) : 'VS Code could not save the PDF copy.' })
+    } finally { client.pdfExport = undefined }
   }
 
   private invalidateResources(resources: readonly vscode.Uri[]) {
@@ -603,6 +625,9 @@ export async function activate(context: vscode.ExtensionContext) {
     supportsMultipleEditorsPerDocument: true,
   }))
   context.subscriptions.push(docx, vscode.window.registerCustomEditorProvider(docxViewType, docx))
+  context.subscriptions.push(vscode.window.registerCustomEditorProvider(pdfViewType, new PdfEditorProvider(assets), {
+    supportsMultipleEditorsPerDocument: true,
+  }))
   for (const [command, action] of Object.entries(nativeCommands)) {
     context.subscriptions.push(vscode.commands.registerCommand(command, () => provider.runAction(action)))
   }
