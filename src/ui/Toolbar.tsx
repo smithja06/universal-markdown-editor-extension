@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/core'
+import { adjustSelectedColumnWidth, columnWidthStep, setSelectedColumnWidth } from '../editor/tableWidth'
 import { useEditorState } from '@tiptap/react'
 import {
   AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, ChevronDown, Code2, Ellipsis, Highlighter,
@@ -108,6 +109,10 @@ export function tableItems(editor: Editor, docx?: boolean): Item[] {
     { label: 'Add column before', run: addColumn('addColumnBefore') },
     { label: 'Add column after', run: addColumn('addColumnAfter') },
     { label: 'Toggle header row', run: () => editor.chain().focus().toggleHeaderRow().run() },
+    { label: '', divider: true },
+    { label: `Widen column (+${columnWidthStep} px)`, run: () => adjustSelectedColumnWidth(editor, columnWidthStep) },
+    { label: `Narrow column (−${columnWidthStep} px)`, run: () => adjustSelectedColumnWidth(editor, -columnWidthStep) },
+    { label: 'Reset column width', run: () => setSelectedColumnWidth(editor, null) },
     ...(docx ? [] : [
       ...alignments.slice(0, 3).map(([value, Icon]) => ({ label: 'Align cells ' + value, icon: <Icon size={15} />, run: () => editor.chain().focus().setCellAttribute('cellAlign', value).run() })),
       { label: 'Merge cells', disabled: !editor.can().mergeCells(), run: () => editor.chain().focus().mergeCells().run() },

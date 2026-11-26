@@ -1,6 +1,6 @@
 import type { JSONContent } from '@tiptap/core'
 import { zipSync } from 'fflate'
-import { canonicalDocx, docxMaxFileBytes, docxMaxXmlElements, docxMaxXmlPartBytes } from './model'
+import { canonicalDocx, docxColumnWidth, docxColumnWidthValue, docxMaxFileBytes, docxMaxXmlElements, docxMaxXmlPartBytes } from './model'
 
 const word = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const office = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -171,12 +171,17 @@ export function writeDocx(document: JSONContent): Uint8Array<ArrayBuffer> {
       .map(edge => `<w:${edge} w:val="single" w:sz="4" w:color="auto"/>`).join('')
     // Word combines adjacent tables with an identical style. Both styles use the same grid appearance.
     const style = tableStyles[tableCount++ % tableStyles.length]
-    const geometry = `<w:tblPr><w:tblStyle w:val="${style}"/><w:tblW w:w="0" w:type="auto"/><w:tblBorders>${border}</w:tblBorders></w:tblPr>
-<w:tblGrid>${'<w:gridCol/>'.repeat(columns)}</w:tblGrid>`
+    // Column widths are twips. A fully specified grid uses fixed layout so Word keeps the widths. Columns without a width size automatically.
+    const widths = rows[0].content!.map(cell => docxColumnWidthValue(cell.attrs?.colwidth))
+    const twips = widths.map(width => width === undefined ? undefined : width * docxColumnWidth.twips)
+    const fixed = twips.every(width => width !== undefined)
+    const tableWidth = fixed ? `<w:tblW w:w="${twips.reduce((sum, width) => sum! + width!, 0)}" w:type="dxa"/>` : '<w:tblW w:w="0" w:type="auto"/>'
+    const geometry = `<w:tblPr><w:tblStyle w:val="${style}"/>${tableWidth}<w:tblBorders>${border}</w:tblBorders>${fixed ? '<w:tblLayout w:type="fixed"/>' : ''}</w:tblPr>
+<w:tblGrid>${twips.map(width => width === undefined ? '<w:gridCol/>' : `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid>`
     const body = rows.map(row => {
       const cells = row.content!
       const header = cells[0].type === 'tableHeader' ? '<w:trPr><w:tblHeader/></w:trPr>' : ''
-      return `<w:tr>${header}${cells.map(cell => `<w:tc>${cell.content!.map(p => paragraph(p)).join('')}</w:tc>`).join('')}</w:tr>`
+      return `<w:tr>${header}${cells.map((cell, index) => `<w:tc>${twips[index] === undefined ? '' : `<w:tcPr><w:tcW w:w="${twips[index]}" w:type="dxa"/></w:tcPr>`}${cell.content!.map(p => paragraph(p)).join('')}</w:tc>`).join('')}</w:tr>`
     }).join('')
     return `<w:tbl>${geometry}${body}</w:tbl>`
   }

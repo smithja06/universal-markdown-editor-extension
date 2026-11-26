@@ -208,3 +208,42 @@ test.each([
 ] satisfies [string, JSONContent][])('rejects %s before creating a DOCX package', (_reason, input) => {
   expect(() => writeDocx(input)).toThrow()
 })
+
+test('writes column widths as a fixed Word grid that reimports to the same pixels', async () => {
+  const { readDocx } = await import('./read')
+  const { canonicalDocx } = await import('./model')
+  const cell = (value: string, width?: number, type = 'tableCell'): JSONContent =>
+    ({ type, ...(width ? { attrs: { colwidth: [width] } } : {}), content: [paragraph(text(value))] })
+  const model = document({ type: 'table', content: [
+    { type: 'tableRow', content: [cell('Name', 180, 'tableHeader'), cell('Amount', 96, 'tableHeader')] },
+    // A row added after resizing carries no widths. The column width still applies.
+    { type: 'tableRow', content: [cell('Coffee'), cell('4.50')] },
+  ] })
+  const part = openParts(model)('word/document.xml')
+  expect(elements(part, 'gridCol').map(column => column.getAttributeNS(word, 'w'))).toEqual(['2700', '1440'])
+  expect(elements(part, 'tblLayout')[0]?.getAttributeNS(word, 'type')).toBe('fixed')
+  expect(elements(part, 'tblW')[0]?.getAttributeNS(word, 'w')).toBe('4140')
+  expect(elements(part, 'tcW').map(width => width.getAttributeNS(word, 'w'))).toEqual(['2700', '1440', '2700', '1440'])
+  // Word requires tblLayout after tblBorders inside tblPr.
+  expect([...elements(part, 'tblPr')[0].children].map(child => child.localName)).toEqual(['tblStyle', 'tblW', 'tblBorders', 'tblLayout'])
+  const reread = readDocx(writeDocx(model))
+  expect(reread.issues.map(issue => issue.feature)).not.toContain('Table formatting')
+  expect(reread.issues.map(issue => issue.feature)).not.toContain('Table cell formatting')
+  expect(reread.document).toEqual(canonicalDocx(model))
+  expect(reread.document.content?.[0].content?.[1].content?.[0].attrs).toEqual({ colwidth: [180] })
+})
+
+test('keeps automatic columns beside resized ones and rejects widths outside the editable range', async () => {
+  const { readDocx } = await import('./read')
+  const { canonicalDocx } = await import('./model')
+  const model = document({ type: 'table', content: [{ type: 'tableRow', content: [
+    { type: 'tableCell', attrs: { colwidth: [150] }, content: [paragraph(text('Wide'))] },
+    { type: 'tableCell', attrs: { colwidth: null }, content: [paragraph(text('Auto'))] },
+  ] }] })
+  const part = openParts(model)('word/document.xml')
+  expect(elements(part, 'tblLayout')).toHaveLength(0)
+  expect(elements(part, 'tblW')[0]?.getAttributeNS(word, 'type')).toBe('auto')
+  expect(readDocx(writeDocx(model)).document).toEqual(canonicalDocx(model))
+  expect(() => canonicalDocx(document({ type: 'table', content: [{ type: 'tableRow', content: [
+    { type: 'tableCell', attrs: { colwidth: [5] }, content: [paragraph(text('Narrow'))] }] }] }))).toThrow(/24 to 2000/)
+})

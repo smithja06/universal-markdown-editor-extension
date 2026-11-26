@@ -384,3 +384,28 @@ describe('Markdown source preservation', () => {
     }
   })
 })
+
+describe('Markdown table column widths', () => {
+  it('writes resized columns as an HTML table that reopens with the same widths', () => {
+    const { editor, session } = open('# Widths\n\n| Item | Cost |\n| --- | --- |\n| Tea | 3 |\n')
+    const tr = editor.state.tr
+    editor.state.doc.descendants((node, position) => {
+      if (node.type.spec.tableRole?.includes('cell') && ['Item', 'Tea'].includes(node.textContent)) tr.setNodeMarkup(position, undefined, { ...node.attrs, colwidth: [200] })
+    })
+    editor.view.dispatch(tr)
+    const { source } = writeMarkdown(session, editor.state.doc)
+    expect(source).toContain('<th colwidth="200">')
+    const reopened = open(source)
+    const widths: unknown[] = []
+    reopened.editor.state.doc.descendants(node => { if (node.type.spec.tableRole?.includes('cell')) widths.push(node.attrs.colwidth) })
+    expect(widths).toEqual([[200], null, [200], null])
+    editor.destroy()
+    reopened.editor.destroy()
+  })
+
+  it('keeps a table with an invalid width attribute as raw HTML', () => {
+    const { editor } = open('<table><tbody><tr><td colwidth="wide"><p>x</p></td></tr></tbody></table>\n')
+    expect(editor.state.doc.firstChild?.type.name).toBe('rawBlock')
+    editor.destroy()
+  })
+})

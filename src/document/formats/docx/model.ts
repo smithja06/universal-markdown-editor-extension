@@ -18,6 +18,13 @@ export const docxMaxFileBytes = 24 * 1024 * 1024
 export const docxMaxXmlPartBytes = 8 * 1024 * 1024
 export const docxMaxXmlElements = 240_000
 export const docxMaxWorkspaceSnapshot = 12 * 1024 * 1024
+/** Table column widths are whole CSS pixels. Word stores twentieths of a point, so 1 px is exactly 15 twips at 96 DPI. */
+export const docxColumnWidth = { min: 24, max: 2000, twips: 15 } as const
+
+export function docxColumnWidthValue(value: unknown) {
+  const width = Array.isArray(value) && value.length === 1 ? value[0] : undefined
+  return Number.isInteger(width) && width >= docxColumnWidth.min && width <= docxColumnWidth.max ? width as number : undefined
+}
 
 export function readDocxSnapshot(source: string): JSONContent {
   if (source.length > docxMaxWorkspaceSnapshot) throw new Error('The DOCX draft exceeds Folio’s workspace editing limit.')
@@ -79,6 +86,10 @@ export function canonicalDocx(input: JSONContent): JSONContent {
     const attrs = node.attrs ?? {}
     for (const [key, value] of Object.entries(attrs)) {
       if (key === 'level' && type === 'heading' || key === 'start' && type === 'orderedList') continue
+      if (key === 'colwidth' && (type === 'tableCell' || type === 'tableHeader')) {
+        if (value !== null && value !== undefined && docxColumnWidthValue(value) === undefined) invalid('Use a column width from 24 to 2000 pixels.')
+        continue
+      }
       if (value !== null && value !== undefined && (!Object.hasOwn(defaults, key) || defaults[key] !== value)) {
         invalid(`Unsupported ${key} formatting.`)
       }
@@ -106,11 +117,20 @@ export function canonicalDocx(input: JSONContent): JSONContent {
     if (!content.length && !optionalContent.has(type)) invalid(`A ${type} is missing content.`)
     if (type === 'listItem' && content.length !== 1) invalid('A list item supports one paragraph.')
     if (type === 'table') {
-      const columns = content[0].content?.length
+      const columns = content[0].content?.length ?? 0
       for (const [index, row] of content.entries()) {
         const cells = row.content ?? []
         if (cells.length !== columns || cells.some(cell => cell.type !== cells[0].type) || index > 0 && cells[0].type === 'tableHeader') {
           invalid('Tables must be rectangular with at most one header row at the top.')
+        }
+      }
+      // A column has one width. The first width set in the column applies to every cell, including rows added later.
+      for (let column = 0; column < columns; column++) {
+        const width = (node.content ?? []).map(row => docxColumnWidthValue(row.content?.[column]?.attrs?.colwidth)).find(value => value !== undefined)
+        if (width === undefined) continue
+        for (const row of content) {
+          const { type: cellType, content: cellContent } = row.content![column]
+          row.content![column] = { type: cellType, attrs: { colwidth: [width] }, ...(cellContent ? { content: cellContent } : {}) }
         }
       }
     }

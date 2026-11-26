@@ -276,12 +276,16 @@ describe('DOCX import', () => {
     expect(result.document.content?.[0]?.content).toEqual([{ type: 'text', text: `Start${'\t'.repeat(100_001)}End` }])
   })
 
-  it('reports custom geometry of an otherwise supported table', () => {
-    const result = readDocx(fixture(`<w:tbl><w:tblGrid><w:gridCol w:w="4200"/></w:tblGrid><w:tr><w:tc>${paragraph('Cell')}</w:tc></w:tr></w:tbl>`))
+  it('keeps grid column widths and reports geometry it cannot edit', () => {
+    const kept = readDocx(fixture(`<w:tbl><w:tblGrid><w:gridCol w:w="4200"/></w:tblGrid><w:tr><w:tc>${paragraph('Cell')}</w:tc></w:tr></w:tbl>`))
+    expect(kept.document.content?.[0].content?.[0].content?.[0].attrs).toEqual({ colwidth: [280] })
+    expect(kept.issues.map(issue => issue.feature)).not.toContain('Table formatting')
+    const result = readDocx(fixture(`<w:tbl><w:tblGrid><w:gridCol w:w="100"/></w:tblGrid><w:tr><w:tc>${paragraph('Cell')}</w:tc></w:tr></w:tbl>`))
     expect(result.issues).toEqual([
       expect.objectContaining({ feature: 'Table formatting', effect: 'approximated' }),
       expect.objectContaining({ feature: 'Document body', effect: 'preserved' }),
     ])
+    expect(result.document.content?.[0].content?.[0].content?.[0].attrs).toBeUndefined()
   })
 
   it('rejects merged tables instead of dropping cell content', () => {

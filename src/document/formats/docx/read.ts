@@ -1,5 +1,5 @@
 import type { JSONContent } from '@tiptap/core'
-import { canonicalDocx, safeDocxLink, type DocxIssue } from './model'
+import { canonicalDocx, docxColumnWidth, safeDocxLink, type DocxIssue } from './model'
 import { enabled, readNumbering, readStyles, rejectHiddenProperties } from './readDefinitions'
 import {
   isWord, readPackage, relatedPart, relationshipAttribute, wordAttr, wordChild, wordChildren,
@@ -369,12 +369,23 @@ export function readDocx(bytes: Uint8Array<ArrayBuffer>): { document: JSONConten
     const gridColumns = grid ? wordChildren(grid, 'gridCol') : undefined
     const customBorders = borders?.children.some(border => !isWord(border) || wordAttr(border) !== 'single' ||
       !['4', undefined].includes(wordAttr(border, 'sz')) || !['auto', undefined].includes(wordAttr(border, 'color')))
-    if ((style && !['TableGrid', 'FolioTableGrid', 'TableNormal'].includes(style)) ||
-      (width && wordAttr(width, 'type') !== 'auto') || customBorders ||
-      gridColumns?.some(column => wordAttr(column, 'w') !== undefined) || properties?.children.some(child => (
-        !isWord(child) || !['tblStyle', 'tblW', 'tblBorders'].includes(child.tag.local)
+    // Grid widths in twips become whole-pixel column widths. Values outside the editable range keep Folio's automatic width.
+    const columnWidths = gridColumns?.map(column => {
+      const twips = Number(wordAttr(column, 'w'))
+      const pixels = Math.round(twips / docxColumnWidth.twips)
+      return Number.isFinite(twips) && pixels >= docxColumnWidth.min && pixels <= docxColumnWidth.max ? pixels : undefined
+    })
+    const gridTotal = columnWidths?.every(value => value !== undefined)
+      ? columnWidths.reduce((sum, value) => sum! + value! * docxColumnWidth.twips, 0) : undefined
+    const layout = properties && wordChild(properties, 'tblLayout')
+    const folioWidth = !width || wordAttr(width, 'type') === 'auto' ||
+      wordAttr(width, 'type') === 'dxa' && Number(wordAttr(width, 'w')) === gridTotal
+    if ((style && !['TableGrid', 'FolioTableGrid', 'TableNormal'].includes(style)) || !folioWidth || customBorders ||
+      gridColumns?.some((column, index) => wordAttr(column, 'w') !== undefined && columnWidths?.[index] === undefined) ||
+      layout && wordAttr(layout, 'type') !== 'fixed' || properties?.children.some(child => (
+        !isWord(child) || !['tblStyle', 'tblW', 'tblBorders', 'tblLayout'].includes(child.tag.local)
       ))) {
-      approximate('table-formatting', 'Table formatting', location, 'Table widths and styling use Folio defaults.')
+      approximate('table-formatting', 'Table formatting', location, 'Table width, layout and styling use Folio defaults. Column widths are kept.')
     }
     const rows = wordChildren(element, 'tr')
     if (!rows.length || grid && grid.children.length !== gridColumns?.length ||
@@ -401,15 +412,19 @@ export function readDocx(bytes: Uint8Array<ArrayBuffer>): { document: JSONConten
         if (cellProperties && (wordChild(cellProperties, 'vMerge') || wordChild(cellProperties, 'hMerge') ||
           (span && wordAttr(span) !== '1'))) return complex()
         const cellWidth = cellProperties && wordChild(cellProperties, 'tcW')
-        if (cellWidth && wordAttr(cellWidth, 'type') !== 'auto' ||
+        const gridWidth = columnWidths?.[cellIndex]
+        const matchesGrid = cellWidth && wordAttr(cellWidth, 'type') === 'dxa' && gridWidth !== undefined &&
+          Number(wordAttr(cellWidth, 'w')) === gridWidth * docxColumnWidth.twips
+        if (cellWidth && wordAttr(cellWidth, 'type') !== 'auto' && !matchesGrid ||
           cellProperties?.children.some(child => !isWord(child) || !['gridSpan', 'tcW'].includes(child.tag.local))) {
           approximate('table-cell-formatting', 'Table cell formatting', location, 'Table cell formatting uses Folio defaults.')
         }
         const paragraphs = wordChildren(cell, 'p')
         if (!paragraphs.length || cell.children.some(child => child !== cellProperties && !isWord(child, 'p'))) return complex()
         const cellLocation = `${location}, row ${rowIndex + 1}, cell ${cellIndex + 1}`
-        return block(header && rowIndex === 0 ? 'tableHeader' : 'tableCell',
+        const node = block(header && rowIndex === 0 ? 'tableHeader' : 'tableCell',
           paragraphs.map((item, index) => paragraph(item, `${cellLocation}, paragraph ${index + 1}`, true).node))
+        return gridWidth === undefined ? node : { ...node, attrs: { colwidth: [gridWidth] } }
       }))
     }))
   }
