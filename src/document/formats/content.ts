@@ -1,8 +1,9 @@
 import type { MarkdownFile } from '../files'
 import type { JSONContent } from '@tiptap/core'
 import { canonicalDocx, docxText, type DocxIssue } from './docx/model'
+import type { PdfFeatures } from './pdf/model'
 
-export type DocumentFormat = 'markdown' | 'txt' | 'docx'
+export type DocumentFormat = 'markdown' | 'txt' | 'docx' | 'pdf'
 export type LineEnding = MarkdownFile['lineEnding']
 
 export interface OriginalFileReference {
@@ -46,8 +47,27 @@ export interface DocxContent {
   original?: never
 }
 
+/** A read-only page document. The immutable original is authoritative and has no editable history. */
+export interface PdfContent {
+  format: 'pdf'
+  schemaVersion: 1
+  pageCount: number
+  features: PdfFeatures
+  pdfTitle?: string
+  // PDF text is extracted from the original on demand and never stored as a draft.
+  source: string
+  lineEnding: '\n'
+  bom: false
+  originalFile?: OriginalFileReference
+  original?: never
+}
+
 // The discriminator also accepts untagged Markdown records.
-export type DocumentContent = MarkdownContent | TxtContent | DocxContent
+export type DocumentContent = MarkdownContent | TxtContent | DocxContent | PdfContent
+
+export function hasOriginal(content: DocumentContent): content is TxtContent | DocxContent | PdfContent {
+  return content.format === 'txt' || content.format === 'docx' || content.format === 'pdf'
+}
 
 export function makeDocxContent(input: JSONContent, issues: DocxIssue[]): DocxContent {
   const document = canonicalDocx(input)
@@ -55,7 +75,7 @@ export function makeDocxContent(input: JSONContent, issues: DocxIssue[]): DocxCo
 }
 
 export function originalReference(content: DocumentContent) {
-  return content.format === 'txt' || content.format === 'docx' ? content.originalFile : undefined
+  return hasOriginal(content) ? content.originalFile : undefined
 }
 
 export function newTextContent(): TxtContent {
@@ -64,7 +84,7 @@ export function newTextContent(): TxtContent {
 
 export function sameLineage(left: DocumentContent, right: DocumentContent) {
   if ((left.format ?? 'markdown') !== (right.format ?? 'markdown')) return false
-  if (left.format === 'txt' || left.format === 'docx') {
+  if (hasOriginal(left)) {
     return left.schemaVersion === right.schemaVersion && originalReference(left)?.id === originalReference(right)?.id
   }
   return true
@@ -74,6 +94,7 @@ export function sameContent(left: DocumentContent, right: DocumentContent) {
   if (left === right) return true
   if (!sameLineage(left, right)) return false
   if (left.source !== right.source || left.bom !== right.bom || left.lineEnding !== right.lineEnding) return false
+  if (left.format === 'pdf' || right.format === 'pdf') return left.format === right.format
   if (left.format === 'docx' || right.format === 'docx') {
     return left.format === 'docx' && right.format === 'docx' && JSON.stringify(left.document) === JSON.stringify(right.document) &&
       JSON.stringify(left.issues) === JSON.stringify(right.issues)

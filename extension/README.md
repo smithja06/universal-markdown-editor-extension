@@ -1,6 +1,6 @@
 # Folio Markdown Editor
 
-Folio offers optional VS Code editors for Markdown, plain text, and supported Word documents. Use **Reopen Editor With…** to select the Folio editor for the current file. VS Code's native Text Editor remains the default for Markdown and TXT.
+Folio offers optional VS Code editors for Markdown, plain text, and supported Word documents, and a read-only PDF viewer. Use **Reopen Editor With…** to select the Folio editor for the current file. VS Code's native Text Editor remains the default for Markdown and TXT.
 
 Use **Visual** for rich editing, **Markdown** for source, or **Split** to see both. Folio follows your VS Code theme and exposes mode changes, document properties, and heading navigation through the Command Palette and the editor title’s **Folio** submenu. Mode shortcuts are Ctrl+Alt+Shift+V/M/S on Windows and Linux and Cmd+Option+Shift+V/M/S on macOS. The shortcuts apply while Folio is active and an input does not have focus.
 
@@ -8,6 +8,11 @@ Use **Visual** for rich editing, **Markdown** for source, or **Split** to see bo
 
 - **Folio Plain Text Editor** opens `.txt` as literal text with find/replace, native Save, Undo/Redo and Revert. The qualified editing scope is local UTF-8 with optional BOM and uniform LF or CRLF, up to 16 MiB. Folio displays mixed and CR-only line endings read-only because VS Code's own Save can normalize them.
 - **Folio DOCX Editor** opens the supported `.docx` subset for visual editing, find/replace, native Undo/Redo, and recovery. Use **Export → Export DOCX copy…** to review fidelity changes and download a validated copy. **Download original** retrieves the opened package. **File → Revert to disk** loads the current file. Native Save and Save As report the copy workflow and leave the draft dirty. Complex or invalid packages open with an explanation.
+
+## PDF viewing and export
+
+- **Folio PDF Viewer** opens local `.pdf` files read-only with page navigation, zoom and fit modes, embedded-text find with highlights, and text selection and copy. Pages without embedded text are labelled, and Folio does not perform OCR. Scripts, links, form fields and attachments in the PDF are inert. Password-protected PDFs open with an explanation. If the file changes on disk, choose **Reload from disk**. Folio never writes PDFs you view.
+- In the Markdown, TXT and DOCX editors, use **Export → Export PDF…** to choose the page size, orientation, margins and file name, review fidelity changes and a validated preview, then select **Save PDF copy…**. Folio saves only to a new local `.pdf` file and never replaces an existing one. If the document changes after the preview, export again from the current revision.
 
 ## Install a VSIX
 
@@ -41,4 +46,4 @@ npm ci
 npm run package:extension
 ```
 
-Install the resulting `extension/dist/folio.vsix`. The build uses the lockfile. The package includes Folio's MIT license, `EPL-1.0.txt`, and third-party notices. The top-level notices link to the upstream ELK, EMF GWT, and Xbase sources. This candidate is for local validation while the release source archive and distribution terms are reviewed. Run `npm run test:extension` for the isolated desktop tests. Set `FOLIO_VSCODE_EXECUTABLE` to the installed VS Code application binary if discovery fails.
+Install the resulting `extension/dist/folio.vsix`. The build uses the lockfile. The package includes Folio's MIT license, `EPL-1.0.txt`, and third-party notices, including `dist/PDF_THIRD_PARTY_NOTICES.txt` for pdf.js, pdfmake and the embedded PDF fonts. The top-level notices link to the upstream ELK, EMF GWT, and Xbase sources. This candidate is for local validation while the release source archive and distribution terms are reviewed. Run `npm run test:extension` for the isolated desktop tests. Set `FOLIO_VSCODE_EXECUTABLE` to the installed VS Code application binary if discovery fails.

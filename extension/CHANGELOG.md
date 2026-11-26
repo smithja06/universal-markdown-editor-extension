@@ -2,6 +2,9 @@
 
 ## 0.1.0 release candidate
 
+- View local PDFs read-only in the optional PDF viewer with page navigation, zoom, embedded-text search and copy. Active PDF content stays inert and viewing never writes the file.
+- Export Markdown, TXT, and supported DOCX documents as validated PDF copies after a fidelity review and preview. Copies are saved only as new local files.
+
 - Open TXT in the optional plain-text editor with native Save, Undo/Redo, and pending-edit recovery.
 - Open supported DOCX files in the optional visual editor with native history, Revert, and recovery. Review and export a validated copy while retaining the opened package.
 

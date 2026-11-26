@@ -1,5 +1,29 @@
 # VS Code platform qualification
 
+## Phase 8 PDF qualification
+
+The November 26, 2026 qualification used Windows 11 Pro 25H2 x64 (26200.9974), desktop VS Code 1.147.0 (`8a14f0cc1b08d531eb83255ea3764ae22aa932b5`), Node 24.13.0 and npm 11.21.0, on local drive-letter `file:` workspaces on fixed NTFS. The synthetic `folio-test-remote:` provider exercised rejection, and a Workspace Trust profile exercised Restricted Mode. The minimum supported VS Code version, Remote, other providers and volumes, macOS, Linux and browser-only VS Code are unqualified for the PDF viewer and PDF copies.
+
+| Workflow | Qualification boundary |
+| --- | --- |
+| PDF viewer | Opt-in **Folio PDF Viewer** only. Rendering of searchable, image-only and active-content fixtures, previous/next and direct page navigation, zoom steps, fit page and fit width, find with match navigation, **Copy page text** and native Ctrl+C through `vscode.env.clipboard`. No dirty state and unchanged workspace bytes. External replacement shows a banner, and **Reload from disk** shows the new page count. Deletion keeps the opened version and reports it. Closing disposes the webview. Malformed files show an explanation, embedded links, scripts and form fields have no effect, non-file providers are rejected, and Restricted Mode leaves the viewer unavailable. |
+| PDF copies | **Export PDF…** from Markdown, TXT and DOCX. **Save PDF copy…** through VS Code's simple file dialog to a new file, followed by a pdf.js text readback. Dialog cancellation leaves no file and keeps the review open. A native edit after the preview blocks delivery until **Review current revision**. The source Markdown bytes, DOCX package and clean state are unchanged. |
+| Unqualified | The OS-native save dialog, its replace confirmation (the exclusive-create refusal is covered by `src/host/vscode/newFile.test.ts`), disk-full and permission failures during the copy write, PDFs above the measured fixtures in VS Code, and screen-reader use of the text layer. |
+
+| Command | Result |
+| --- | --- |
+| `npm run test:extension -- --output test-results/p8-desktop-full` | 68 passed in 7.6 min, all 60 existing and eight PDF desktop cases. |
+| Installed VSIX, below | 12 passed on VS Code 1.147.0 with the packaged `extension/dist/folio.vsix` (SHA-256 `93c1fe766837f4a1016e290fb6c8bc338c60bc2eb87106ff0a8ff5ab1eb58d92`). |
+
+```powershell
+$env:FOLIO_TEST_VSIX = 'extension/dist/folio.vsix'
+$env:FOLIO_VSCODE_CLI_JS = Join-Path $env:LOCALAPPDATA 'Programs/Microsoft VS Code/8a14f0cc1b/resources/app/out/cli.js'
+npx playwright test --config playwright.vscode.config.ts pdf.vscode.ts pdfExport.vscode.ts editor.vscode.ts multiformat.vscode.ts -g 'PDF|Markdown exports|TXT and DOCX export|stale PDF|opens optionally|TXT defaults to native|DOCX offers reviewed|Restricted Mode' --output test-results/p8-installed
+Remove-Item Env:FOLIO_TEST_VSIX, Env:FOLIO_VSCODE_CLI_JS
+```
+
+[Phase 8 architecture and limits](phase-8-pdf.md) · [Handoff verification](PROJECT_HANDOFF.md#phase-8-verification)
+
 ## Phase 7C multi-format qualification
 
 The November 26, 2026 qualification used Windows 11 Pro 25H2 x64 (26200.9974), desktop VS Code 1.147.0 (`8a14f0cc1b08d531eb83255ea3764ae22aa932b5`), Node 24.13.0, and npm 11.21.0. Test workspaces used local, drive-letter `file:` URIs on fixed `C:` NTFS. Standalone browser coverage used Chromium 159.0.8154.6. The synthetic `folio-test-remote:` fixture exercised provider rejection, and a profile with independent user, extension, and shared-data directories exercised Restricted Mode. Minimum-version retesting, true Remote, other providers and volumes, macOS and Linux desktop, and browser-only VS Code remain unqualified for the new formats.

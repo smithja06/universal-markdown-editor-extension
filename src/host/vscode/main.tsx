@@ -6,10 +6,11 @@ import './scrollbars.css'
 import './theme.css'
 import App from '../../App'
 import { createWebviewHost } from './host'
-import { connectionMessage, isHostMessage, type ClientMessage } from './protocol'
+import { connectionMessage, isHostMessage, type ClientMessage, type HostMessage } from './protocol'
 import { createRecoveryJournal } from './recovery'
 import { RecoveryNotice } from './RecoveryNotice'
 import { webviewTheme } from './theme'
+import { PdfWorkspace } from './PdfWorkspace'
 
 declare function acquireVsCodeApi(): { postMessage(message: { connection: string; message: ClientMessage }): void }
 
@@ -29,9 +30,9 @@ if (container) {
     const vscode = acquireVsCodeApi()
     const connection = crypto.randomUUID()
     const post = (message: ClientMessage) => vscode.postMessage({ connection, message })
-    const host = createWebviewHost({
+    const transport = {
       post,
-      listen(listener) {
+      listen(listener: (message: HostMessage) => void) {
         const receive = (event: MessageEvent<unknown>) => {
           // VS Code relays messages from the same-origin outer webview and masks window.parent.
           if (event.origin === 'null' || event.origin !== window.origin) return
@@ -41,7 +42,14 @@ if (container) {
         window.addEventListener('message', receive)
         return () => window.removeEventListener('message', receive)
       },
-    }, platform, theme, createRecoveryJournal(() => window.localStorage), format)
+    }
+    if (format === 'PDF') {
+      // Read-only PDFs have no native text buffer, recovery journal or edit protocol.
+      root.render(<PdfWorkspace transport={transport} initialTheme={theme} />)
+      window.addEventListener('pagehide', () => root.unmount(), { once: true })
+    } else mountEditor()
+    function mountEditor() {
+    const host = createWebviewHost(transport, platform, theme, createRecoveryJournal(() => window.localStorage), format)
 
     const mount = () => {
       const state = host.liveDocument.read()
@@ -70,5 +78,6 @@ if (container) {
       host.dispose()
       root.unmount()
     }, { once: true })
+    }
   }
 }

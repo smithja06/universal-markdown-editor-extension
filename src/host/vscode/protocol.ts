@@ -2,6 +2,21 @@ import { isFingerprint, isGeneration, isId, isRecord, isRecoveryDraft, isUri, ty
 import { isNativeAction, type NativeAction } from './nativeCommands'
 import type { DocumentFormat } from '../../document/formats/content'
 import { docxMaxFileBytes, type DocxIssue } from '../../document/formats/docx/model'
+import { pdfLimits } from '../../document/formats/pdf/model'
+
+/** The read-only PDF editor state. Bytes travel separately in `pdfBytes`. */
+export interface PdfViewState {
+  uri: string
+  title: string
+  revision: number
+  available: boolean
+  /** The workspace file changed after this revision was read. */
+  changed: boolean
+  failure?: string
+  fingerprint?: string
+}
+
+export const pdfExportMaxBytes = 128 * 1024 * 1024
 
 interface DocumentMetadata {
   uri: string
@@ -46,6 +61,8 @@ export type ClientMessage =
   | { type: 'pickWorkspaceImage'; id: number; revision: number; previousSelection?: number }
   | { type: 'confirmWorkspaceImage'; id: number; revision: number; selection: number }
   | { type: 'cancelWorkspaceImage'; id: number }
+  | { type: 'pdfReload' }
+  | { type: 'pdfExport'; id: number; revision: number; filename: string; bytes: ArrayBuffer }
 
 export type HostMessage =
   | { type: 'state'; state: DocumentState; edit?: { id: number; accepted: boolean; message?: string } }
@@ -60,6 +77,9 @@ export type HostMessage =
   | { type: 'action'; action: NativeAction }
   | { type: 'resourceResult'; id: number; ok: boolean; image?: string }
   | { type: 'imagePickerResult'; id: number; reference?: string; preview?: string; error?: string }
+  | { type: 'pdfState'; state: PdfViewState }
+  | { type: 'pdfBytes'; revision: number; bytes: ArrayBuffer }
+  | { type: 'pdfExportResult'; id: number; status: 'saved' | 'cancelled' | 'error'; message?: string; name?: string }
 
 const record = isRecord
 const integer = (value: unknown, minimum = 0): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum
@@ -93,7 +113,24 @@ export function isClientMessage(value: unknown): value is ClientMessage {
     (value.previousSelection === undefined || (isGeneration(value.previousSelection) && value.previousSelection < value.id))
   if (value.type === 'confirmWorkspaceImage') return isGeneration(value.id) && integer(value.revision) && isGeneration(value.selection)
   if (value.type === 'cancelWorkspaceImage') return isGeneration(value.id)
+  if (value.type === 'pdfReload') return true
+  if (value.type === 'pdfExport') return isGeneration(value.id) && integer(value.revision) && isPdfFilename(value.filename) &&
+    value.bytes instanceof ArrayBuffer && value.bytes.byteLength > 0 && value.bytes.byteLength <= pdfExportMaxBytes
   return value.type === 'command' && (value.command === 'save' || value.command === 'undo' || value.command === 'redo' || value.command === 'revert')
+}
+
+/** A single safe filename for a new PDF copy. Directories are chosen in the native save dialog. */
+export function isPdfFilename(value: unknown): value is string {
+  // eslint-disable-next-line no-control-regex -- Reject controls and characters Windows forbids in names.
+  return typeof value === 'string' && value.length <= 200 && /\.pdf$/i.test(value) && !/[\u0000-\u001f<>:"/\\|?*]/u.test(value) &&
+    !/^\.+$/.test(value) && !/[. ]$/.test(value.slice(0, -4)) && value.trim() === value
+}
+
+function isPdfViewState(value: unknown): value is PdfViewState {
+  return record(value) && isUri(value.uri) && typeof value.title === 'string' && value.title.length <= 1024 && integer(value.revision) &&
+    typeof value.available === 'boolean' && typeof value.changed === 'boolean' &&
+    (value.failure === undefined || (typeof value.failure === 'string' && value.failure.length <= 1024)) &&
+    (value.fingerprint === undefined || isFingerprint(value.fingerprint))
 }
 
 function isDocumentMetadata(value: unknown): value is DocumentMetadata {
@@ -133,6 +170,11 @@ export function isHostMessage(value: unknown): value is HostMessage {
   if (value.type === 'action') return isNativeAction(value.action)
   if (value.type === 'resourceResult') return isGeneration(value.id) && typeof value.ok === 'boolean' &&
     (value.image === undefined || (typeof value.image === 'string' && rasterDataUrl.test(value.image)))
+  if (value.type === 'pdfState') return isPdfViewState(value.state)
+  if (value.type === 'pdfBytes') return integer(value.revision) && value.bytes instanceof ArrayBuffer && value.bytes.byteLength <= pdfLimits.fileBytes
+  if (value.type === 'pdfExportResult') return isGeneration(value.id) && (value.status === 'saved' || value.status === 'cancelled' || value.status === 'error') &&
+    (value.message === undefined || (typeof value.message === 'string' && value.message.length <= 1024)) &&
+    (value.name === undefined || (typeof value.name === 'string' && value.name.length <= 1024))
   if (value.type === 'imagePickerResult') return isGeneration(value.id) &&
     (value.error === undefined || (typeof value.error === 'string' && value.error.length <= 512)) &&
     (value.reference === undefined || (value.error === undefined && typeof value.reference === 'string' &&

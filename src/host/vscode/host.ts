@@ -9,6 +9,7 @@ import type { RecoveryJournal } from './recovery'
 import { createWorkspaceResources } from './resources'
 import { onWebviewTheme } from './theme'
 import { createWorkspaceDocx } from './workspaceDocx'
+import { createPdfCopy } from './pdfCopy'
 
 function unavailable() {
   return new Error('This operation is unavailable in the VS Code editor.')
@@ -52,6 +53,7 @@ export function createWebviewHost(transport: LiveDocumentTransport, platform: Sh
     storage,
     files: workspaceDocx ? { ...files, download: downloadFile } : files,
     workspaceDocx,
+    pdfExport: createPdfCopy(transport),
     keyboard: { platform, handledByHost: new Set(['workspace.palette']) },
     appearance: {
       read: () => settings,

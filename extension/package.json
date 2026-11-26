@@ -1,7 +1,7 @@
 {
   "name": "folio-markdown-editor",
   "displayName": "Folio Markdown Editor",
-  "description": "Opt-in editors for Markdown, plain text, and supported Word documents.",
+  "description": "Opt-in editors for Markdown, plain text, and supported Word documents, and a read-only PDF viewer.",
   "version": "0.1.0",
   "publisher": "smithja06",
   "license": "MIT",
@@ -15,7 +15,7 @@
   "main": "./dist/extension.cjs",
   "extensionKind": ["workspace"],
   "capabilities": { "virtualWorkspaces": true, "untrustedWorkspaces": { "supported": false } },
-  "files": ["dist/extension.cjs", "dist/docx-codec.cjs", "dist/DOCX_THIRD_PARTY_NOTICES.txt", "dist/webview", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "EPL-1.0.txt"],
+  "files": ["dist/extension.cjs", "dist/docx-codec.cjs", "dist/DOCX_THIRD_PARTY_NOTICES.txt", "dist/PDF_THIRD_PARTY_NOTICES.txt", "dist/webview", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "EPL-1.0.txt"],
   "contributes": {
     "commands": [
       { "command": "folio.showVisual", "title": "Show Visual Editor", "category": "Folio", "enablement": "activeCustomEditorId == folio.markdown" },
@@ -69,6 +69,12 @@
         "viewType": "folio.docx",
         "displayName": "Folio DOCX Editor",
         "selector": [{ "filenamePattern": "*.docx" }],
+        "priority": "option"
+      },
+      {
+        "viewType": "folio.pdf",
+        "displayName": "Folio PDF Viewer",
+        "selector": [{ "filenamePattern": "*.pdf" }],
         "priority": "option"
       }
     ]

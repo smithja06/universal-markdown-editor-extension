@@ -15,7 +15,7 @@ import { dividerWidth, useSplitLayout } from './editor/useSplitLayout'
 import { scrollToSplitHeading, useSplitScroll } from './editor/splitScroll'
 import { calloutKinds } from './editor/schema'
 import { createWorkspace, type EditorMode, type EditorPane } from './document/workspace'
-import { markdownProcessor } from './document/markdown'
+import { markdownProcessor, openMarkdown } from './document/markdown'
 import type { LineEnding } from './document/formats/content'
 import { formatCapabilities, identifyFormat, openFileTypes, type ExportSnapshot, type FormatDiagnostic } from './document/formats/registry'
 import { safeDocxLink } from './document/formats/docx/model'
@@ -34,6 +34,9 @@ import { registerItems } from './ui/commandItems'
 import { CommandRegistry, matchesShortcut, shortcutLabel } from './core/commands'
 import type { FolioHost } from './host/contracts'
 import { RecoveryNotice } from './host/vscode/RecoveryNotice'
+import { PdfViewer } from './ui/pdf/PdfViewer'
+import { usePdfOriginal } from './ui/pdf/usePdfOriginal'
+import { PdfExportDialog } from './ui/PdfExportDialog'
 
 const windowCommands = ['workspace.palette', 'document.save', 'document.save-as', 'document.open-markdown', 'search.find', 'search.replace',
   'search.next', 'search.previous', 'format.edit-link', 'format.clear-formatting', 'format.increase-indentation', 'format.decrease-indentation',
@@ -89,12 +92,16 @@ export default function App({ host }: { host: FolioHost }) {
   const doc = useDocument(notify, visualScroll, host, workspaceView)
   const { editor } = doc
   const capabilities = formatCapabilities(doc.file)
-  const plainText = !capabilities.richText
+  const pdfDocument = doc.file.format === 'pdf'
+  const plainText = !capabilities.richText && !pdfDocument
   const docx = doc.file.format === 'docx'
   const importNotes = doc.file.format === 'docx' ? doc.file.issues : []
   const importLosses = importNotes.some(issue => issue.effect !== 'preserved')
-  const markdown = !plainText && !docx
-  const localDraft = plainText || docx
+  const markdown = !plainText && !docx && !pdfDocument
+  const localDraft = plainText || docx || pdfDocument
+  const pdfOriginal = usePdfOriginal(doc.file.format === 'pdf' ? doc.file.originalFile : undefined, host.storage.readOriginal)
+  const [pdfFind, setPdfFind] = useState(0)
+  const [pdfPages, setPdfPages] = useState<number>()
   const formatting = useFormatting(editor)
   const { mode, sidebar, setSidebar, appearance, setAppearance } = useStore(workspaceView)
   const themeFromHost = host.appearance.themeFromHost
@@ -107,7 +114,7 @@ export default function App({ host }: { host: FolioHost }) {
   const started = !!editor && doc.status !== 'loading'
   const ready = started && !!doc.layout.activeId
   const liveWritable = !!doc.liveState?.available && !doc.liveState.readOnly && doc.liveState.conflict === undefined
-  const editable = ready && (!liveDocument || liveWritable) && (source || !doc.previewIssue)
+  const editable = ready && !pdfDocument && (!liveDocument || liveWritable) && (source || !doc.previewIssue)
   const splitLayout = useSplitLayout(appearance.splitRatio, ratio => setAppearance({ splitRatio: ratio }))
   useSplitScroll(split && ready && appearance.syncScroll && !doc.previewIssue, editor, visualScroll, doc.sourceView, doc.scrollAnchors, doc.file.id)
   const [tab, setTab] = useState<PropertyTab>('Outline')
@@ -120,6 +127,7 @@ export default function App({ host }: { host: FolioHost }) {
   const [exportLineEnding, setExportLineEnding] = useState<LineEnding>()
   const [exportingDocx, setExportingDocx] = useState(false)
   const exporting = useRef<AbortController>(undefined)
+  const [pdfExport, setPdfExport] = useState<{ snapshot: ExportSnapshot; key: number } | null>(null)
   const root = useRef<HTMLDivElement>(null)
   const propertiesOrigin = useRef<HTMLElement | null>(null)
   const [palette, setPalette] = useState<'all' | 'documents' | 'headings' | null>(null)
@@ -174,6 +182,7 @@ export default function App({ host }: { host: FolioHost }) {
   function openLink(preset?: string) { if (!source && doc.activatePane('visual')) setRequest({ name: 'link', preset }) }
   function showSearch(replace = false) {
     if (!ready) return
+    if (pdfDocument) { setPdfFind(value => value + 1); return }
     if (findRef.current) findRef.current.focus(replace)
     else setFindPanel({ replace })
   }
@@ -441,7 +450,7 @@ export default function App({ host }: { host: FolioHost }) {
     const target = mode === 'source' || (split && (event.target as Element).closest('.source-shell')) ? 'source' : 'visual'
     const point = target === 'visual' ? editor?.view.posAtCoords({ left: event.clientX, top: event.clientY }) : undefined
     if (image) void addImage(image, point?.pos, target)
-    else notify(markdown ? 'Drop a Markdown, TXT, or DOCX document, or an image file.' : 'Drop a Markdown, TXT, or DOCX document.')
+    else notify(markdown ? 'Drop a Markdown, TXT, DOCX, or PDF document, or an image file.' : 'Drop a Markdown, TXT, DOCX, or PDF document.')
   }
 
   function dropBlock(event: DragEvent) {
@@ -499,6 +508,37 @@ export default function App({ host }: { host: FolioHost }) {
     }
   }
 
+  function openPdfExport() {
+    const native = liveDocument?.read()
+    if (native && (native.pending || native.conflict !== undefined || !native.available || native.revision === undefined)) {
+      notify('Wait for VS Code to sync your pending edits, then export the PDF again.')
+      return
+    }
+    try { setPdfExport({ snapshot: doc.captureExport(), key: Date.now() }) }
+    catch (error) { notify(errorMessage(error)) }
+  }
+
+  async function buildPrint(snapshot: ExportSnapshot, signal: AbortSignal) {
+    const { content, title } = snapshot
+    const [{ printTxt, printDocx }, { printMarkdown }, { browserAssets }] = await Promise.all([
+      import('./document/pdfExport/fromText'), import('./document/pdfExport/fromMarkdown'), import('./document/pdfExport/browser')])
+    if (content.format === 'txt') return printTxt(title, content.source)
+    if (content.format === 'docx') return printDocx(title, content.document, content.issues)
+    if (content.format === 'pdf' || !editor) throw new Error('This document cannot be exported as PDF.')
+    // Parse the captured source rather than the live editor so the review stays bound to this revision.
+    return printMarkdown(title, openMarkdown(content.source, editor.schema).document.toJSON(), browserAssets(host.resources?.image), signal)
+  }
+
+  async function deliverPdf(snapshot: ExportSnapshot, filename: string, bytes: Uint8Array) {
+    if (liveDocument && host.pdfExport) {
+      if (snapshot.nativeRevision === undefined) throw new Error('Export the PDF again after VS Code syncs the document.')
+      const result = await host.pdfExport.save(filename, bytes, snapshot.nativeRevision)
+      return result.status === 'saved' ? 'Saved PDF copy ' + result.name : undefined
+    }
+    host.files.download(filename, bytes.slice(), 'application/pdf')
+    return 'Download requested for ' + filename
+  }
+
   function cancelExport() {
     exporting.current?.abort()
     exporting.current = undefined
@@ -513,30 +553,30 @@ export default function App({ host }: { host: FolioHost }) {
       { id: 'document.open-markdown', label: 'Open document…', icon: <FolderOpen size={16} />, shortcut: 'Ctrl+O', run: () => fileInput.current?.click() },
       { label: 'Document library', icon: <FolderOpen size={16} />, run: () => setDialog('library') },
       { label: 'Recent documents', icon: <FileText size={16} />, run: () => setDialog('recent') },
-      { label: 'Version History', icon: <History size={16} />, disabled: !ready, run: () => setDialog('history') },
+      { label: 'Version History', icon: <History size={16} />, disabled: !ready || pdfDocument, run: () => setDialog('history') },
       { label: '', divider: true },
     ]),
-    { id: 'document.save', label: host.workspaceDocx ? 'Export DOCX copy…' : localDraft && !liveDocument ? 'Save draft' : 'Save', icon: <Download size={16} />, shortcut: 'Ctrl+S', disabled: !ready || (!!liveDocument && !liveWritable),
+    { id: 'document.save', label: host.workspaceDocx ? 'Export DOCX copy…' : localDraft && !liveDocument ? 'Save draft' : 'Save', icon: <Download size={16} />, shortcut: 'Ctrl+S', disabled: !ready || pdfDocument || (!!liveDocument && !liveWritable),
       run: () => { if (host.workspaceDocx) void exportCopy(); else void doc.save() } },
     ...(host.workspaceDocx && liveDocument ? [{ label: 'Revert to disk', disabled: !ready || !liveWritable, run: () => liveDocument.run('revert') }] : []),
     ...(liveDocument ? [] : [
-      { id: 'document.save-as', label: docx ? 'Export DOCX copy…' : plainText ? 'Export TXT copy…' : 'Save as…', icon: <ArrowDownToLine size={16} />, shortcut: 'Ctrl+Shift+S', disabled: !ready,
-        run: () => { if (localDraft) void exportCopy(); else void doc.save({ saveAs: true }) } },
+      { id: 'document.save-as', label: docx ? 'Export DOCX copy…' : plainText ? 'Export TXT copy…' : pdfDocument ? 'Download original PDF' : 'Save as…', icon: <ArrowDownToLine size={16} />, shortcut: 'Ctrl+Shift+S', disabled: !ready,
+        run: () => { if (pdfDocument) report(doc.downloadOriginal()); else if (localDraft) void exportCopy(); else void doc.save({ saveAs: true }) } },
       { label: '', divider: true },
       { label: 'Rename document', disabled: !ready, run: () => requestAnimationFrame(() => { titleInput.current?.focus(); titleInput.current?.select() }) },
       { label: 'Duplicate document', disabled: !ready, run: () => report(doc.duplicateDocument(doc.file.id)) },
     ]),
   ], started)
   const editItems = registerItems(registry, platform, 'Editing', 'edit', [
-    { label: 'Undo', icon: <Undo2 size={16} />, shortcut: 'Ctrl+Z', run: undo, disabled: liveDocument ? !liveWritable : source ? !undoAvailable : !formatting?.undo,
-      available: () => ready && (liveDocument ? liveWritable : source ? !!doc.sourceView.current && undoDepth(doc.sourceView.current.state) > 0 : !!editor?.can().undo()) },
-    { label: 'Redo', icon: <Redo2 size={16} />, shortcut: 'Ctrl+Shift+Z', run: redo, disabled: liveDocument ? !liveWritable : source ? !redoAvailable : !formatting?.redo,
+    { label: 'Undo', icon: <Undo2 size={16} />, shortcut: 'Ctrl+Z', run: undo, disabled: pdfDocument || (liveDocument ? !liveWritable : source ? !undoAvailable : !formatting?.undo),
+      available: () => ready && !pdfDocument && (liveDocument ? liveWritable : source ? !!doc.sourceView.current && undoDepth(doc.sourceView.current.state) > 0 : !!editor?.can().undo()) },
+    { label: 'Redo', icon: <Redo2 size={16} />, shortcut: 'Ctrl+Shift+Z', run: redo, disabled: pdfDocument || (liveDocument ? !liveWritable : source ? !redoAvailable : !formatting?.redo),
       shortcuts: liveDocument ? [{ key: 'z', primary: true, shift: true }, { key: 'y', primary: true, platform: 'other' }] : undefined,
-      available: () => ready && (liveDocument ? liveWritable : source ? !!doc.sourceView.current && redoDepth(doc.sourceView.current.state) > 0 : !!editor?.can().redo()) },
+      available: () => ready && !pdfDocument && (liveDocument ? liveWritable : source ? !!doc.sourceView.current && redoDepth(doc.sourceView.current.state) > 0 : !!editor?.can().redo()) },
     { label: '', divider: true },
-    { id: 'search.find', label: 'Find and replace', keywords: 'search text match', icon: <Search size={16} />, shortcut: 'Ctrl+F', disabled: !ready, run: () => showSearch() },
+    { id: 'search.find', label: pdfDocument ? 'Find in PDF' : 'Find and replace', keywords: 'search text match', icon: <Search size={16} />, shortcut: 'Ctrl+F', disabled: !ready, run: () => showSearch() },
     { id: 'workspace.palette', label: 'Command Palette', shortcut: host.keyboard.handledByHost?.has('workspace.palette') ? undefined : 'Ctrl+Shift+P', run: () => setPalette(previous => previous ? null : 'all') },
-    ...(docx || plainText ? [] : [
+    ...(docx || plainText || pdfDocument ? [] : [
       { label: 'Move block up', icon: <ArrowUp size={16} />, disabled: source || !editable, run: () => editor && moveSelectedBlock(editor, -1) },
       { label: 'Move block down', icon: <ArrowDown size={16} />, disabled: source || !editable, run: () => editor && moveSelectedBlock(editor, 1) },
     ]),
@@ -546,7 +586,7 @@ export default function App({ host }: { host: FolioHost }) {
     ...(markdown ? editorModes.map(({ mode: choice, label, icon: Icon }) => ({ id: 'view.mode.' + choice, label, keywords: 'switch editor mode ' + choice, icon: <Icon size={16} />, active: mode === choice, run: () => doc.switchMode(choice) })) : []),
     ...(split ? [{ label: 'Sync Scroll', active: appearance.syncScroll, run: () => setAppearance({ syncScroll: !appearance.syncScroll }) }] : []),
     { id: 'view.properties', label: sidebar ? 'Hide document properties' : 'Show document properties', keywords: 'toggle sidebar', icon: <PanelRight size={16} />, run: () => sidebar ? closeProperties() : openProperties(propertiesTab) },
-    ...(plainText ? [] : [{ label: 'Document outline', icon: <ListTree size={16} />, run: () => openProperties('Outline') }]),
+    ...(plainText || pdfDocument ? [] : [{ label: 'Document outline', icon: <ListTree size={16} />, run: () => openProperties('Outline') }]),
     { id: 'view.width', label: appearance.width === 'full' ? 'Page width' : 'Full width', keywords: 'toggle document width', icon: appearance.width === 'full' ? <Minimize2 size={16} /> : <Maximize2 size={16} />, run: () => setAppearance({ width: appearance.width === 'full' ? 'page' : 'full' }) },
     { label: 'Appearance', run: () => openProperties('Appearance') },
     { label: 'Statistics', run: () => openProperties('Statistics') },
@@ -566,12 +606,17 @@ export default function App({ host }: { host: FolioHost }) {
       notify(notices.length ? `HTML download started with ${notices.join(' and ')}` : 'HTML download started')
     } catch (error) { notify(errorMessage(error)) }
   }
-  const exportItems = registerItems(registry, platform, 'Export', 'export', localDraft ? [
+  const pdfItem = { label: 'Export PDF…', icon: <ArrowDownToLine size={16} />, keywords: 'print pdf copy', run: openPdfExport }
+  const exportItems = registerItems(registry, platform, 'Export', 'export', pdfDocument ? [
+    { label: 'Download original', icon: <Download size={16} />, run: () => report(doc.downloadOriginal()) },
+  ] : localDraft ? [
+    pdfItem,
     ...(!liveDocument || host.workspaceDocx ? [{ label: docx ? 'Export DOCX copy…' : 'Export TXT copy…', icon: <ArrowDownToLine size={16} />, disabled: !capabilities.exportCopy || (!!liveDocument && !liveWritable), run: () => void exportCopy() }] : []),
     ...(host.workspaceDocx || (doc.file.format === 'txt' || doc.file.format === 'docx') && doc.file.originalFile ? [{ label: 'Download original', icon: <Download size={16} />, run: () => report(doc.downloadOriginal()) }] : []),
     { label: '', divider: true },
     { label: 'Copy plain text', icon: <Copy size={16} />, run: () => void copy('text') },
   ] : [
+    pdfItem,
     ...(liveDocument ? [] : [
       { label: 'Download Markdown', icon: <ArrowDownToLine size={16} />, run: () => void doc.save({ download: true }) },
       { label: 'Export HTML', icon: <FileCode2 size={16} />, run: () => void downloadHtml(false) },
@@ -589,7 +634,7 @@ export default function App({ host }: { host: FolioHost }) {
     label, run: () => { if (editor) paragraphStyle(editor, label) }, keywords: 'paragraph style',
   })), editable && !source)
 
-  registry.register({ id: 'search.replace', label: 'Replace text', category: 'Editing', available: () => ready,
+  registry.register({ id: 'search.replace', label: 'Replace text', category: 'Editing', available: () => ready && !pdfDocument,
     shortcuts: [{ key: 'h', primary: true, platform: 'other' }, { key: 'f', primary: true, alt: true, platform: 'mac' }], run: () => showSearch(true) })
   registry.register({ id: 'search.next', label: 'Find next match', category: 'Editing', available: () => !!findPanel && ready,
     shortcuts: [{ key: 'F3' }], run: () => findRef.current?.move(1) })
@@ -615,7 +660,7 @@ export default function App({ host }: { host: FolioHost }) {
 
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
-      if (event.isComposing || event.defaultPrevented || request || dialog || exportReview || exportingDocx) return
+      if (event.isComposing || event.defaultPrevented || request || dialog || exportReview || exportingDocx || pdfExport) return
       if (plainText && doc.liveState?.readOnly && (platform === 'mac' ? event.metaKey : event.ctrlKey) &&
         !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's') {
         event.preventDefault()
@@ -699,14 +744,14 @@ export default function App({ host }: { host: FolioHost }) {
             aria-label={label} title={label} aria-pressed={mode === choice} onClick={() => execute('view.mode.' + choice)}><Icon size={15} /><span>{short}</span></button>)}
         </div>}
         <IconButton label="Toggle document properties" active={sidebar} disabled={!ready} onClick={() => execute('view.properties')} className="sidebar-toggle"><PanelRight size={18} /></IconButton>
-        <Menu label={liveDocument && !host.workspaceDocx ? 'Copy' : 'Export'} items={exportItems} align="right" disabled={!ready} className="export-menu">{liveDocument && !host.workspaceDocx ? <><Copy size={16} /><span>Copy</span></> : <><Download size={16} /><span>Export</span></>}<ChevronDown size={12} /></Menu>
+        <Menu label="Export" items={exportItems} align="right" disabled={!ready} className="export-menu"><Download size={16} /><span>Export</span><ChevronDown size={12} /></Menu>
       </div>
     </header>
     {!liveDocument && <DocumentTabs tabs={doc.tabs} activeId={doc.layout.activeId} canReopen={doc.layout.closed.length > 0} disabled={!started}
       select={id => execute('navigation.open-document', id)} close={id => report(doc.closeTab(id))} closeOthers={id => report(doc.closeOtherTabs(id))} reopen={() => report(doc.reopenTab())} create={() => execute('document.new-document')} />}
-    <Toolbar editor={editor} state={formatting} source={source} plainText={plainText} docx={docx} ready={editable} execute={execute} shortcut={commandShortcut} insertItems={actions} extraFormats={formatMenu.slice(docx ? 4 : 5)} styleItems={styleItems} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} sourceImageCommand={sourceImageCommand} hostHistory={liveDocument ? ready && liveWritable : undefined} />
+    {!pdfDocument && <Toolbar editor={editor} state={formatting} source={source} plainText={plainText} docx={docx} ready={editable} execute={execute} shortcut={commandShortcut} insertItems={actions} extraFormats={formatMenu.slice(docx ? 4 : 5)} styleItems={styleItems} sourceCanUndo={undoAvailable} sourceCanRedo={redoAvailable} sourceImageCommand={sourceImageCommand} hostHistory={liveDocument ? ready && liveWritable : undefined} />}
     {liveDocument && doc.liveState && <RecoveryNotice state={doc.liveState} copy={host.clipboard.writeText} discard={liveDocument.discardRecovery} restore={liveDocument.restoreRecovery} notify={notify} />}
-    {findPanel && doc.layout.activeId && <FindPanel panelRef={findRef} documentId={doc.layout.activeId} title={doc.file.title} mode={docx ? 'visual' : mode} startReplace={findPanel.replace}
+    {findPanel && doc.layout.activeId && !pdfDocument && <FindPanel panelRef={findRef} documentId={doc.layout.activeId} title={doc.file.title} mode={docx ? 'visual' : mode} startReplace={findPanel.replace}
       readOnly={!!liveDocument && !liveWritable} plainText={plainText} docx={docx}
       find={host.search} capture={doc.captureSearch} subscribe={doc.subscribeSearch} present={doc.presentSearch} replace={doc.applySearch}
       clear={doc.clearSearch} openSource={() => doc.switchMode('source', false)} close={closeSearch} />}
@@ -719,7 +764,13 @@ export default function App({ host }: { host: FolioHost }) {
         {!started ? <div className="opening-state"><LoaderCircle size={20} className="spinner" /> Opening workspace</div> : !ready && <div className="empty-workspace">
           <FileText size={27} aria-hidden="true" /><h2>No open documents</h2><div><button type="button" className="primary-button" onClick={newFile}>New document</button><button type="button" className="secondary-button" onClick={() => setDialog('library')}>Browse library</button></div>
         </div>}
-        <section className={docx ? 'visual-pane docx-pane' : 'visual-pane'} aria-label="Visual pane" hidden={!ready || plainText || markdown && mode === 'source'}>
+        {ready && pdfDocument && <section className="pdf-pane" aria-label="PDF document">
+          {pdfOriginal?.error ? <div className="pdf-state pdf-error" role="alert"><CircleAlert size={20} /><div><strong>This PDF cannot be displayed.</strong><p>{pdfOriginal.error}</p></div></div>
+            : <PdfViewer bytes={pdfOriginal?.bytes} documentKey={doc.file.id} label={doc.file.title} notify={notify} findRequest={pdfFind}
+              copyText={text => host.clipboard.writeText(text)} onSummary={summary => setPdfPages(summary?.pageCount)}
+              actions={<button type="button" className="secondary-button" onClick={() => report(doc.downloadOriginal())}><Download size={14} />Download original</button>} />}
+        </section>}
+        <section className={docx ? 'visual-pane docx-pane' : 'visual-pane'} aria-label="Visual pane" hidden={!ready || plainText || pdfDocument || markdown && mode === 'source'}>
           {split && <div className="split-pane-header"><Pilcrow size={15} /><span>Visual Editor</span></div>}
           {doc.previewIssue && <div className="preview-notice" role="status"><CircleAlert size={15} /><span><strong>Preview paused.</strong> {doc.previewIssue}</span></div>}
           <div className="visual-scroll" ref={visualScroll} onScroll={() => { if (grip) setGrip(null); doc.trackView() }}>
@@ -749,30 +800,31 @@ export default function App({ host }: { host: FolioHost }) {
           </div>
         </section>
         {split && <div className="split-divider" role="separator" tabIndex={0} aria-label="Resize editor panes" aria-orientation="vertical" hidden={splitLayout.stacked} {...splitLayout.separator}><i /></div>}
-        <section className="source-shell" aria-label={plainText ? 'Plain text pane' : 'Markdown pane'} hidden={!ready || docx || !plainText && mode === 'visual'}>
+        <section className="source-shell" aria-label={plainText ? 'Plain text pane' : 'Markdown pane'} hidden={!ready || docx || pdfDocument || !plainText && mode === 'visual'}>
           <div className="source-banner"><FileCode2 size={16} /><span>{plainText ? (/\.txt$/i.test(doc.file.title) ? doc.file.title : doc.file.title + '.txt') : split ? 'Markdown Source' : /\.(md|markdown)$/i.test(doc.file.title) ? doc.file.title : doc.file.title + '.md'}</span>
             {split && <button type="button" className="sync-scroll" aria-pressed={appearance.syncScroll} onClick={() => execute('view.sync-scroll')}><Link size={14} /> Sync Scroll</button>}
           </div>
           <div className="source-pane-content" onPointerDownCapture={event => { if (split && !doc.activatePane('source')) event.preventDefault() }}
             onFocusCapture={() => { if (split) doc.activatePane('source') }}
             onBeforeInputCapture={event => { if (!doc.activatePane('source')) event.preventDefault() }}>
-            {started && <SourceEditor initial={docx ? '' : doc.file.source} active={ready && !docx && (plainText || mode !== 'visual')} plainText={plainText} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} readOnly={!!liveDocument && !liveWritable} canEdit={doc.canEdit} onChange={doc.setSource}
+            {started && <SourceEditor initial={docx || pdfDocument ? '' : doc.file.source} active={ready && !docx && !pdfDocument && (plainText || mode !== 'visual')} plainText={plainText} lineNumberDisplay={appearance.lineNumbers} wordWrap={appearance.wordWrap} readOnly={!!liveDocument && !liveWritable} canEdit={doc.canEdit} onChange={doc.setSource}
               onOpenLink={host.resources ? (href, event) => (platform === 'mac' ? event.metaKey : event.ctrlKey) && openWorkspaceLink(href) : undefined}
               onLocation={location => { setLocation(location); doc.trackView() }} onReady={doc.registerSource} onLanguageError={() => notify('Markdown aids could not be loaded. Source editing is still available.')} />}
           </div>
         </section>
-        {dragging && <div className="drop-overlay" aria-hidden="true"><Upload size={29} /><strong>{markdown ? 'Drop a Markdown, TXT, or DOCX file, or an image' : 'Drop a Markdown, TXT, or DOCX file'}</strong></div>}
+        {dragging && <div className="drop-overlay" aria-hidden="true"><Upload size={29} /><strong>{markdown ? 'Drop a Markdown, TXT, DOCX, or PDF file, or an image' : 'Drop a Markdown, TXT, DOCX, or PDF file'}</strong></div>}
       </main>
       {ready && sidebar && <Properties appearance={appearance} setAppearance={setAppearance} hostTheme={!!themeFromHost} plainText={plainText} docx={docx} tab={propertiesTab} setTab={setTab} headings={doc.info.outline} active={doc.activeHeading || doc.info.outline[0]?.anchor || ''} statistics={doc.info.statistics} key={doc.file.id}
         metadata={doc.metadata} readOnly={!!liveDocument && !liveWritable} onMetadata={doc.changeMetadata} close={closeProperties} jump={jump} width={width} setWidth={value => setWidth(Math.min(430, Math.max(250, value)))} />}
     </div>
     <footer className="statusbar">
-      <div><span className="mode-indicator"><i />{plainText ? 'Plain text' : split ? 'Split mode' : source ? 'Source mode' : 'Visual mode'}</span><span className="status-separator" /><button type="button" onClick={() => openProperties('Statistics')}>{doc.info.statistics.words.toLocaleString()} words</button><span className="reading-time">{doc.info.statistics.minutes} min read</span></div>
+      {pdfDocument ? <div><span className="mode-indicator"><i />Read-only PDF</span><span className="status-separator" /><span>{(pdfPages ?? (doc.file.format === 'pdf' ? doc.file.pageCount : 0)).toLocaleString()} pages</span></div>
+        : <div><span className="mode-indicator"><i />{plainText ? 'Plain text' : split ? 'Split mode' : source ? 'Source mode' : 'Visual mode'}</span><span className="status-separator" /><button type="button" onClick={() => openProperties('Statistics')}>{doc.info.statistics.words.toLocaleString()} words</button><span className="reading-time">{doc.info.statistics.minutes} min read</span></div>}
       <div>
         {markdown && doc.warnings > 0 && !source && <button type="button" className="warning-link" onClick={() => doc.switchMode('source')} title="Open preserved syntax in Markdown source"><CircleAlert size={13} /> {doc.warnings} preserved {doc.warnings === 1 ? 'item' : 'items'}</button>}
         {importNotes.length > 0 && <button type="button" className={importLosses ? 'warning-link' : undefined} onClick={() => setDialog('docx-import')}>{importLosses ? <CircleAlert size={13} /> : <Info size={13} />} DOCX import notes</button>}
         {source && <span>Ln {location.line}, Col {location.column}</span>}
-        {!docx && <><span className="status-encoding">{plainText && doc.liveState?.readOnly ? 'Native text buffer' : plainText && doc.file.bom ? 'UTF-8 BOM' : 'UTF-8'}</span><span className="status-separator" /></>}<span>{docx ? 'DOCX' : plainText ? 'TXT' : 'Markdown'}</span>
+        {!docx && !pdfDocument && <><span className="status-encoding">{plainText && doc.liveState?.readOnly ? 'Native text buffer' : plainText && doc.file.bom ? 'UTF-8 BOM' : 'UTF-8'}</span><span className="status-separator" /></>}<span>{pdfDocument ? 'PDF' : docx ? 'DOCX' : plainText ? 'TXT' : 'Markdown'}</span>
       </div>
     </footer>
     <input ref={fileInput} type="file" accept={liveDocument ? '.md,.markdown,text/markdown' : openFileTypes} hidden onChange={event => { const file = event.target.files?.[0]; if (file) void doc.importFile(file); event.target.value = '' }} />
@@ -810,6 +862,9 @@ export default function App({ host }: { host: FolioHost }) {
         </div>
       </div>
     </Modal>}
+    {pdfExport && <PdfExportDialog key={pdfExport.key} title={pdfExport.snapshot.title} build={signal => buildPrint(pdfExport.snapshot, signal)}
+      isCurrent={() => doc.isCurrentExport(pdfExport.snapshot)} deliver={(filename, bytes) => deliverPdf(pdfExport.snapshot, filename, bytes)}
+      deliveryLabel={liveDocument ? 'Save PDF copy…' : 'Download PDF'} close={() => setPdfExport(null)} restart={() => { setPdfExport(null); requestAnimationFrame(openPdfExport) }} notify={notify} />}
     {dialog === 'emoji' && <Modal title="Insert emoji" close={() => setDialog(null)}><div className="emoji-grid">
       {['😀', '👋', '✨', '💡', '✅', '📌', '🗂️', '📝', '📚', '🔎', '🌿', '🎯', '🚀', '⚠️', '❤️', '🙌', '🎉', '📎', '⭐', '🔗'].map(emoji => <button type="button" key={emoji} onClick={() => { editor?.chain().focus().insertContent(emoji).run(); setDialog(null) }}>{emoji}</button>)}
     </div></Modal>}
