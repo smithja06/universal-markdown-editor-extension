@@ -8,6 +8,7 @@ import { axisMetrics, contains, defaultHeight, defaultWidth, fitSizes, intersect
 import { clipboardCharacterLimit, decodeTypedClipboard, encodeTypedClipboard, typedClipboardMime } from './clipboard'
 import { SpreadsheetGrid, type GridEditing } from './Grid'
 import { applySuggestion, formulaAssist } from './formulaAssist'
+import type { FormulaUpdates, StructureChange } from '../../document/formats/spreadsheet/restructure'
 import { FormulaAssistPanel } from './FormulaAssistPanel'
 import { SpreadsheetToolbar, type BorderMode, type ToolDialog } from './Toolbar'
 import { BorderDialog, ColorDialog, ConditionalDialog, ConfirmDialog, DialectDialog, ExportDialog, FormulaReference, InputDialog, LinkDialog,
@@ -97,6 +98,20 @@ function addReferenceChanges(workbook: Workbook, original: string, replacement?:
   }) }
 }
 
+/** Writes IronCalc's reference updates into the formulas. Changed formulas lose their stored result until recalculated. */
+function withFormulaUpdates(workbook: Workbook, updates: FormulaUpdates): Workbook {
+  return { ...workbook, sheets: workbook.sheets.map(sheet => {
+    const changed = updates[sheet.id]
+    if (!changed) return sheet
+    const cells = { ...sheet.cells }
+    for (const [address, value] of Object.entries(changed)) {
+      const cell = cells[address]
+      if (cell?.kind === 'formula') cells[address] = { ...cell, value, cached: undefined, cachedError: undefined }
+    }
+    return { ...sheet, cells }
+  }) }
+}
+
 function complexSheetReferences(workbook: Workbook) {
   return workbook.sheets.some(sheet => Object.values(sheet.cells).some(cell => cell.kind === 'formula' &&
     /(?:\bINDIRECT\s*\(|\[[^\]]+\]|!\$?[A-Z]{1,3}:\$?[A-Z]{1,3}|!\$?\d+:\$?\d+|(?:'[^']+'|[\w.]+):(?:'[^']+'|[\w.]+)!)/i.test(String(cell.value))))
@@ -162,6 +177,7 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
   const cell = sheet.cells[activeAddress]
   const style = cell?.style ?? {}
   const [formulaDraft, setFormulaDraft] = useState<{ address: string; value: string }>()
+  const [structuring, setStructuring] = useState(false)
   const [assist, setAssist] = useState<{ field: 'bar' | 'cell'; text: string; cursor: number; index: number; dismissed: boolean }>()
   const [cellCursor, setCellCursor] = useState<{ position: number; sequence: number }>()
   const formulaBar = useRef<HTMLTextAreaElement>(null)
@@ -628,11 +644,24 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     update({ ...workbook, sheets: [...workbook.sheets, next] })
     switchSheet(next)
   }
+  /** IronCalc updates formula references for the change. A workbook edit made meanwhile cancels the operation. */
+  async function formulaUpdates(change: StructureChange) {
+    if (!formulaCount) return {}
+    const base = workbook
+    setStructuring(true)
+    try {
+      const updates = await (await import('../../document/formats/spreadsheet/workerClient')).restructureWorkbook(base, change)
+      if (workbookRef.current !== base) throw new Error('The workbook changed while Folio updated formula references. Try again.')
+      return updates
+    } finally { setStructuring(false) }
+  }
   function renameSheet(name: string) {
     validNewSheetName(name, workbook, sheet.id)
     if (name === sheet.name) return
-    if (complexSheetReferences(workbook)) throw new Error('This workbook has advanced formula references that Folio cannot update during sheet rename.')
-    update(addReferenceChanges(patchSheet(workbook, { ...sheet, name }), sheet.name, name))
+    const base = workbook, target = sheet
+    void formulaUpdates({ kind: 'rename', sheetId: target.id, name })
+      .then(updates => update(withFormulaUpdates(patchSheet(base, { ...target, name }), updates)))
+      .catch(error => setNotice('Folio kept the worksheet name. ' + (error instanceof Error ? error.message : '')))
   }
   function deleteSheet() {
     if (workbook.sheets.length <= 1) return
@@ -673,14 +702,20 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     }
     replaceSheet({ ...sheet, [key]: next })
   }
-  function structure(axis: Axis, index: number, insert: boolean) {
-    if (formulaCount) { setNotice('Row and column insertion and deletion require a workbook without formulas.'); return }
+  async function structure(axis: Axis, index: number, insert: boolean) {
     const limit = axis === 'row' ? spreadsheetLimits.rows : spreadsheetLimits.cols
     if (insert && bounds[axis] >= limit) { setNotice('This insertion would move cells beyond the worksheet boundary.'); return }
-    const next = shiftSheet(sheet, axis, index, insert)
+    const base = workbook, target = sheet
+    let updates: FormulaUpdates
+    try { updates = await formulaUpdates({ kind: insert ? 'insert' : 'delete', sheetId: target.id, axis, index }) }
+    catch (error) {
+      setNotice(`Folio left the worksheet unchanged because it cannot update every formula reference. ${error instanceof Error ? error.message : ''}`)
+      return
+    }
+    const next = shiftSheet(target, axis, index, insert)
     try {
-      if (workbook.csv) replaceCsvShape(next, shiftCsvRows(workbook.csv.rowWidths, axis, index, insert))
-      else replaceSheet(next)
+      if (base.csv) replaceCsvShape(next, shiftCsvRows(base.csv.rowWidths, axis, index, insert))
+      else update(withFormulaUpdates(patchSheet(base, next), updates))
     } catch (error) { report(error) }
   }
   function toggleHidden(axis: Axis, index?: number) {
@@ -710,8 +745,8 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     const index = point[axis]
     const frozen = axis === 'row' ? 'frozenRows' : 'frozenCols'
     return [
-      { label: 'Insert ' + name + (axis === 'row' ? ' above' : ' to the left'), disabled, run: () => structure(axis, index, true) },
-      { label: 'Delete ' + name, disabled, run: () => structure(axis, index, false) },
+      { label: 'Insert ' + name + (axis === 'row' ? ' above' : ' to the left'), disabled: disabled || structuring, run: () => void structure(axis, index, true) },
+      { label: 'Delete ' + name, disabled: disabled || structuring, run: () => void structure(axis, index, false) },
       { label: 'Resize ' + name + '…', disabled, run: () => { setResize({ axis, index }); setDialog('resize') } },
       { label: (axis === 'row' ? 'Auto-fit row height' : 'Auto-fit column width'), disabled, run: () => autoFit(axis, index) },
       { label: 'Hide ' + name, disabled, run: () => toggleHidden(axis, index) },
