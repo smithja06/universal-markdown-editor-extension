@@ -4,8 +4,9 @@ import { renderDiagram } from '../diagrams'
 import { exportFonts } from './fonts'
 import type { GeneratorReply, GeneratorRequest } from './generator.worker'
 import { missingGlyphs } from './layout'
+import { codePointMarker } from './coverage'
 import type { MarkdownAssets, RasterAsset } from './fromMarkdown'
-import { blockText, exportLimits, type ExportNotice, type PdfPageOptions, type PrintBlock, type PrintDocument } from './model'
+import { blockText, documentLanguage, exportLimits, type ExportNotice, type PdfPageOptions, type PrintBlock, type PrintDocument } from './model'
 import { fontSetCoverage } from './render'
 import { validatePdf, type PdfValidation } from './validate'
 
@@ -26,8 +27,8 @@ export function reviewNotices(print: PrintDocument): ExportNotice[] {
   if (!missing.size) return print.notices
   const total = [...missing.values()].reduce((sum, count) => sum + count, 0)
   const sample = [...missing.keys()].slice(0, 12).join(' ')
-  return [...print.notices, { feature: 'Characters and fonts', effect: 'omitted',
-    message: `${total.toLocaleString('en-US')} character${total === 1 ? '' : 's'} (${sample}${missing.size > 12 ? ' …' : ''}) have no glyph in Folio’s bundled PDF fonts and will appear as blank or placeholder glyphs.` }]
+  return [...print.notices, { feature: 'Characters and fonts', effect: 'approximated',
+    message: `${total.toLocaleString('en-US')} character${total === 1 ? '' : 's'} (${sample}${missing.size > 12 ? ' …' : ''}) have no glyph in Folio’s bundled PDF fonts. They print as Unicode code points such as ${codePointMarker([...missing.keys()].slice(0, 1))}, which stay searchable.` }]
 }
 
 function generate(request: GeneratorRequest, signal?: AbortSignal) {
@@ -49,7 +50,9 @@ function generate(request: GeneratorRequest, signal?: AbortSignal) {
 }
 
 /** Generates a PDF in an isolated worker, then reopens it with the viewer engine to validate it. */
-export async function createPdf(print: PrintDocument, options: PdfPageOptions, signal?: AbortSignal): Promise<{ bytes: Uint8Array; validation: PdfValidation }> {
+export async function createPdf(input: PrintDocument, options: PdfPageOptions, signal?: AbortSignal): Promise<{ bytes: Uint8Array; validation: PdfValidation }> {
+  // Without a declared language, assistive technology reads the PDF in the reader's locale.
+  const print = { ...input, language: input.language ?? documentLanguage(globalThis.navigator?.language) }
   const bytes = await generate({ print, options, fonts: exportFonts }, signal)
   signal?.throwIfAborted()
   const validation = await validatePdf(bytes, print, options, fontCoverage(), await browserPdfRuntime(), signal)

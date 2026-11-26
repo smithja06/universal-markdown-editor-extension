@@ -1,6 +1,6 @@
 import { needsGlyph } from './coverage'
 import { openPdf, type PdfRuntime } from '../formats/pdf/engine'
-import { literalColumns, literalSize, wrapLiteral, type Coverage } from './layout'
+import { literalColumns, literalSize, printedText, wrapLiteral, type Coverage } from './layout'
 import { exportLimits, pageDimensions, runText, type PdfPageOptions, type PrintBlock, type PrintDocument } from './model'
 
 export interface PdfValidation { pageCount: number; width: number; height: number }
@@ -8,12 +8,11 @@ export interface PdfValidation { pageCount: number; width: number; height: numbe
 /** Text fragments that must appear, in order, in the generated PDF's embedded text. */
 export function expectedFragments(print: PrintDocument, coverage: Coverage, options: PdfPageOptions) {
   const fragments: string[] = []
+  // Compare the text as printed, including code-point markers for characters no bundled font can draw.
   const keep = (text: string, mono: boolean) => {
     let value = ''
-    for (const character of text) {
-      const point = character.codePointAt(0)!
-      if (/\s/u.test(character) || !needsGlyph(point)) continue
-      if (!coverage.mono.has(point) && (mono || !coverage.body.has(point))) continue
+    for (const character of printedText(text, coverage, mono)) {
+      if (/\s/u.test(character) || !needsGlyph(character.codePointAt(0)!)) continue
       value += character
     }
     if (value) fragments.push(value)
@@ -50,10 +49,9 @@ export async function validatePdf(bytes: Uint8Array, print: PrintDocument, optio
     let text = ''
     for (let index = 0; index < handle.pageCount; index++) {
       signal?.throwIfAborted()
-      // Characters no bundled font covers may extract as replacement glyphs, so compare only representable text.
       let page = Array.from((await handle.text(index, signal)).text).filter(character => {
         const point = character.codePointAt(0)!
-        return !/\s/u.test(character) && needsGlyph(point) && (coverage.body.has(point) || coverage.mono.has(point))
+        return !/\s/u.test(character) && needsGlyph(point) && (coverage.body.has(point) || coverage.mono.has(point) || coverage.symbols.has(point))
       }).join('')
       const footer = `${index + 1}/${handle.pageCount}`
       const at = page.lastIndexOf(footer)

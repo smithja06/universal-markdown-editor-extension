@@ -1,5 +1,5 @@
 import type { JSONContent } from '@tiptap/core'
-import { exportLimits, safePdfLink, type Align, type ExportNotice, type Inline, type PrintBlock, type PrintDocument, type TableCell, type TextRun } from './model'
+import { documentLanguage, exportLimits, safePdfLink, type Align, type ExportNotice, type Inline, type PrintBlock, type PrintDocument, type TableCell, type TextRun } from './model'
 
 export interface RasterAsset { src: string; width: number; height: number }
 export interface MarkdownAssets {
@@ -158,5 +158,8 @@ export async function printMarkdown(title: string, document: JSONContent, assets
   if (counters.raw) notices.push({ feature: 'HTML and unsupported syntax', effect: 'approximated', message: `${plural(counters.raw, 'preserved source item')} printed as literal source text.` })
   if (counters.links) notices.push({ feature: 'Links', effect: 'approximated', message: `${plural(counters.links, 'link')} to headings, files or unsupported destinations printed as plain text.` })
   if (counters.unsupportedMarks.size) notices.push({ feature: 'Formatting', effect: 'approximated', message: `${[...counters.unsupportedMarks].sort().join(', ')} formatting printed as plain text.` })
-  return { title, source: 'markdown', blocks: body, notices }
+  // A `lang:` or `language:` front matter entry sets the PDF language.
+  const declared = /^(?:lang|language):\s*["']?([A-Za-z0-9-]{2,35})["']?\s*$/m.exec(String(document.attrs?.frontMatter ?? ''))?.[1]
+  const language = documentLanguage(declared)
+  return { title, source: 'markdown', blocks: body, notices, ...(language ? { language } : {}) }
 }

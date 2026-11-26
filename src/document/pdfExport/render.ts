@@ -22,7 +22,8 @@ export function decodeBase64(value: string) {
 }
 
 export function fontSetCoverage(fonts: FontData): Coverage {
-  return { body: fontCoverage(decodeBase64(fonts['Roboto-Regular.ttf'])), mono: fontCoverage(decodeBase64(fonts['DejaVuSansMono.ttf'])) }
+  return { body: fontCoverage(decodeBase64(fonts['Roboto-Regular.ttf'])), mono: fontCoverage(decodeBase64(fonts['DejaVuSansMono.ttf'])),
+    symbols: fontCoverage(decodeBase64(fonts['DejaVuSans.ttf'])) }
 }
 
 export async function renderPdf(pdfMake: PdfMakeLike, print: PrintDocument, options: PdfPageOptions, fonts: FontData, coverage = fontSetCoverage(fonts)) {

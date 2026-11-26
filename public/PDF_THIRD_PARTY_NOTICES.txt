@@ -1,6 +1,6 @@
 Folio PDF viewer and PDF export third-party notices
 
-The PDF viewer bundles pdf.js. PDF export runs pdfmake's prebuilt browser bundle (pdfmake/build/pdfmake.min.js) in an isolated worker and embeds Roboto and DejaVu Sans Mono fonts. The pdfmake bundle contains the components listed under "Components inside pdfmake 0.3.14". Their versions are those resolved for pdfmake 0.3.14 in Folio's lockfile where installed, or the versions declared by pdfmake's build configuration otherwise. The bundle does not record embedded versions itself.
+The PDF viewer bundles pdf.js. PDF export runs pdfmake's prebuilt browser bundle (pdfmake/build/pdfmake.min.js) in an isolated worker and embeds Roboto, DejaVu Sans and DejaVu Sans Mono fonts. The pdfmake bundle contains the components listed under "Components inside pdfmake 0.3.14". Their versions are those resolved for pdfmake 0.3.14 in Folio's lockfile where installed, or the versions declared by pdfmake's build configuration otherwise. The bundle does not record embedded versions itself.
 
 ------------------------------------------------------------------------------
 
@@ -217,7 +217,7 @@ The four unmodified TrueType files are embedded and subset into exported PDFs.
 
 ------------------------------------------------------------------------------
 
-DejaVu Sans Mono (dejavu-fonts-ttf 2.37.3) | https://dejavu-fonts.github.io
+DejaVu Sans and DejaVu Sans Mono (dejavu-fonts-ttf 2.37.3, DejaVuSans.ttf and DejaVuSansMono.ttf, unmodified) | https://dejavu-fonts.github.io
 
 Fonts are (c) Bitstream (see below). DejaVu changes are in public domain.
 Glyphs imported from Arev fonts are (c) Tavmjong Bah (see below)

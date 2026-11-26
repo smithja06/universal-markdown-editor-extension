@@ -10,7 +10,7 @@ export function nodePdfMake() {
   for (const name of ['Roboto-Regular.ttf', 'Roboto-Medium.ttf', 'Roboto-Italic.ttf', 'Roboto-MediumItalic.ttf']) {
     fonts[name] = readFileSync(require.resolve('pdfmake/fonts/Roboto/' + name)).toString('base64')
   }
-  fonts['DejaVuSansMono.ttf'] = readFileSync(require.resolve('dejavu-fonts-ttf/ttf/DejaVuSansMono.ttf')).toString('base64')
+  for (const name of ['DejaVuSansMono.ttf', 'DejaVuSans.ttf']) fonts[name] = readFileSync(require.resolve('dejavu-fonts-ttf/ttf/' + name)).toString('base64')
   const pdfMake = require('pdfmake') as PdfMakeLike & { setLocalAccessPolicy(policy: () => boolean): void }
   pdfMake.setLocalAccessPolicy(() => false)
   return { pdfMake, fonts }
