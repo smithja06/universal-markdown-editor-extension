@@ -3,6 +3,7 @@ import { History, Plus } from 'lucide-react'
 import type { JSONContent } from '@tiptap/core'
 import { Modal } from './controls'
 import type { DocumentFormat } from '../document/formats/content'
+import { cellInput } from '../document/formats/spreadsheet/model'
 import { automaticVersionLimit, versionStorageError, type DocumentVersion, type VersionSummary } from '../document/versions'
 import type { DocumentStorage } from '../host/contracts'
 
@@ -108,7 +109,7 @@ export function VersionHistory({ documentId, title, theme, automaticError, forma
   }, [documentId, read, selection])
 
   useEffect(() => {
-    if (!preview || preview.content.format === 'txt' || preview.content.format === 'docx' || mode !== 'rendered') return
+    if (!preview || (preview.content.format && preview.content.format !== 'markdown') || mode !== 'rendered') return
     let active = true
     void import('../document/export').then(module => module.renderVersionPreview(preview.content.source)).then(
       html => { if (active) setRendered(html) },
@@ -187,7 +188,7 @@ export function VersionHistory({ documentId, title, theme, automaticError, forma
             : <p>{selection ? 'Loading preview…' : 'Choose a version to preview.'}</p>}</div>}
           {preview && <>
             <div className="version-preview-top">
-              {preview.content.format !== 'txt' && preview.content.format !== 'docx' && <div role="group" aria-label="Preview format" className="version-formats">
+              {(!preview.content.format || preview.content.format === 'markdown') && <div role="group" aria-label="Preview format" className="version-formats">
                 <button type="button" aria-pressed={mode === 'rendered'} onClick={() => setMode('rendered')}>Rendered</button>
                 <button type="button" aria-pressed={mode === 'markdown'} onClick={() => setMode('markdown')}>Markdown</button>
               </div>}
@@ -200,7 +201,14 @@ export function VersionHistory({ documentId, title, theme, automaticError, forma
                 <button type="button" className="primary-button" disabled={!!busy} onClick={() => void restoreSelected()}>{busy === 'restore' ? 'Restoring…' : 'Confirm restore'}</button>
               </div>
             </div>}
-            {preview.content.format === 'docx'
+            {'workbook' in preview.content
+              ? <div className="version-docx" role="region" aria-label="Spreadsheet version preview" tabIndex={0}>
+                {preview.content.workbook.sheets.map(sheet => <section key={sheet.id}>
+                  <h3>{sheet.name}</h3>
+                  <ul>{Object.entries(sheet.cells).slice(0, 6).map(([address, cell]) => <li key={address}><strong>{address}</strong> {cellInput(cell)}</li>)}</ul>
+                </section>)}
+              </div>
+              : preview.content.format === 'docx'
               ? <div className="version-docx tiptap" role="region" aria-label="DOCX version preview" tabIndex={0}>{docxPreview(preview.content.document)}</div>
               : mode === 'markdown' || preview.content.format === 'txt' ? <pre className="version-markdown" role="region" aria-label={preview.content.format === 'txt' ? 'Plain text version preview' : 'Markdown version preview'} tabIndex={0}>{preview.content.source}</pre>
               : rendered ? <iframe className="version-frame" title="Rendered version preview" sandbox="" srcDoc={rendered} style={{ colorScheme: theme }} />
@@ -208,7 +216,7 @@ export function VersionHistory({ documentId, title, theme, automaticError, forma
           </>}
         </div>
       </div>
-      <p className="muted version-footer">{storage} of {format === 'docx' ? 'DOCX' : format === 'txt' ? 'plain text' : 'Markdown'} stored for this document. Folio keeps the {automaticVersionLimit} most recent automatic checkpoints and retains versions you create or recover.</p>
+      <p className="muted version-footer">{storage} of {format === 'txt' ? 'plain text' : format && format !== 'markdown' ? format.toUpperCase() : 'Markdown'} stored for this document. Folio keeps the {automaticVersionLimit} most recent automatic checkpoints and retains versions you create or recover.</p>
     </div>
   </Modal>
 }

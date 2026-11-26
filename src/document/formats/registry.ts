@@ -1,13 +1,14 @@
 import type { FileInput } from '../../host/contracts'
 import { decodeMarkdown, encodeMarkdown, markdownFilename, sanitizeFilename } from '../files'
-import { makeDocxContent, type DocumentContent, type DocumentFormat, type DocxContent, type LineEnding, type MarkdownContent, type OriginalFile, type OriginalFileReference, type TxtContent } from './content'
+import { hasOriginal, makeDocxContent, spreadsheetContent, type DocumentContent, type DocumentFormat, type DocxContent, type LineEnding, type MarkdownContent, type OriginalFile, type OriginalFileReference, type TxtContent } from './content'
 import { docxMaxFileBytes, docxMimeType, type DocxCodec, type DocxIssue } from './docx/model'
 import { containsBinaryControls, decodeTxt, maxTxtImportBytes, TxtInputError } from './txt'
 import { pdfLimits, pdfMimeType, PdfInputError, type PdfInspector } from './pdf/model'
+import { spreadsheetLimits } from './spreadsheet/model'
 
 export interface FormatDiagnostic {
   severity: 'info' | 'warning' | 'error'
-  code: 'unsupported-format' | 'invalid-encoding' | 'invalid-text' | 'size-limit' | 'mixed-line-endings' | 'stale-export' | 'missing-original' | 'invalid-docx' | 'docx-fidelity' | 'invalid-pdf' | 'encrypted-pdf' | 'pdf-content' | 'read-only'
+  code: 'unsupported-format' | 'invalid-encoding' | 'invalid-text' | 'size-limit' | 'mixed-line-endings' | 'stale-export' | 'missing-original' | 'invalid-docx' | 'docx-fidelity' | 'invalid-pdf' | 'encrypted-pdf' | 'pdf-content' | 'read-only' | 'invalid-spreadsheet'
   message: string
   feature?: string
   location?: string
@@ -93,6 +94,11 @@ const docxAdapter = {
 }
 
 const pdfAdapter = { extensions: ['.pdf'], mediaType: pdfMimeType, capabilities: { richText: false, exportCopy: false, readOnly: true } }
+export const spreadsheetMediaTypes = {
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv: 'text/csv;charset=utf-8',
+  png: 'image/png',
+}
 
 function docxIssue(issue: DocxIssue): FormatDiagnostic {
   return { ...issue, code: 'docx-fidelity', severity: issue.effect === 'preserved' ? 'info' : 'warning' }
@@ -112,27 +118,33 @@ async function prepareDocx(content: DocxContent, options: ExportOptions, signal?
   }
 }
 
-export const openFileTypes = [...Object.values(adapters).flatMap(adapter => adapter.extensions), ...docxAdapter.extensions, ...pdfAdapter.extensions, 'text/markdown', 'text/plain', docxMimeType, pdfMimeType].join(',')
+export const openFileTypes = [...Object.values(adapters).flatMap(adapter => adapter.extensions), ...docxAdapter.extensions, ...pdfAdapter.extensions, '.xlsx', '.csv', 'text/markdown', 'text/plain', docxMimeType, pdfMimeType, spreadsheetMediaTypes.xlsx, 'text/csv'].join(',')
 
 export function identifyFormat(filename: string): DocumentFormat | undefined {
   const extension = /\.[^.]+$/.exec(filename.toLowerCase())?.[0]
   if (extension === '.docx') return 'docx'
   if (extension === '.pdf') return 'pdf'
+  if (extension === '.xlsx') return 'xlsx'
+  if (extension === '.csv') return 'csv'
   return (Object.keys(adapters) as (keyof typeof adapters)[]).find(format => extension && adapters[format].extensions.includes(extension))
 }
 
 export function formatCapabilities(content: Pick<DocumentContent, 'format'>): { richText: boolean; exportCopy: boolean; readOnly?: boolean } {
+  if (content.format === 'xlsx' || content.format === 'csv') return { richText: false, exportCopy: true }
   return content.format === 'pdf' ? pdfAdapter.capabilities : content.format === 'docx' ? docxAdapter.capabilities : adapters[content.format ?? 'markdown'].capabilities
 }
 
 export async function importDocument(input: FileInput, signal?: AbortSignal, codec?: DocxCodec, inspectPdf?: PdfInspector): Promise<Imported> {
   const format = identifyFormat(input.name)
-  if (!format) return reject('unsupported-format', 'Choose a .md, .markdown, .txt, .docx or .pdf file.')
+  if (!format) return reject('unsupported-format', 'Choose a Markdown, TXT, DOCX, PDF, XLSX, or CSV file.')
   signal?.throwIfAborted()
   if (format === 'txt' && input.size !== undefined && input.size > maxTxtImportBytes) return reject('size-limit', 'TXT imports are limited to 16 MiB.')
   if (format === 'docx' && (input.size ?? 0) > docxMaxFileBytes) return reject('size-limit', 'DOCX imports are limited to 24 MiB.')
   const pdfLimit = `PDF imports are limited to ${pdfLimits.fileBytes / 1024 / 1024} MiB.`
   if (format === 'pdf' && (input.size ?? 0) > pdfLimits.fileBytes) return reject('size-limit', pdfLimit)
+  const spreadsheet = format === 'xlsx' || format === 'csv'
+  const spreadsheetLimit = 'Spreadsheet imports are limited to 16 MiB.'
+  if (spreadsheet && (input.size ?? 0) > spreadsheetLimits.fileBytes) return reject('size-limit', spreadsheetLimit)
   const bytes = new Uint8Array(await input.arrayBuffer())
   signal?.throwIfAborted()
   let content: DocumentContent | Rejected
@@ -148,6 +160,12 @@ export async function importDocument(input: FileInput, signal?: AbortSignal, cod
       if (!codec) return reject('invalid-docx', 'DOCX import is available in standalone Folio.')
       const result = await codec.read(bytes, signal)
       content = makeDocxContent(result.document, result.issues)
+    } else if (spreadsheet) {
+      if (bytes.byteLength > spreadsheetLimits.fileBytes) return reject('size-limit', spreadsheetLimit)
+      const workbook = format === 'xlsx'
+        ? await (await import('./spreadsheet/workerClient')).readXlsx(bytes, signal)
+        : await (await import('./spreadsheet/csvWorker')).readCsvInWorker(bytes.slice(), undefined, signal)
+      content = spreadsheetContent(format, workbook)
     } else content = adapters[format].decode(bytes)
   }
   catch (error) {
@@ -155,11 +173,12 @@ export async function importDocument(input: FileInput, signal?: AbortSignal, cod
     if (error instanceof PdfInputError) return reject(error.code === 'encrypted' ? 'encrypted-pdf' : error.code === 'size-limit' ? 'size-limit' : 'invalid-pdf', error.message)
     if (format === 'pdf') return reject('invalid-pdf', 'The file is not a readable PDF document.')
     if (format === 'docx') return reject('invalid-docx', error instanceof Error ? error.message : 'The DOCX package could not be opened.')
+    if (spreadsheet) return reject('invalid-spreadsheet', error instanceof Error ? error.message : 'The spreadsheet could not be opened.')
     if (!(error instanceof TypeError)) throw error
     return reject('invalid-encoding', 'The file is not valid UTF-8.')
   }
   if ('status' in content) return content
-  if (content.format !== 'txt' && content.format !== 'docx' && content.format !== 'pdf') return { status: 'editable', content, diagnostics: [] }
+  if (!hasOriginal(content)) return { status: 'editable', content, diagnostics: [] }
   const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('')
   signal?.throwIfAborted()
   const reference = { id: crypto.randomUUID(), filename: input.name, sha256, byteLength: bytes.length }
@@ -173,6 +192,7 @@ export async function exportDocument(snapshot: ExportSnapshot, isCurrent: (snaps
   if (!isCurrent(snapshot)) return stale()
   const { content, title } = snapshot
   if (content.format === 'pdf') return reject('read-only', 'Imported PDFs are read-only. Use Download original to save the exact file.')
+  if ('workbook' in content) return reject('invalid-spreadsheet', 'Use the spreadsheet editor’s export options to review and save a copy.')
   const adapter = content.format === 'docx' ? docxAdapter : adapters[content.format ?? 'markdown']
   const prepared = await (content.format === 'docx' ? prepareDocx(content, options, signal, codec)
     : content.format === 'txt' ? adapters.txt.encode(content, options, readOriginal) : adapters.markdown.encode(content, options, readOriginal))

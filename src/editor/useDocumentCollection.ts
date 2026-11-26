@@ -70,7 +70,7 @@ export function useDocumentCollection(storage: DocumentStorage) {
     })
   }, [cache, enqueue, storage, updateSummary])
 
-  const insertImported = useCallback((file: DocumentFile, words: number, original: OriginalFile | undefined, signal: AbortSignal) => {
+  const insertImported = useCallback((file: DocumentFile, words: number | undefined, original: OriginalFile | undefined, signal: AbortSignal) => {
     return enqueue(async () => {
       const summary = await storage.insertDraft(file, words, original, signal)
       drafts.current.set(file.id, file)

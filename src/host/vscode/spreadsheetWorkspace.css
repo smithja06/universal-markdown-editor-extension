@@ -1,0 +1,16 @@
+.spreadsheet-native > .spreadsheet-native-notice {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: var(--ui);
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.spreadsheet-native > .spreadsheet-native-notice[role="alert"] {
+  border-left: 3px solid var(--warning);
+}

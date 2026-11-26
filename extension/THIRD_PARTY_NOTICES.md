@@ -17,6 +17,10 @@ This release candidate is for local validation. The pinned links identify the up
 
 The PDF viewer bundles pdf.js (pdfjs-dist 6.5.438, Apache 2.0, Copyright Mozilla Foundation and contributors) and runs its worker from a bundled blob. PDF export runs pdfmake 0.3.14's prebuilt browser bundle (MIT) in an isolated worker. That bundle contains pdfkit, fontkit, linebreak and other MIT, ISC, BlueOak 1.0.0, BSD-3-Clause and Apache 2.0 components. Exported PDFs embed subsets of the Roboto fonts (Apache 2.0, Copyright 2011 Google Inc.) and DejaVu Sans Mono 2.37 (Bitstream Vera and Arev font licenses, DejaVu changes in the public domain). The full list, versions and license texts are in `dist/PDF_THIRD_PARTY_NOTICES.txt`.
 
+## Spreadsheet runtime
+
+Folio uses the MIT option for IronCalc XLSX 0.9.1. The complete engine notice, published Rust dependency notices and Unicode CLDR license accompany the WASM in dist/SPREADSHEET_THIRD_PARTY_NOTICES.txt.
+
 ## DOMPurify
 
 DOMPurify 3.4.18 is dual-licensed. This package uses it under Apache 2.0. Copyright (c) Cure53 and other contributors. The generated notices include the Apache 2.0 text. Folio bundles and minifies the published module. [Upstream license](https://github.com/cure53/DOMPurify/blob/37abc335c6a0aad2ac4f9dce6bd256d40c17acc4/LICENSE)

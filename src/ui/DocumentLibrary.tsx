@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Copy, FilePlus2, FileText, Pencil, RotateCcw, Search, Trash2 } from 'lucide-react'
+import { Copy, FilePlus2, FileText, Pencil, RotateCcw, Search, Table2, Trash2 } from 'lucide-react'
 import type { DocumentSummary } from '../document/workspace'
 import { IconButton, Modal } from './controls'
 
@@ -13,7 +13,7 @@ interface Props {
   items: DocumentSummary[]
   tabs: string[]
   close(): void
-  create(): void
+  create(format?: 'xlsx'): void
   open(id: string): Promise<void>
   rename(id: string, title: string): Promise<void>
   duplicate(id: string): Promise<void>
@@ -72,7 +72,10 @@ export function DocumentLibrary({ items, tabs, close, create, open, rename, dupl
     <div className="document-library">
       <div className="library-navigation">
         <div className="library-views" role="group" aria-label="Document collections">{views.map(option => <button key={option} type="button" aria-pressed={option === view} disabled={busy} onClick={() => { confirmationTrigger.current = null; setPending(undefined); setView(option); setError(''); setFeedback('') }}>{option}</button>)}</div>
-        <button type="button" className="primary-button library-new" disabled={busy} onClick={() => void run(create, 'close')}><FilePlus2 size={15} /> New document</button>
+        <div className="library-create-actions">
+          <button type="button" className="secondary-button" disabled={busy} onClick={() => void run(() => create('xlsx'), 'close')}><Table2 size={15} /> New spreadsheet</button>
+          <button type="button" className="primary-button library-new" disabled={busy} onClick={() => void run(create, 'close')}><FilePlus2 size={15} /> New document</button>
+        </div>
       </div>
       <div className="library-controls">
         <label className="library-search"><Search size={16} /><input ref={searchInput} data-dialog-focus type="search" aria-label="Search documents" placeholder="Search by name" value={search} onChange={event => setSearch(event.target.value)} /></label>
@@ -100,7 +103,7 @@ export function DocumentLibrary({ items, tabs, close, create, open, rename, dupl
             <FileText size={17} aria-hidden="true" className="library-row-icon" />
             <div className="library-row-details">
               {view === 'Trash' ? <strong>{item.title}</strong> : <button type="button" className="library-open" disabled={busy} onClick={() => void run(() => open(item.id), 'close')}>{item.title}</button>}
-              <p className="muted">{item.format === 'pdf' ? 'PDF' : item.format === 'docx' ? 'DOCX' : item.format === 'txt' ? 'TXT' : 'Markdown'} · {view === 'Trash' ? `Deleted ${calendar.format(item.deletedAt)}` : `Modified ${calendar.format(item.updated)} · Created ${calendar.format(item.createdAt)}`}{item.words !== undefined && ` · ${item.words.toLocaleString()} ${item.words === 1 ? 'word' : 'words'}`}{openIds.has(item.id) && ' · Open'}</p>
+              <p className="muted">{item.format && item.format !== 'markdown' ? item.format.toUpperCase() : 'Markdown'} · {view === 'Trash' ? `Deleted ${calendar.format(item.deletedAt)}` : `Modified ${calendar.format(item.updated)} · Created ${calendar.format(item.createdAt)}`}{item.words !== undefined && ` · ${item.words.toLocaleString()} ${item.words === 1 ? 'word' : 'words'}`}{openIds.has(item.id) && ' · Open'}</p>
             </div>
             <div className="library-row-actions">
               {view === 'Trash' ? <button type="button" className="secondary-button" disabled={busy} aria-label={'Restore ' + item.title} onClick={() => void run(() => restore(item.id), 'Document restored to the library.')}><RotateCcw size={13} /> Restore</button> : <>

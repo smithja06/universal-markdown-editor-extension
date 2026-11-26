@@ -3,6 +3,7 @@ import { isNativeAction, type NativeAction } from './nativeCommands'
 import type { DocumentFormat } from '../../document/formats/content'
 import { docxMaxFileBytes, type DocxIssue } from '../../document/formats/docx/model'
 import { pdfLimits } from '../../document/formats/pdf/model'
+import { isSpreadsheetClientMessage, isSpreadsheetHostMessage, type SpreadsheetClientMessage, type SpreadsheetHostMessage } from './spreadsheetProtocol'
 
 /** The read-only PDF editor state. Bytes travel separately in `pdfBytes`. */
 export interface PdfViewState {
@@ -46,6 +47,7 @@ export type PendingCheckpoint = Pick<RecoveryDraft, 'id' | 'uri' | 'generation' 
 export const concurrentWorkspaceImages = 4
 
 export type ClientMessage =
+  | SpreadsheetClientMessage
   | { type: 'ready' }
   | { type: 'edit'; id: number; revision: number; change: Splice }
   | { type: 'checkpoint'; draft: RecoveryDraft | PendingCheckpoint }
@@ -65,6 +67,7 @@ export type ClientMessage =
   | { type: 'pdfExport'; id: number; revision: number; filename: string; bytes: ArrayBuffer }
 
 export type HostMessage =
+  | SpreadsheetHostMessage
   | { type: 'state'; state: DocumentState; edit?: { id: number; accepted: boolean; message?: string } }
   | { type: 'accepted'; state: DocumentMetadata; edit: { id: number } }
   | { type: 'error'; message: string }
@@ -98,6 +101,7 @@ export function isPendingCheckpoint(value: unknown): value is PendingCheckpoint 
 
 export function isClientMessage(value: unknown): value is ClientMessage {
   if (!record(value)) return false
+  if (typeof value.type === 'string' && value.type.startsWith('spreadsheet')) return isSpreadsheetClientMessage(value)
   if (value.type === 'ready' || value.type === 'status') return true
   if (value.type === 'edit') return integer(value.id, 1) && integer(value.revision) && isSplice(value.change)
   if (value.type === 'checkpoint') return isRecoveryDraft(value.draft) || isPendingCheckpoint(value.draft)
@@ -154,6 +158,7 @@ function isDocumentState(value: unknown): value is DocumentState {
 
 export function isHostMessage(value: unknown): value is HostMessage {
   if (!record(value)) return false
+  if (typeof value.type === 'string' && value.type.startsWith('spreadsheet')) return isSpreadsheetHostMessage(value)
   if (value.type === 'error') return typeof value.message === 'string'
   if (value.type === 'recovery') return typeof value.scope === 'string' && /^[\da-f]{64}$/.test(value.scope) &&
     isId(value.id) && Array.isArray(value.active) && value.active.every(isId) &&

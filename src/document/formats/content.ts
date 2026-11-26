@@ -2,8 +2,9 @@ import type { MarkdownFile } from '../files'
 import type { JSONContent } from '@tiptap/core'
 import { canonicalDocx, docxText, type DocxIssue } from './docx/model'
 import type { PdfFeatures } from './pdf/model'
+import type { SpreadsheetFormat, Workbook } from './spreadsheet/model'
 
-export type DocumentFormat = 'markdown' | 'txt' | 'docx' | 'pdf'
+export type DocumentFormat = 'markdown' | 'txt' | 'docx' | 'pdf' | SpreadsheetFormat
 export type LineEnding = MarkdownFile['lineEnding']
 
 export interface OriginalFileReference {
@@ -62,11 +63,27 @@ export interface PdfContent {
   original?: never
 }
 
-// The discriminator also accepts untagged Markdown records.
-export type DocumentContent = MarkdownContent | TxtContent | DocxContent | PdfContent
+export interface SpreadsheetContent {
+  format: SpreadsheetFormat
+  schemaVersion: 1
+  workbook: Workbook
+  // Compatibility field for shared draft metadata. Workbook is authoritative.
+  source: string
+  lineEnding: '\n'
+  bom: false
+  originalFile?: OriginalFileReference
+  original?: never
+}
 
-export function hasOriginal(content: DocumentContent): content is TxtContent | DocxContent | PdfContent {
-  return content.format === 'txt' || content.format === 'docx' || content.format === 'pdf'
+export function spreadsheetContent(format: SpreadsheetFormat, workbook: Workbook): SpreadsheetContent {
+  return { format, schemaVersion: 1, workbook, source: '', lineEnding: '\n', bom: false }
+}
+
+// The discriminator also accepts untagged Markdown records.
+export type DocumentContent = MarkdownContent | TxtContent | DocxContent | PdfContent | SpreadsheetContent
+
+export function hasOriginal(content: DocumentContent): content is TxtContent | DocxContent | PdfContent | SpreadsheetContent {
+  return !!content.format && content.format !== 'markdown'
 }
 
 export function makeDocxContent(input: JSONContent, issues: DocxIssue[]): DocxContent {
@@ -94,6 +111,10 @@ export function sameContent(left: DocumentContent, right: DocumentContent) {
   if (left === right) return true
   if (!sameLineage(left, right)) return false
   if (left.source !== right.source || left.bom !== right.bom || left.lineEnding !== right.lineEnding) return false
+  if ('workbook' in left || 'workbook' in right) {
+    return 'workbook' in left && 'workbook' in right &&
+      (left.workbook === right.workbook || JSON.stringify(left.workbook) === JSON.stringify(right.workbook))
+  }
   if (left.format === 'pdf' || right.format === 'pdf') return left.format === right.format
   if (left.format === 'docx' || right.format === 'docx') {
     return left.format === 'docx' && right.format === 'docx' && JSON.stringify(left.document) === JSON.stringify(right.document) &&

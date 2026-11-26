@@ -1,5 +1,21 @@
 # VS Code platform qualification
 
+## Phase 9 spreadsheet qualification
+
+Qualification used Windows 11 x64, desktop VS Code 1.147.0, Node 24.13.0 and Chromium 159.0.8154.6. Workspace fixtures were local drive-letter file URIs, plus an isolated virtual-workspace provider and an independently isolated Restricted Mode profile. Minimum-version desktop, other platforms, true Remote, additional providers and OS-native copy dialogs remain open.
+
+| Workflow | Verified boundary |
+| --- | --- |
+| Optional CSV editor | VS Code Text Editor remained the default, including in Restricted Mode. Folio preserved literal formula-like cells and padded identifiers and supported native dirty state, Undo/Redo, and Revert. |
+| XLSX | Optional registration, multiple sheets and imported cached results. Explicit local calculation worked from the installed WASM worker. Tab hiding preserved the session. Revert to replacement bytes reset calculation trust, with the replacement’s cached value visible. |
+| Recovery | The CSV fixture verified hot exit and a simultaneous external replacement followed by explicit Revert. Native checkpoints precede acknowledgment. The secondary webview journal is limited to 2 MiB, so a larger queued change can be interrupted before acknowledgment by an abrupt crash. |
+| Copy delivery | CSV safe-copy, XLSX fresh-cache and selected-range PNG exports passed through the VS Code simple file dialog. Output XLSX reimported with its formula and new cache. The installed PNG test read back the signature and exact 208 × 52 range dimensions. Source bytes and dirty-state boundaries were checked. |
+| Boundaries | The virtual provider was declined. Restricted Mode retained the native text editor and kept Folio unavailable. |
+
+Eight installed spreadsheet cases passed on the final local 204-entry VSIX. Its SHA-256 is 9ca957adaf31873b62b01f532524ef0e8c8cf5c3c22c0734168e1e49aabd9241. The inventory matched all packaged runtime files with their built counterparts, and the packaged XLSX WASM and notice matched their npm and repository inputs.
+
+[Phase 9 architecture, browser qualification and independent reader checks](phase-9-spreadsheets.md)
+
 ## Phase 8 PDF qualification
 
 The November 26, 2026 qualification used Windows 11 Pro 25H2 x64 (26200.9974), desktop VS Code 1.147.0 (`8a14f0cc1b08d531eb83255ea3764ae22aa932b5`), Node 24.13.0 and npm 11.21.0, on local drive-letter `file:` workspaces on fixed NTFS. The synthetic `folio-test-remote:` provider exercised rejection, and a Workspace Trust profile exercised Restricted Mode. The minimum supported VS Code version, Remote, other providers and volumes, macOS, Linux and browser-only VS Code are unqualified for the PDF viewer and PDF copies.
