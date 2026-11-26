@@ -7,6 +7,8 @@ import { IconButton, Menu, Modal, type Item } from '../controls'
 import { axisMetrics, contains, defaultHeight, defaultWidth, fitSizes, intersects, rewriteSheetReferences, shiftCsvRows, shiftSheet } from './display'
 import { clipboardCharacterLimit, decodeTypedClipboard, encodeTypedClipboard, typedClipboardMime } from './clipboard'
 import { SpreadsheetGrid, type GridEditing } from './Grid'
+import { applySuggestion, formulaAssist } from './formulaAssist'
+import { FormulaAssistPanel } from './FormulaAssistPanel'
 import { SpreadsheetToolbar, type BorderMode, type ToolDialog } from './Toolbar'
 import { BorderDialog, ColorDialog, ConditionalDialog, ConfirmDialog, DialectDialog, ExportDialog, FormulaReference, InputDialog, LinkDialog,
   NumberDialog, RegionalDialog, WorkbookFind, type SpreadsheetExportRequest } from './dialogs'
@@ -160,6 +162,10 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
   const cell = sheet.cells[activeAddress]
   const style = cell?.style ?? {}
   const [formulaDraft, setFormulaDraft] = useState<{ address: string; value: string }>()
+  const [assist, setAssist] = useState<{ field: 'bar' | 'cell'; text: string; cursor: number; index: number; dismissed: boolean }>()
+  const [cellCursor, setCellCursor] = useState<{ position: number; sequence: number }>()
+  const formulaBar = useRef<HTMLTextAreaElement>(null)
+  const assistId = useId()
   const [nameDraft, setNameDraft] = useState<string>()
   const [editing, setEditing] = useState<GridEditing>()
   const [dialog, setDialog] = useState<Dialog>()
@@ -189,6 +195,9 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
   const cancelCalculation = useRef<AbortController>(undefined)
   const bounds = useMemo(() => bounding(sheet), [sheet])
   const disabled = readOnly
+  const assistState = useMemo(() => assist && format === 'xlsx' ? formulaAssist(assist.text, assist.cursor) : undefined, [assist, format])
+  const assistOpen = !!assistState?.suggestions.length && !assist?.dismissed
+  const assistActive = assistOpen && assistState ? `${assistId}-${assistState.suggestions[assist?.index ?? 0]?.name}` : undefined
 
   const reportCalculation = useRef(onCalculationChange)
   useEffect(() => { reportCalculation.current = onCalculationChange })
@@ -437,7 +446,52 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     if (direction) { move(direction); focus() }
   }
   function commitFormula() {
+    setAssist(undefined)
     if (formulaDraft?.address === activeAddress && writeCell(active, formulaDraft.value)) setFormulaDraft(undefined)
+  }
+  function trackAssist(field: 'bar' | 'cell', target: HTMLTextAreaElement) {
+    if (format !== 'xlsx') return
+    const text = target.value
+    const cursor = target.selectionStart ?? text.length
+    setAssist(previous => previous?.field === field && previous.text === text && previous.cursor === cursor ? previous
+      : { field, text, cursor, index: 0, dismissed: previous?.field === field && previous.text === text && previous.dismissed })
+  }
+  function writeAssisted(field: 'bar' | 'cell', text: string, cursor: number) {
+    if (field === 'bar') {
+      setFormulaDraft({ address: activeAddress, value: applyEditorText(formulaDraft?.address === activeAddress ? formulaDraft.value : cellInput(cell), text) })
+      requestAnimationFrame(() => formulaBar.current?.setSelectionRange(cursor, cursor))
+    } else {
+      setEditing(previous => previous && { ...previous, value: applyEditorText(previous.value, text) })
+      setCellCursor(previous => ({ position: cursor, sequence: (previous?.sequence ?? 0) + 1 }))
+    }
+    setAssist({ field, text, cursor, index: 0, dismissed: false })
+  }
+  function pickSuggestion(field: 'bar' | 'cell', index: number) {
+    if (!assist || !assistState?.suggestions[index]) return
+    const { value, cursor } = applySuggestion(assist.text, assistState.start, assist.cursor, assistState.suggestions[index].name)
+    writeAssisted(field, value, cursor)
+  }
+  /** Arrow keys move through suggestions, Tab or Enter insert one and Escape closes the list. */
+  function assistKey(field: 'bar' | 'cell', event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!assist || assist.field !== field || !assistOpen || !assistState) return false
+    const count = assistState.suggestions.length
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const step = event.key === 'ArrowDown' ? 1 : -1
+      setAssist({ ...assist, index: (assist.index + step + count) % count })
+      return true
+    }
+    if (event.key === 'Tab' || event.key === 'Enter' && !event.altKey && !event.shiftKey) {
+      event.preventDefault()
+      pickSuggestion(field, assist.index)
+      return true
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      setAssist({ ...assist, dismissed: true })
+      return true
+    }
+    return false
   }
   function commitName() {
     if (nameDraft === undefined) return
@@ -719,25 +773,37 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
           if (event.key === 'Escape') { event.preventDefault(); setNameDraft(undefined); focus() }
         }} />
       <button type="button" title="Formula reference" aria-label="Open formula reference" className="folio-sheet-fx" onClick={() => setDialog('reference')}>ƒx</button>
-      <textarea aria-label="Formula bar" className="folio-sheet-formula-field" autoComplete="off" spellCheck={false} readOnly={readOnly} rows={1}
+      <textarea ref={formulaBar} aria-label="Formula bar" className="folio-sheet-formula-field" autoComplete="off" spellCheck={false} readOnly={readOnly} rows={1}
         title="Enter to apply. Alt+Enter inserts a line break."
+        aria-autocomplete={format === 'xlsx' ? 'list' : undefined}
+        aria-controls={assist?.field === 'bar' && assistOpen ? assistId : undefined}
+        aria-activedescendant={assist?.field === 'bar' ? assistActive : undefined}
         value={editorText(formulaDraft?.address === activeAddress ? formulaDraft.value : editing?.key === activeAddress ? editing.value : cellInput(cell))}
-        maxLength={spreadsheetLimits.cellLength} onChange={event => setFormulaDraft({ address: activeAddress,
-          value: applyEditorText(formulaDraft?.address === activeAddress ? formulaDraft.value : cellInput(cell), event.target.value) })} onBlur={commitFormula}
+        maxLength={spreadsheetLimits.cellLength} onChange={event => {
+          setFormulaDraft({ address: activeAddress,
+            value: applyEditorText(formulaDraft?.address === activeAddress ? formulaDraft.value : cellInput(cell), event.target.value) })
+          trackAssist('bar', event.target)
+        }} onBlur={commitFormula} onSelect={event => { if (formulaDraft) trackAssist('bar', event.currentTarget) }}
         onKeyDown={event => {
+          if (assistKey('bar', event)) return
           if (event.key === 'Enter' && !event.altKey) { event.preventDefault(); commitFormula(); focus() }
           if (event.key === 'Escape') { event.preventDefault(); setFormulaDraft(undefined); focus() }
         }} />
       {format === 'xlsx' && calculationLabel && <button className="folio-sheet-calculation" type="button" title="Formula calculation options"
         onClick={() => setDialog('calculation')}><Sigma size={13} />{calculationLabel}</button>}
+      {assistState && assist && (assist.field === 'bar' ? formulaDraft?.address === activeAddress : editing?.key === activeAddress) &&
+        <FormulaAssistPanel id={assistId} state={assistState} index={assist.index} open={assistOpen} pick={index => pickSuggestion(assist.field, index)} />}
     </div>
     <div className="folio-sheet-grid-frame">
       <SpreadsheetGrid sheet={sheet} locale={workbook.locale} date1904={workbook.date1904} calculated={sheetCalculation}
         range={range} active={active} scrollRef={scroll} editing={editing} readOnly={readOnly} header={workbook.csv?.header}
         onSelect={select} onSelectAxis={selectAxis} onBeginEdit={beginEditing}
         onEdit={value => setEditing(previous => previous && { ...previous, value: applyEditorText(previous.value, value) })}
-        onCommit={commitEditing} onCancel={() => { setEditing(undefined); focus() }} onKey={key}
-        onCopy={copy} onPaste={paste} onResize={resizeAxis} onAutoFit={autoFit} onContext={openContext} />
+        onCommit={direction => { setAssist(undefined); commitEditing(direction) }} onCancel={() => { setAssist(undefined); setEditing(undefined); focus() }} onKey={key}
+        onCopy={copy} onPaste={paste} onResize={resizeAxis} onAutoFit={autoFit} onContext={openContext}
+        onEditorKey={event => assistKey('cell', event)} onEditorCursor={field => trackAssist('cell', field)} editorCursor={cellCursor}
+        editorAssist={format === 'xlsx' ? { list: assistId, active: assist?.field === 'cell' ? assistActive : undefined,
+          expanded: assist?.field === 'cell' && assistOpen } : undefined} />
       {notice && <div role="status" className="folio-sheet-toast"><span>{notice}</span><IconButton label="Dismiss message" onClick={() => setNotice('')}><X size={14} /></IconButton></div>}
     </div>
     <footer className="folio-sheet-footer">

@@ -4,7 +4,7 @@ import { cellAddress, parseAddress, type CellValue, type Workbook } from './mode
 import { createEngine, setLiteral, validateWorkbook } from './xlsxExport'
 import type { CalculationResults } from './xlsxMessages'
 import { child, children, xmlReader } from './xlsxXml'
-import { formulaCatalog } from './formulaCatalog'
+import { catalogFunction, formulaCatalog } from './formulaCatalog'
 
 type Formula = { address: string; sheet: number; value: string; dependencies: number[]; supported: boolean }
 const allowedFunctions = new Set<string>(formulaCatalog.map(entry => entry.name))
@@ -34,7 +34,7 @@ function inspectFormula(formula: Formula, names: Map<string, number>, lookup: Ma
     }
     if ('Ident' in value) {
       const name = value.Ident.toUpperCase()
-      if (!allowedFunctions.has(name) || tokens[index + 1]?.token !== 'LeftParenthesis' || workbook.date1904 && (name === 'NOW' || name === 'TODAY')) return false
+      if (!allowedFunctions.has(name) || tokens[index + 1]?.token !== 'LeftParenthesis' || workbook.date1904 && catalogFunction(name)?.date1900) return false
     } else if ('Reference' in value || 'Range' in value) {
       const range = 'Range' in value ? value.Range : { sheet: value.Reference.sheet, left: value.Reference, right: value.Reference }
       const sheet = range.sheet ? names.get(range.sheet.toLowerCase()) : formula.sheet

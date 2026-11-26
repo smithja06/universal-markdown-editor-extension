@@ -27,6 +27,12 @@ interface GridProps {
   onContext: (event: MouseEvent, point: Point, axis?: 'row' | 'col') => void
   onResize: (axis: 'row' | 'col', index: number, value: number) => void
   onAutoFit: (axis: 'row' | 'col', index: number) => void
+  /** Lets formula assistance consume a key in the cell editor. Returns true when handled. */
+  onEditorKey?: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean
+  onEditorCursor?: (field: HTMLTextAreaElement) => void
+  /** Requested caret offset after the editor value changes programmatically. */
+  editorCursor?: { position: number; sequence: number }
+  editorAssist?: { list: string; active?: string; expanded: boolean }
 }
 
 function cellStyle(style?: CellStyle): CSSProperties {
@@ -54,7 +60,8 @@ function cellStyle(style?: CellStyle): CSSProperties {
 const frozenViewLimit = 80
 
 export function SpreadsheetGrid({ sheet, locale, date1904, calculated, range, active, scrollRef, editing, readOnly, header,
-  onSelect, onSelectAxis, onBeginEdit, onEdit, onCommit, onCancel, onKey, onCopy, onPaste, onResize, onAutoFit, onContext }: GridProps) {
+  onSelect, onSelectAxis, onBeginEdit, onEdit, onCommit, onCancel, onKey, onCopy, onPaste, onResize, onAutoFit, onContext,
+  onEditorKey, onEditorCursor, editorCursor, editorAssist }: GridProps) {
   const rows = useMemo(() => axisMetrics(spreadsheetLimits.rows, defaultHeight, wrapHeights(sheet, locale, date1904), sheet.hiddenRows), [sheet, locale, date1904])
   const cols = useMemo(() => axisMetrics(spreadsheetLimits.cols, defaultWidth, sheet.widths, sheet.hiddenCols), [sheet.widths, sheet.hiddenCols])
   const conditional = useMemo(() => ruleAppearance(sheet, calculated), [sheet, calculated])
@@ -106,6 +113,10 @@ export function SpreadsheetGrid({ sheet, locale, date1904, calculated, range, ac
     input.current?.setSelectionRange(input.current.value.length, input.current.value.length)
   }, [editing?.key])
 
+  useLayoutEffect(() => {
+    if (editorCursor && input.current) input.current.setSelectionRange(editorCursor.position, editorCursor.position)
+  }, [editorCursor])
+
   const fixedRows = rows.visible(0, Math.min(frozenHeight, viewport.height))
   const fixedCols = cols.visible(0, Math.min(frozenWidth, viewport.width))
   const scrollingRows = rows.visible(Math.max(frozenHeight, viewport.top + frozenHeight - 72), viewport.top + viewport.height + 72)
@@ -150,9 +161,13 @@ export function SpreadsheetGrid({ sheet, locale, date1904, calculated, range, ac
       onContextMenu={event => onContext(event, { row, col })}>
       {bar && <span className="folio-sheet-data-bar" aria-hidden="true" style={{ width: Math.max(2, (look.bar ?? 0) * 100) + '%', backgroundColor: look.color }} />}
       {editing && focused ? <textarea className="folio-sheet-cell-edit" aria-label={'Edit ' + address} ref={input} value={editorText(editing.value)} rows={1}
-        onChange={event => onEdit(event.target.value)} onBlur={() => onCommit()}
+        aria-autocomplete={editorAssist ? 'list' : undefined} aria-controls={editorAssist?.expanded ? editorAssist.list : undefined}
+        aria-activedescendant={editorAssist?.active}
+        onChange={event => { onEdit(event.target.value); onEditorCursor?.(event.target) }} onBlur={() => onCommit()}
+        onSelect={event => onEditorCursor?.(event.currentTarget)}
         onKeyDown={event => {
           event.stopPropagation()
+          if (onEditorKey?.(event)) return
           if (event.key === 'Escape') { event.preventDefault(); onCancel() }
           if (event.key === 'Tab' || event.key === 'Enter' && !event.altKey) {
             event.preventDefault()
