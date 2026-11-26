@@ -8,6 +8,7 @@ import { createLiveDocumentClient, type LiveDocumentTransport } from './liveDocu
 import type { RecoveryJournal } from './recovery'
 import { createWorkspaceResources } from './resources'
 import { onWebviewTheme } from './theme'
+import { colorPreferences, effectiveTheme, onColorPreferences, setColorPreferences } from './appearance'
 import { createWorkspaceDocx } from './workspaceDocx'
 import { createPdfCopy } from './pdfCopy'
 
@@ -42,11 +43,12 @@ const files: FileOperations = {
 
 const search = createSearch(() => new SearchWorker())
 
-export function createWebviewHost(transport: LiveDocumentTransport, platform: ShortcutPlatform, theme: Appearance['theme'], journal: RecoveryJournal, format = 'Markdown') {
+export function createWebviewHost(transport: LiveDocumentTransport, platform: ShortcutPlatform, journal: RecoveryJournal, format = 'Markdown') {
   const liveDocument = createLiveDocumentClient(transport, journal)
   const resources = format === 'Markdown' ? createWorkspaceResources(transport) : undefined
   const workspaceDocx = format === 'DOCX' ? createWorkspaceDocx(transport) : undefined
-  let settings = normalizeAppearance({ theme })
+  const colors = colorPreferences()
+  let settings: Appearance = { ...normalizeAppearance(colors), theme: effectiveTheme(colors) }
   let recent: string[] = []
   return {
     liveDocument,
@@ -57,8 +59,17 @@ export function createWebviewHost(transport: LiveDocumentTransport, platform: Sh
     keyboard: { platform, handledByHost: new Set(['workspace.palette']) },
     appearance: {
       read: () => settings,
-      write(value) { settings = value },
+      write(value) {
+        settings = value
+        setColorPreferences({ hostColors: value.hostColors, theme: value.theme, accentColor: value.accentColor })
+      },
       themeFromHost: onWebviewTheme,
+      // Other Folio editors share the color choice through the extension host.
+      subscribe: listener => onColorPreferences(colors => {
+        const update = { hostColors: colors.hostColors, accentColor: colors.accentColor, theme: effectiveTheme(colors) }
+        settings = { ...settings, ...update }
+        listener(update)
+      }),
     },
     commands: {
       attach(api) {

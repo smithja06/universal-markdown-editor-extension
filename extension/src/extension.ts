@@ -3,6 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import * as vscode from 'vscode'
 import { concurrentWorkspaceImages, connectionMessage, isClientMessage, spliceSource, type ClientMessage, type DocumentState, type HostMessage, type PendingCheckpoint } from '../../src/host/vscode/protocol'
 import { isId, recoveryPrefix, type RecoveryDraft } from '../../src/host/vscode/recovery'
+import { attachAppearance, initializeAppearance } from './appearance'
 import { webviewHtml } from './webview'
 import { encodeRecoveryBase, recoveryGeneration, unpackRecovery, type PackedRecovery } from './packedRecovery'
 import { nativeCommands, type NativeAction } from '../../src/host/vscode/nativeCommands'
@@ -262,6 +263,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
       this.removeView(session, view)
       return
     }
+    attachAppearance(panel)
     panel.webview.html = html
   }
 
@@ -603,6 +605,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
 }
 
 export async function activate(context: vscode.ExtensionContext) {
+  initializeAppearance(context.globalState)
   let workspace = context.storageUri?.toString()
   if (!workspace) {
     // Empty windows have workspace state but no extension storage directory.
@@ -638,7 +641,32 @@ export async function activate(context: vscode.ExtensionContext) {
       webviewOptions: { retainContextWhenHidden: true },
     }))
   }
+  context.subscriptions.push(vscode.commands.registerCommand('folio.openWith', openWithFolio))
   for (const [command, action] of Object.entries(nativeCommands)) {
     context.subscriptions.push(vscode.commands.registerCommand(command, () => provider.runAction(action)))
+  }
+}
+
+/** Each file extension maps to the Folio editor that opens it. */
+const folioEditors: Record<string, string> = {
+  '.md': viewType, '.markdown': viewType, '.txt': txtViewType, '.docx': docxViewType,
+  '.pdf': pdfViewType, '.xlsx': xlsxViewType, '.csv': csvViewType,
+}
+
+/** Opens the explorer selection, or the active tab, in its Folio editor. Folio editors stay opt-in. */
+async function openWithFolio(target?: unknown, selection?: unknown) {
+  const tab = vscode.window.tabGroups.activeTabGroup.activeTab?.input as { uri?: unknown } | undefined
+  const chosen = Array.isArray(selection) && selection.length ? selection : [target ?? tab?.uri]
+  const uris = chosen.filter((uri): uri is vscode.Uri => uri instanceof vscode.Uri)
+  if (!uris.length) {
+    void vscode.window.showInformationMessage('Select a Markdown, text, DOCX, PDF, XLSX or CSV file to open with Folio.')
+    return
+  }
+  for (const uri of uris) {
+    const name = uri.path.slice(uri.path.lastIndexOf('/') + 1)
+    const dot = name.lastIndexOf('.')
+    const editor = dot > 0 ? folioEditors[name.slice(dot).toLowerCase()] : undefined
+    if (editor) await vscode.commands.executeCommand('vscode.openWith', uri, editor)
+    else void vscode.window.showInformationMessage(`Folio cannot open ${name}. It supports Markdown, text, DOCX, PDF, XLSX and CSV files.`)
   }
 }

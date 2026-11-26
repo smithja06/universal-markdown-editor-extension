@@ -2,6 +2,9 @@
 
 ## 0.1.0 release candidate
 
+- Choose **Match VS Code**, **Light** or **Dark** and an accent color in every Folio editor. The choice is shared across open editors and kept between sessions.
+- Open Markdown, TXT, DOCX, PDF, XLSX and CSV files with **Open with Folio** from the Explorer, editor tab context menu or Command Palette.
+
 - View local PDFs read-only in the optional PDF viewer with page navigation, zoom, embedded-text search and copy. Active PDF content stays inert and viewing never writes the file.
 - Export Markdown, TXT, and supported DOCX documents as validated PDF copies after a fidelity review and preview. Copies are saved only as new local files.
 

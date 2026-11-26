@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CsvDialect, Workbook } from '../../document/formats/spreadsheet/model'
-import type { Appearance } from '../../document/workspace'
 import { SpreadsheetEditor, type SpreadsheetExportRequest } from '../../ui/spreadsheet/SpreadsheetEditor'
 import { sourceChange, type ClientMessage, type HostMessage } from './protocol'
 import { isRecord } from './recovery'
 import { isSpreadsheetClientMessage, readSpreadsheetSnapshot, type SpreadsheetState } from './spreadsheetProtocol'
-import { onWebviewTheme } from './theme'
+import { ColorPopover } from '../../ui/ColorControls'
+import { useWebviewColors } from './appearance'
 import './spreadsheetWorkspace.css'
 
 interface SpreadsheetTransport {
@@ -38,8 +38,8 @@ function storePending(state: SpreadsheetState, draft?: Snapshot) {
   } catch { /* The native host owns acknowledged drafts. */ }
 }
 
-export function SpreadsheetWorkspace({ transport, initialTheme }: { transport: SpreadsheetTransport; initialTheme: Appearance['theme'] }) {
-  const [theme, setTheme] = useState(initialTheme)
+export function SpreadsheetWorkspace({ transport }: { transport: SpreadsheetTransport }) {
+  const colors = useWebviewColors()
   const [state, setState] = useState<SpreadsheetState>()
   const [snapshot, setSnapshot] = useState<Snapshot>()
   const [editing, setEditing] = useState(false)
@@ -83,7 +83,6 @@ export function SpreadsheetWorkspace({ transport, initialTheme }: { transport: S
     transport.post(message)
   }, [transport])
 
-  useEffect(() => onWebviewTheme(setTheme), [])
   useEffect(() => {
     const listen = transport.listen(message => {
       if (message.type === 'error') {
@@ -219,7 +218,7 @@ export function SpreadsheetWorkspace({ transport, initialTheme }: { transport: S
   }
 
   const format = state?.format
-  return <main className="app spreadsheet-native" data-theme={theme}>
+  return <main className="app spreadsheet-native" data-theme={colors.theme} data-host-colors={colors.hostColors ? '' : undefined} style={colors.style}>
     {state?.failure ? <p className="opening-state" role="alert">Folio could not open this workbook. {state.failure}</p>
       : !snapshot || !state || !format ? <p className="opening-state" role="status">Opening workbook in VS Code…</p>
         : <>
@@ -243,7 +242,8 @@ export function SpreadsheetWorkspace({ transport, initialTheme }: { transport: S
             onOriginal={saveOriginal} onExport={exportFile}
             onCsvDialect={format === 'csv' && !state.dirty ? reinterpretDelimiter : undefined}
             onUndo={() => command('undo')} onRedo={() => command('redo')}
-            canUndo={!editing && !recovery && state.canUndo} canRedo={!editing && !recovery && state.canRedo} />
+            canUndo={!editing && !recovery && state.canUndo} canRedo={!editing && !recovery && state.canRedo}
+            headerActions={<ColorPopover theme={colors.preferences.theme} accentColor={colors.preferences.accentColor} hostColors={colors.hostColors} onChange={colors.set} />} />
         </>}
     {fileActive && <div className="spreadsheet-native-notice" role="status">
       <span>{fileActive}</span>

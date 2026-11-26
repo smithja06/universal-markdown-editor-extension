@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import * as vscode from 'vscode'
+import { appearanceMeta } from './appearance'
 
 const assetAttribute = /\b(src|href)="\.\/(assets\/[\w./-]+)"/g
 
@@ -19,7 +20,8 @@ export async function webviewHtml(webview: vscode.Webview, root: vscode.Uri, for
     "base-uri 'none'",
     "form-action 'none'",
   ].join('; ')
-  return template.replace('<head>', `<head>\n    <meta http-equiv="Content-Security-Policy" content="${policy}">\n    <meta name="folio-format" content="${format}">`)
+  return template.replace('<head>', `<head>\n    <meta http-equiv="Content-Security-Policy" content="${policy}">\n    <meta name="folio-format" content="${format}">
+    ${appearanceMeta()}`)
     .replace(/<(?:script|link)\b[^>]*>/g, tag => {
       const resolved = tag.replace(assetAttribute, (attribute: string, key: string, path: string) => {
         if (path.split('/').includes('..')) return attribute

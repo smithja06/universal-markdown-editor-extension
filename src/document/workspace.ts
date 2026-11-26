@@ -17,6 +17,8 @@ export type DocumentFile = DocumentIdentity & DocumentContent
 export interface Appearance {
   theme: Theme
   accentColor: AccentColor
+  /** In hosts with their own color theme, use the host colors instead of the Folio palette. */
+  hostColors: boolean
   font: 'Default' | 'Sans serif' | 'Serif' | 'Monospace'
   fontSize: number
   lineHeight: number
@@ -27,7 +29,7 @@ export interface Appearance {
   syncScroll: boolean
 }
 
-const defaultAppearance: Appearance = { theme: 'light', accentColor: forestAccent, font: 'Default', fontSize: 16, lineHeight: 1.7, width: 'page', lineNumbers: true, wordWrap: true, splitRatio: 0.5, syncScroll: false }
+const defaultAppearance: Appearance = { theme: 'light', accentColor: forestAccent, hostColors: true, font: 'Default', fontSize: 16, lineHeight: 1.7, width: 'page', lineNumbers: true, wordWrap: true, splitRatio: 0.5, syncScroll: false }
 
 export function newDocument(title = 'Untitled document', file: DocumentContent = { source: '', lineEnding: '\n', bom: false }): DocumentFile {
   const content: DocumentContent = file.format && file.format !== 'markdown' ? file : { ...file, format: 'markdown', schemaVersion: 1 }
@@ -45,11 +47,11 @@ export const welcomeSource = [
   'Open a Markdown file or start with a blank page. Use the outline to move between sections, and export your work whenever you’re ready.',
 ].join('\n\n') + '\n'
 
-type StoredAppearance = Partial<Omit<Appearance, 'theme' | 'accentColor'>> & { theme?: unknown; accentColor?: unknown }
+type StoredAppearance = Partial<Omit<Appearance, 'theme' | 'accentColor' | 'hostColors'>> & { theme?: unknown; accentColor?: unknown; hostColors?: unknown }
 
 export function normalizeAppearance(stored: StoredAppearance, prefersDark = false): Appearance {
   const theme = stored.theme === 'dark' || (stored.theme === 'system' && prefersDark) ? 'dark' : 'light'
-  return { ...defaultAppearance, ...stored, theme, accentColor: normalizeAccent(stored.accentColor) }
+  return { ...defaultAppearance, ...stored, theme, accentColor: normalizeAccent(stored.accentColor), hostColors: stored.hostColors !== false }
 }
 
 export type EditorPane = 'visual' | 'source'

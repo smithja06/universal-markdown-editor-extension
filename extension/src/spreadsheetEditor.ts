@@ -10,6 +10,7 @@ import {
   spreadsheetCopyNotice, spreadsheetExternalNotice, writeSpreadsheetBackup,
 } from './spreadsheetDocument'
 import { runSpreadsheetWorker } from './spreadsheetWorker'
+import { attachAppearance } from './appearance'
 import { webviewHtml } from './webview'
 
 export const xlsxViewType = 'folio.xlsx'
@@ -149,6 +150,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
       view.client = undefined
       if (this.views.get(document) === view) this.views.delete(document)
     })
+    attachAppearance(panel)
     panel.webview.html = html
   }
 

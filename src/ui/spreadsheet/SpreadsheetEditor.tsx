@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { ArrowDownToLine, Check, ChevronDown, CircleAlert, FileSpreadsheet, Globe2, HelpCircle, List, LoaderCircle, Plus, Sigma, X } from 'lucide-react'
 import { applyEditorText, cellAddress, cellInput, createSheet, editorText, enterCell, normalizeRange, parseAddress, parseRange, rangeAddress, rangeSize,
   spreadsheetLimits, type Border, type Cell, type CellStyle, type CellValue, type CsvDialect, type Point, type Range, type Sheet,
@@ -30,6 +30,8 @@ interface Props {
   canUndo?: boolean
   canRedo?: boolean
   onCsvDialect?: (delimiter: CsvDialect['delimiter']) => Promise<void>
+  /** Host controls placed beside the workbook actions. */
+  headerActions?: ReactNode
 }
 
 const initialPoint = { row: 1, col: 1 }
@@ -145,7 +147,7 @@ function currencyFormat(locale: string) {
 }
 
 export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly = false, status, onSave, saveLabel = 'Save draft', onOriginal, onExport,
-  onUndo, onRedo, canUndo, canRedo, onCsvDialect }: Props) {
+  onUndo, onRedo, canUndo, canRedo, onCsvDialect, headerActions }: Props) {
   const [sheetId, setSheetId] = useState(workbook.sheets[0].id)
   const sheet = workbook.sheets.find(item => item.id === sheetId) ?? workbook.sheets[0]
   const [selection, setSelection] = useState<Selection>({ anchor: initialPoint, end: initialPoint })
@@ -664,6 +666,7 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
       </div>
       <div className="folio-sheet-actions">
         {status && <span className="folio-sheet-status" role="status"><Check size={12} />{status}</span>}
+        {headerActions}
         {hasWarnings && <IconButton label="Workbook compatibility" onClick={() => setDialog('warnings')}><CircleAlert size={17} /></IconButton>}
         <IconButton label="Formula reference" onClick={() => setDialog('reference')}><HelpCircle size={18} /></IconButton>
         <Menu label="Export copies" align="right" chevron className="folio-sheet-export" items={[

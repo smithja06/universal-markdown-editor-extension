@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, type CSSProperties } from 'react'
 import '@fontsource-variable/inter'
 import '@fontsource-variable/manrope'
 import '../../styles.css'
@@ -11,27 +11,34 @@ import { createWebviewHost } from './host'
 import { connectionMessage, isHostMessage, type ClientMessage, type HostMessage } from './protocol'
 import { createRecoveryJournal } from './recovery'
 import { RecoveryNotice } from './RecoveryNotice'
-import { webviewTheme } from './theme'
+import { accentTheme } from '../../appearance'
+import { colorPreferences, connectWebviewAppearance, effectiveTheme } from './appearance'
 import { PdfWorkspace } from './PdfWorkspace'
 
 const SpreadsheetWorkspace = lazy(() => import('./SpreadsheetWorkspace').then(module => ({ default: module.SpreadsheetWorkspace })))
 
-declare function acquireVsCodeApi(): { postMessage(message: { connection: string; message: ClientMessage }): void }
+declare function acquireVsCodeApi(): { postMessage(message: unknown): void }
 
 const container = document.getElementById('root')
 if (container) {
   const root = createRoot(container)
-  const theme = webviewTheme()
   const platform = /Mac|iPhone|iPad/.test(navigator.platform) ? 'mac' : 'other'
   const format = document.querySelector('meta[name="folio-format"]')?.getAttribute('content') ?? 'Markdown'
 
-  const loading = (message?: string) => <main className="app" data-theme={theme}>
+  /** Placeholder shells use the shared color choice that was current when they rendered. */
+  const shell = () => {
+    const colors = colorPreferences()
+    const theme = effectiveTheme(colors)
+    return { 'data-theme': theme, 'data-host-colors': colors.hostColors ? '' : undefined, style: colors.hostColors ? undefined : accentTheme(colors.accentColor, theme) as CSSProperties }
+  }
+  const loading = (message?: string) => <main className="app" {...shell()}>
     <p className="opening-state" role={message ? 'alert' : 'status'}>{message ?? `Opening ${format} in VS Code…`}</p>
   </main>
 
   if (typeof acquireVsCodeApi !== 'function') root.render(loading('Open a document in VS Code to use the Folio editor.'))
   else {
     const vscode = acquireVsCodeApi()
+    connectWebviewAppearance(message => vscode.postMessage(message))
     const connection = crypto.randomUUID()
     const post = (message: ClientMessage) => vscode.postMessage({ connection, message })
     const transport = {
@@ -49,21 +56,21 @@ if (container) {
     }
     if (format === 'PDF') {
       // Read-only PDFs have no native text buffer, recovery journal or edit protocol.
-      root.render(<PdfWorkspace transport={transport} initialTheme={theme} />)
+      root.render(<PdfWorkspace transport={transport} />)
       window.addEventListener('pagehide', () => root.unmount(), { once: true })
     } else if (format === 'XLSX' || format === 'CSV') {
       root.render(<LazyBoundary fallback={loading('The Folio spreadsheet editor could not load. Reopen the workbook to retry.')}>
-        <Suspense fallback={loading()}><SpreadsheetWorkspace transport={transport} initialTheme={theme} /></Suspense>
+        <Suspense fallback={loading()}><SpreadsheetWorkspace transport={transport} /></Suspense>
       </LazyBoundary>)
       window.addEventListener('pagehide', () => root.unmount(), { once: true })
     } else mountEditor()
     function mountEditor() {
-    const host = createWebviewHost(transport, platform, theme, createRecoveryJournal(() => window.localStorage), format)
+    const host = createWebviewHost(transport, platform, createRecoveryJournal(() => window.localStorage), format)
 
     const mount = () => {
       const state = host.liveDocument.read()
       if (!state.id) root.render(loading(state.message))
-      else if (state.format === 'docx' && !state.available) root.render(<main className="app" data-theme={theme}>
+      else if (state.format === 'docx' && !state.available) root.render(<main className="app" {...shell()}>
         <RecoveryNotice state={state} copy={host.clipboard.writeText} discard={host.liveDocument.discardRecovery} notify={() => undefined} />
       </main>)
       else {

@@ -96,3 +96,21 @@ export function accentTheme(color: AccentColor, theme: Theme) {
     '--accent-fill-text': whiteText ? '#fff' : '#000',
   }
 }
+
+/** The color choices a VS Code host shares between every Folio editor. */
+export interface ColorPreferences {
+  /** Follow the VS Code color theme instead of Folio's own light or dark palette. */
+  hostColors: boolean
+  theme: Theme
+  accentColor: AccentColor
+}
+
+export const defaultColorPreferences: ColorPreferences = { hostColors: true, theme: 'light', accentColor: forestAccent }
+
+export function normalizeColorPreferences(value: unknown): ColorPreferences {
+  const saved = value && typeof value === 'object' ? value as Partial<Record<keyof ColorPreferences, unknown>> : {}
+  return { hostColors: saved.hostColors !== false, theme: saved.theme === 'dark' ? 'dark' : 'light', accentColor: normalizeAccent(saved.accentColor) }
+}
+
+export const sameColorPreferences = (a: ColorPreferences, b: ColorPreferences) => a.hostColors === b.hostColors && a.theme === b.theme &&
+  a.accentColor.red === b.accentColor.red && a.accentColor.green === b.accentColor.green && a.accentColor.blue === b.accentColor.blue
