@@ -58,7 +58,12 @@ export function createWebviewHost(transport: LiveDocumentTransport, platform: Sh
     pdfExport: createPdfCopy(transport),
     keyboard: { platform, handledByHost: new Set(['workspace.palette']) },
     appearance: {
-      read: () => settings,
+      // A shared choice can arrive before the editor mounts and subscribes, so reads use the current shared colors.
+      read: () => {
+        const current = colorPreferences()
+        settings = { ...settings, hostColors: current.hostColors, accentColor: current.accentColor, theme: effectiveTheme(current) }
+        return settings
+      },
       write(value) {
         settings = value
         setColorPreferences({ hostColors: value.hostColors, theme: value.theme, accentColor: value.accentColor })
