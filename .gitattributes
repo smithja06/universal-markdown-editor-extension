@@ -1,3 +1,6 @@
+# Check out text with LF on every platform so builds are byte-reproducible regardless of core.autocrlf.
+* text=auto eol=lf
+
 # Keep upstream license texts byte-identical to their sources.
 extension/EPL-2.0.txt -text
 extension/EPL-1.0.txt -text
