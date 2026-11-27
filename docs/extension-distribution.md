@@ -1,5 +1,38 @@
 # Folio VSIX distribution record
 
+## Phase 10 distribution record
+
+Final candidate: `extension/dist/folio.vsix` built from the Phase 10 documentation commit, whose code is identical to `db1429c`, 205 entries, 8,814,394 bytes, SHA-256 `aa1f09b71d4628573a83a94349f4ee59a9f038cd5a114a24af14a8058bf3d1c3`.
+
+**Inventory.**
+
+- No entries outside the allowlist. Packaged files match the build byte for byte. `EPL-1.0.txt` and `EPL-2.0.txt` are marked `-text` in `.gitattributes`, so they stay byte-exact.
+- No source maps, development files or CDN URLs.
+- All notice files are present and match `public/`.
+- The `spreadsheet.wasm` SHA-256 `03235ab1…3cc196c` equals the npm WASM.
+- The only credential-pattern hit was inside the inline base64 IronCalc WASM.
+- The ELK chunk is `elk-XV6XMXQE-LmPXhOG2.js`, SHA-256 `52ee6432f72ece3db8e7aca898ef6f62e84f327613e17a962c66f96593b3aa4d`.
+
+**ELK/MELK.**
+
+- `scripts/elk-source-companion.mjs` (`npm run source:companion`) downloads the pinned elkjs and ELK commit archives, the EMF GWT Common and Ecore, Xtext Xbase, Guava GWT and GWT user source JARs, and the elkjs 0.12.1 npm tarball.
+- It verifies all seven recorded SHA-256 values and the lockfile's sha512 integrity, then writes `extension/dist/source-companion/folio-elk-source-companion.zip` (22,222,075 bytes, SHA-256 `6b593b2a…9ec82469`). The archive includes build steps, the EPL 1.0 and 2.0 and Folio licenses, Folio's lockfile, the Vite webview configuration and the packaged chunk hash.
+- The `0.13.0-SNAPSHOT` MELK generator in elkjs' recipe is a build tool. Its `.melk` inputs and its own source are in the ELK archive. It affects byte-exact rebuilds, not corresponding-source availability.
+- The VSIX adds `EPL-2.0.txt` (byte-identical to elkjs's `LICENSE.md`) and the Unicode License V3 for the CLDR data in GWT's i18n runtime. The GWT and Guava source JARs contain no Apache NOTICE files.
+- **Remaining before any public distribution:** host the archive at a durable URL beside the release, record the URL in `THIRD_PARTY_NOTICES.md`, repackage, and recheck the checksums. This step is part of publication and needs explicit authorization.
+
+**pdfmake.**
+
+- The shipped bundle embeds core-js **3.51.0**. The notice previously listed the declared minimum, 3.49.0, and is corrected. The license matches the integrity-verified 3.51.0 package.
+- buffer 6.0.3, process 0.11.10, file-saver 2.0.5, ieee754 1.2.1 and base64-js 1.5.1 are the only published versions in pdfmake 0.3.14's declared ranges, and events 3.3.0 is the latest 3.x.
+- pdfkit 0.20.2 and its runtime dependencies match Folio's lockfile.
+- The patched SVG-to-PDFKit is identified by the upstream commit pdfmake declares (`b091ebd4…`).
+- **Resolved.**
+
+**pdf.js.** The webview uses pdf.js 6.5.438's legacy build, which embeds core-js 3.51.0, recorded in the PDF notice. The license is unchanged (Apache 2.0).
+
+**Fonts.** DejaVu Sans (`DejaVuSans.ttf`) joins DejaVu Sans Mono from the same pinned `dejavu-fonts-ttf` 2.37.3 under the same license, and both notices name it. The lazy PDF export chunk is 3,105,081 bytes.
+
 ## Phase 9 spreadsheet runtime
 
 Phase 9 pins the IronCalc bindings at 0.9.1 and bundles the XLSX binding under the MIT option. The native codec runs separately and loads the bundled spreadsheet.wasm. The webview uses a lazy inline worker with the same WASM bytes. The published npm package carries notices generated from the Rust lockfile and the Unicode license for its CLDR data. Folio ships these alongside the MIT notice in the standalone build and the VSIX. [Spreadsheet notices](../public/SPREADSHEET_THIRD_PARTY_NOTICES.txt) · [Phase 9 architecture](phase-9-spreadsheets.md)

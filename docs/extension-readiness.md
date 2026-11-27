@@ -1,5 +1,21 @@
 # Folio in VS Code
 
+## Phase 10 release assessment
+
+**Verdict: not ready for public release.** The engineering scope is implemented and verified on Windows. Three items remain. [Phase 10 record](phase-10-final-integration.md#15-remaining-release-blockers)
+
+| Priority | Finding |
+| --- | --- |
+| Release blocking | **Publication step.** Host the hash-verified ELK source companion (`npm run source:companion`) at a durable public URL, record it in `THIRD_PARTY_NOTICES.md`, rebuild and recheck the artifact. This needs the user's authorization. |
+| Release blocking | **Interactive reruns.** Rerun the PDF clipboard desktop case and the Excel 365 reader check on an unlocked session. The last session refused all clipboard access, and Excel automation could not read opened workbooks. |
+| Release scope | **Platforms.** Only Windows 11 x64, fixed NTFS and local `file:` is qualified, on VS Code 1.100.0, 1.147.0 and 1.148.0. macOS, Linux, WSL and Remote are unqualified and must not be claimed. On those hosts the native Save gate falls back to reviewed copies. |
+| Accepted by the user | Untagged PDF export for 1.0, disclosed as not PDF/UA. Reviewed-copy-only DOCX and XLSX on unqualified platforms. |
+| Tracked after 1.0 | Tagged PDF, a text-backed Folio CSV grid, LibreOffice interoperability, a full manual toolbar and high-contrast screen-reader pass, and the bimodal Source switch time. |
+
+**Native binary Save in VS Code.** `folio.docx`, `folio.xlsx` and `folio.csv` implement `saveCustomDocument` and `saveCustomDocumentAs` through `extension/src/binarySave.ts`. The gate requires Windows, a local extension host, a drive-letter `file:` URI without authority, a fixed NTFS volume (CIM query) and local profile storage. Desktop VS Code reports global storage as `vscode-userdata:`, which maps to the profile directory. `verifiedReplace.ts` checks the expected SHA-256 and writes in place under one exclusive handle, journals before writing, restores on failure, and classifies stopped writes on reopen. The first in-place Save per opened version asks for confirmation and lists what the rewrite drops. Save As writes only new files. Known external changes, files held by other apps and unqualified environments refuse Save and keep the draft and its checkpoint. Dirty state follows content, so Undo past a save point keeps a checkpoint. After Save As, VS Code opens the new file in its default editor because Folio editors are opt-in.
+
+**Webview.** pdf.js now loads its legacy build (core-js polyfills) for Chromium 132 in VS Code 1.100. Shared color choices are read when an editor mounts. The CSP, Workspace Trust and resource roots are unchanged.
+
 ## Phase 9 spreadsheet editors
 
 Open a local file in a trusted workspace and choose **Reopen Editor With** to use Folio’s optional XLSX or CSV editor. It shares the standalone grid, workbook tools, formula bar and worksheets. The extension host owns revisions and checkpoints, reports native dirty state, provides undo and redo and supports revert and hot-exit backup. Export publishes a reviewed copy to a new local file. The original remains available after external changes and while recovering a backup. [Spreadsheet architecture](phase-9-spreadsheets.md) · [Desktop qualification](extension-qualification.md#phase-9-spreadsheet-qualification)
