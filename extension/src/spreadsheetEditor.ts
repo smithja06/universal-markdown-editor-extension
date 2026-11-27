@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import { spreadsheetLimits, type SpreadsheetFormat } from '../../src/document/formats/spreadsheet/model'
+import { spreadsheetLimits, type SpreadsheetFormat, type Workbook } from '../../src/document/formats/spreadsheet/model'
 import { connectionMessage, isClientMessage, sourceChange, spliceSource, type ClientMessage, type HostMessage, type Splice } from '../../src/host/vscode/protocol'
 import type { SpreadsheetStateMeta } from '../../src/host/vscode/spreadsheetProtocol'
 import { cancellation, fingerprint } from './docxDocument'
@@ -7,8 +7,9 @@ import { isLocalDocumentFile, readLocalDocument } from './localDocumentFile'
 import { isSameSpreadsheetFile, saveSpreadsheetCopy } from './spreadsheetCopy'
 import {
   isWorkbookCheckpoint, loadWorkbookOriginal, parseWorkbookDraft, restoreSpreadsheetBackup, SpreadsheetDocument,
-  spreadsheetCopyNotice, spreadsheetExternalNotice, writeSpreadsheetBackup,
+  spreadsheetExternalNotice, writeSpreadsheetBackup,
 } from './spreadsheetDocument'
+import { BinarySaveError, externalRefusal, interruptedNotice, saveUnavailable, type BinarySaver } from './binarySave'
 import { runSpreadsheetWorker } from './spreadsheetWorker'
 import { attachAppearance } from './appearance'
 import { webviewHtml } from './webview'
@@ -40,7 +41,9 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
   readonly onDidChangeCustomDocument = this.changed.event
 
   constructor(private readonly format: SpreadsheetFormat, private readonly assets: vscode.Uri,
-    private readonly recovery: vscode.Memento, private readonly backupRoot: vscode.Uri) {}
+    private readonly recovery: vscode.Memento, private readonly backupRoot: vscode.Uri, private readonly saver: BinarySaver) {}
+
+  private get kind() { return this.format === 'xlsx' ? 'XLSX' as const : 'CSV' as const }
 
   dispose() {
     this.changed.dispose()
@@ -64,10 +67,26 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
         throw new Error('Folio spreadsheets require a trusted workspace and a local file.')
       }
       if (context.backupId) await restoreSpreadsheetBackup(document, context.backupId, this.backupRoot, signal)
-      else document.install(await this.openOriginal(document, signal))
+      else {
+        const bytes = await readLocalDocument(document.uri, spreadsheetLimits.fileBytes, signal)
+        const journal = await this.saver.recover(uri, bytes)
+        if (journal?.state === 'interrupted') {
+          // Reopen the last complete file as the original and the content being saved as an unsaved draft.
+          const previous = await loadWorkbookOriginal(document.format, journal.journal.previous, signal)
+          const draft = await loadWorkbookOriginal(document.format, journal.journal.replacement, signal)
+          document.install(previous, draft.source)
+          document.disk = journal.disk
+          document.dirty = document.restored = true
+          document.saveNotice = interruptedNotice(this.kind)
+        } else {
+          document.install(await loadWorkbookOriginal(document.format, bytes, signal))
+          if (journal) document.saveNotice = `An earlier Folio save of this ${this.kind} was interrupted and the file changed afterwards. Folio opened the current file and kept the save journal.`
+        }
+      }
+      document.nativeSave = await this.saver.available(uri)
       const checkpoint: unknown = this.recovery.get(document.checkpointKey)
       if (isWorkbookCheckpoint(checkpoint, uri) && checkpoint.fingerprint === document.original?.fingerprint &&
-        (!document.restored || checkpoint.revision >= document.revision)) {
+        !document.saveNotice && (!document.restored || checkpoint.revision >= document.revision)) {
         try {
           document.install(document.original, checkpoint.source)
           document.revision = checkpoint.revision + 1
@@ -133,11 +152,17 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
       if (message.type === 'spreadsheetOriginal' || message.type === 'spreadsheetExport' || message.type === 'spreadsheetCsvDialect') {
         return void this.deliver(document, view, client, message)
       }
+      if (message.type === 'spreadsheetCalculation') {
+        document.calculationAllowed = message.allowed
+        return
+      }
       if (message.type === 'spreadsheetCommand' && panel.active && document.original) {
         const command = message.command
+        if (command === 'save' && !document.nativeSave) return this.post(view, client, { type: 'error', message: saveUnavailable(this.kind) })
         void Promise.resolve(command === 'revert' && !document.dirty
           ? this.revert(document, document.lifetime.signal)
-          : vscode.commands.executeCommand(command === 'revert' ? 'workbench.action.files.revert' : command))
+          : vscode.commands.executeCommand(command === 'revert' ? 'workbench.action.files.revert'
+            : command === 'save' ? 'workbench.action.files.save' : command))
           .catch(error => this.post(view, client, { type: 'error', message: errorMessage(error) }))
       }
     })
@@ -160,10 +185,11 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
   }
 
   private state(document: SpreadsheetDocument): StateMessage['state'] {
-    const notice = [document.external ? spreadsheetExternalNotice : undefined, document.notice].filter(Boolean).join(' ')
+    const notice = [document.external ? spreadsheetExternalNotice : undefined, document.saveNotice, document.notice,
+      document.nativeSave || document.failure ? undefined : saveUnavailable(this.kind)].filter(Boolean).join(' ').slice(0, 1024)
     return { ...this.meta(document), title: document.uri.path.split('/').at(-1) || 'Workbook', uri: document.uri.toString(),
       format: document.format, source: document.source, fingerprint: document.original?.fingerprint,
-      failure: document.failure, notice: notice || undefined }
+      failure: document.failure, notice: notice || undefined, nativeSave: document.nativeSave, session: document.session }
   }
 
   private post(view: View, client: Client, message: HostMessage) {
@@ -181,14 +207,14 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
     let external = true
     try {
       const bytes = await readLocalDocument(document.uri, spreadsheetLimits.fileBytes, signal)
-      external = fingerprint(bytes) !== original.fingerprint
+      external = fingerprint(bytes) !== (document.disk ?? original.fingerprint)
     } catch { /* A missing or unreadable file leaves the draft available. */ }
     if (signal.aborted || document.original !== original || document.external === external) return
     document.external = external
     this.publish(document)
   }
 
-  private async commit(document: SpreadsheetDocument, after: string, dirty: boolean) {
+  private async commit(document: SpreadsheetDocument, after: string) {
     document.lifetime.signal.throwIfAborted()
     const workbook = parseWorkbookDraft(after, document.format)
     const previous = document.workbook
@@ -197,6 +223,8 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
       throw new Error('The draft changed original workbook compatibility metadata.')
     }
     const revision = document.revision + 1
+    // Dirty state follows content, so undoing past a save keeps a recovery checkpoint for a draft that differs from disk.
+    const dirty = after !== document.clean || document.disk !== document.original?.fingerprint
     await this.recovery.update(document.checkpointKey, dirty ? document.checkpoint(after, revision) : undefined)
     document.source = after
     document.workbook = workbook
@@ -218,10 +246,9 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
       const { change } = edit
       const after = spliceSource(before, change)
       if (after !== before) {
-        const wasDirty = document.dirty
         const inverse = { from: change.from, to: change.from + change.text.length, text: before.slice(change.from, change.to) }
-        await this.commit(document, after, true)
-        this.emitHistory(document, change, inverse, wasDirty, 'Edit workbook')
+        await this.commit(document, after)
+        this.emitHistory(document, change, inverse, 'Edit workbook')
       }
       response = { type: 'spreadsheetAccepted', id: edit.id, state: this.meta(document) }
     } catch (error) {
@@ -237,22 +264,22 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
     const change = sourceChange(before, document.source)
     if (change) {
       const inverse = { from: change.from, to: change.from + change.text.length, text: before.slice(change.from, change.to) }
-      this.emitHistory(document, change, inverse, false, label)
+      this.emitHistory(document, change, inverse, label)
     }
   }
 
-  private emitHistory(document: SpreadsheetDocument, forward: Splice, inverse: Splice, wasDirty: boolean, label: string) {
+  private emitHistory(document: SpreadsheetDocument, forward: Splice, inverse: Splice, label: string) {
     const epoch = document.historyEpoch
     document.undoDepth++
     document.redoDepth = 0
-    const apply = (change: Splice, dirty: boolean, direction: number) => document.serialize(async () => {
+    const apply = (change: Splice, direction: number) => document.serialize(async () => {
       if (epoch !== document.historyEpoch || document.source === undefined) return
-      await this.commit(document, spliceSource(document.source, change), dirty)
+      await this.commit(document, spliceSource(document.source, change))
       document.undoDepth += direction
       document.redoDepth -= direction
       this.publish(document)
     })
-    this.changed.fire({ document, label, undo: () => apply(inverse, wasDirty, -1), redo: () => apply(forward, true, 1) })
+    this.changed.fire({ document, label, undo: () => apply(inverse, -1), redo: () => apply(forward, 1) })
   }
 
   private async deliver(document: SpreadsheetDocument, view: View, client: Client, request: FileRequest) {
@@ -277,8 +304,8 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
           const change = sourceChange(before, after)
           if (change) {
             const inverse = { from: change.from, to: change.from + change.text.length, text: before.slice(change.from, change.to) }
-            await this.commit(document, after, true)
-            this.emitHistory(document, change, inverse, false, 'Change CSV delimiter')
+            await this.commit(document, after)
+            this.emitHistory(document, change, inverse, 'Change CSV delimiter')
             this.publish(document)
           }
         })
@@ -311,13 +338,102 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
     }
   }
 
-  saveCustomDocument(_document: SpreadsheetDocument, token: vscode.CancellationToken): never {
-    if (token.isCancellationRequested) throw new vscode.CancellationError()
-    throw new Error(spreadsheetCopyNotice)
+  saveCustomDocument(document: SpreadsheetDocument, token: vscode.CancellationToken) {
+    return document.serialize(() => this.save(document, token))
   }
 
-  saveCustomDocumentAs(document: SpreadsheetDocument, _destination: vscode.Uri, token: vscode.CancellationToken): never {
-    return this.saveCustomDocument(document, token)
+  saveCustomDocumentAs(document: SpreadsheetDocument, destination: vscode.Uri, token: vscode.CancellationToken) {
+    return document.serialize(async () => {
+      if (isSameSpreadsheetFile(destination, document.uri)) return this.save(document, token)
+      const { workbook, original } = this.writable(document, token)
+      const { signal, dispose } = cancellation(token, document.lifetime.signal)
+      try {
+        if (!await this.saver.available(destination)) throw new BinarySaveError(saveUnavailable(this.kind))
+        const bytes = await this.encode(document, workbook, signal)
+        await this.saver.confirm(original.fingerprint, this.name(document), await this.losses(document, workbook, original, signal), true)
+        if (token.isCancellationRequested) throw new vscode.CancellationError()
+        await this.saver.saveAs(destination, bytes, this.format)
+      } catch (error) { this.reportSave(document, error) }
+      finally { dispose() }
+    })
+  }
+
+  private name(document: SpreadsheetDocument) { return document.uri.path.split('/').at(-1) || 'Workbook' }
+
+  private writable(document: SpreadsheetDocument, token: vscode.CancellationToken) {
+    if (token.isCancellationRequested) throw new vscode.CancellationError()
+    const { workbook, original } = document
+    if (!workbook || !original || document.source === undefined) throw new Error('The workbook is unavailable.')
+    if (!document.nativeSave) this.reportSave(document, new BinarySaveError(saveUnavailable(this.kind)))
+    return { workbook, original }
+  }
+
+  private reportSave(document: SpreadsheetDocument, error: unknown): never {
+    if (!(error instanceof vscode.CancellationError)) {
+      if (error instanceof BinarySaveError && error.conflict) document.external = true
+      document.saveNotice = errorMessage(error)
+      this.publish(document)
+      const view = this.views.get(document)
+      if (view?.client) this.post(view, view.client, { type: 'error', message: errorMessage(error) })
+    }
+    throw error
+  }
+
+  /** XLSX uses the export writer. CSV keeps the literal values and original dialect of its first worksheet. */
+  private async encode(document: SpreadsheetDocument, workbook: Workbook, signal: AbortSignal) {
+    if (document.format === 'xlsx') {
+      return (await runSpreadsheetWorker({ operation: 'write', workbook, includeCalculated: document.calculationAllowed }, signal)).bytes
+    }
+    const sheet = workbook.sheets[0]
+    return (await runSpreadsheetWorker({ operation: 'writeCsv', workbook,
+      options: { sheetId: sheet.id, safety: 'literal', delimiter: workbook.csv?.delimiter } }, signal)).bytes
+  }
+
+  /** Content of the opened file that a rewrite does not keep. */
+  private async losses(document: SpreadsheetDocument, workbook: Workbook, original: NonNullable<SpreadsheetDocument['original']>, signal: AbortSignal) {
+    if (document.format === 'xlsx') {
+      const losses = [...parseWorkbookDraft(original.source, 'xlsx').warnings]
+      if (!document.calculationAllowed && workbook.sheets.some(sheet => Object.values(sheet.cells).some(cell => cell.kind === 'formula'))) {
+        losses.push('Fresh formula results. Formulas keep their stored results, which can be stale until recalculated.')
+      }
+      return losses
+    }
+    const losses: string[] = []
+    const [first, ...others] = workbook.sheets
+    if (others.length) losses.push(`Worksheets other than “${first.name}”`)
+    if (workbook.sheets.some(sheet => sheet.merges.length || sheet.rules.length || Object.values(sheet.cells).some(cell => cell.style || cell.link))) {
+      losses.push('Cell formatting, links, merges and conditional rules (CSV stores values only)')
+    }
+    const opened = parseWorkbookDraft(original.source, 'csv')
+    const roundTrip = await runSpreadsheetWorker({ operation: 'writeCsv', workbook: opened,
+      options: { sheetId: opened.sheets[0].id, safety: 'literal', delimiter: opened.csv?.delimiter } }, signal)
+    if (fingerprint(roundTrip.bytes) !== original.fingerprint) losses.push('The original quoting and line-ending layout. Folio rewrites the CSV in its normalized form with the same values.')
+    return losses
+  }
+
+  /** Writes the draft over the opened file only while the file still has the fingerprint Folio expects. */
+  private async save(document: SpreadsheetDocument, token: vscode.CancellationToken) {
+    const { workbook, original } = this.writable(document, token)
+    const expected = document.disk
+    if (!document.unsaved || !expected) return
+    if (document.external) this.reportSave(document, new BinarySaveError(externalRefusal, true))
+    const source = document.source
+    const { signal, dispose } = cancellation(token, document.lifetime.signal)
+    try {
+      const bytes = await this.encode(document, workbook, signal)
+      await this.saver.confirm(expected, this.name(document), await this.losses(document, workbook, original, signal))
+      const saved = await loadWorkbookOriginal(document.format, bytes, signal)
+      const written = await this.saver.replace(document.uri, expected, bytes, token)
+      this.saver.remember(written)
+      await this.recovery.update(document.checkpointKey, undefined).then(undefined, () => undefined)
+      document.original = saved
+      document.disk = written
+      document.clean = source
+      document.dirty = document.external = false
+      document.saveNotice = document.notice = undefined
+      this.publish(document)
+    } catch (error) { this.reportSave(document, error) }
+    finally { dispose() }
   }
 
   private revert(document: SpreadsheetDocument, signal: AbortSignal) {
@@ -328,6 +444,8 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
         await this.recovery.update(document.checkpointKey, undefined)
         document.install(original)
         document.dirty = document.external = false
+        document.saveNotice = undefined
+        document.session++
         document.revision++
         document.historyEpoch++
         document.undoDepth = document.redoDepth = 0

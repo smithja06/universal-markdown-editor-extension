@@ -99,12 +99,31 @@ describe('PDF export from Markdown', () => {
     expect(new TextDecoder('latin1').decode(bytes)).toMatch(/\/Subtype\s*\/Image/)
   }, 30_000)
 
-  it('discloses glyphs that no bundled font can represent and still validates', async () => {
+  it('prints uncovered characters as searchable code points and still validates', async () => {
     const print = await printMarkdown('glyphs.md', openMarkdown('Smile 🙂 and 中文 with → arrow\n', schema).document.toJSON())
     const missing = missingGlyphs(print, coverage)
     expect([...missing.keys()].sort()).toEqual(['中', '文', '🙂'].sort())
     expect(missing.has('→')).toBe(false)
-    expect(expectedFragments(print, coverage, defaultPageOptions).join('')).toBe('Smileandwith→arrow')
+    expect(expectedFragments(print, coverage, defaultPageOptions).join('')).toBe('Smile[U+1F642]and[U+4E2DU+6587]with→arrow')
+    const { bytes } = await generate(print)
+    const handle = await openPdf(bytes, await nodePdfRuntime())
+    try { expect((await handle.text(0)).text).toContain('[U+4E2D U+6587]') }
+    finally { await handle.destroy() }
+  }, 30_000)
+
+  it('draws accented Latin, Greek, Cyrillic, Armenian, Georgian and symbols with bundled fonts', async () => {
+    const samples = ['Crème brûlée Łódź őű', 'Αθήνα ἀρχή', 'Москва Ґґ Ђђ',
+      'Հայաստան', 'საქართველო', '∑ ∞ ≤ ≥ ≠ ✓ ★ ☂ € £ ¥ №']
+    const print = printTxt('scripts.txt', samples.join('\n') + '\n')
+    expect(missingGlyphs(print, coverage).size).toBe(0)
+    const markdown = await printMarkdown('scripts.md', openMarkdown(samples.join('\n\n') + '\n', schema).document.toJSON())
+    expect(missingGlyphs(markdown, coverage).size).toBe(0)
+    const { bytes } = await generate(markdown)
+    const handle = await openPdf(bytes, await nodePdfRuntime())
+    try {
+      const text = (await handle.text(0)).text.normalize('NFC')
+      for (const sample of samples) for (const word of sample.split(' ')) expect(text).toContain(word.normalize('NFC'))
+    } finally { await handle.destroy() }
     await generate(print)
   }, 30_000)
 })
@@ -137,4 +156,37 @@ describe('PDF export validation', () => {
     await expect(validatePdf(bytes, print, { ...defaultPageOptions, size: 'a4' }, coverage, runtime)).rejects.toThrow(/page size/)
     await expect(validatePdf(new TextEncoder().encode('%PDF-1.7 broken'), print, defaultPageOptions, coverage, runtime)).rejects.toThrow(/reopened/)
   }, 30_000)
+})
+
+describe('PDF export accessibility metadata', () => {
+  it('declares the language and title and builds a nested heading outline', async () => {
+    const source = '---\nlang: fr-CA\n---\n\n# Rapport\n\nIntro.\n\n## Contexte\n\nTexte.\n\n### Détails\n\n## Résultats\n\n# Annexe\n'
+    const print = await printMarkdown('Rapport annuel', openMarkdown(source, schema).document.toJSON())
+    expect(print.language).toBe('fr-CA')
+    const { bytes } = await generate(print)
+    const pdfjs = (await import('pdfjs-dist/legacy/build/pdf.mjs')) as unknown as {
+      getDocument(input: { data: Uint8Array }): { destroy(): Promise<void>; promise: Promise<{
+        getMetadata(): Promise<{ info: Record<string, unknown> }>
+        getOutline(): Promise<{ title: string; items: { title: string; items: { title: string }[] }[] }[] | null>
+      }> }
+    }
+    await nodePdfRuntime()
+    const task = pdfjs.getDocument({ data: new Uint8Array(bytes) })
+    const document = await task.promise
+    try {
+      const { info } = await document.getMetadata()
+      expect(info.Language).toBe('fr-CA')
+      expect(info.Title).toBe('Rapport annuel')
+      const outline = await document.getOutline()
+      expect(outline?.map(item => item.title)).toEqual(['Rapport', 'Annexe'])
+      expect(outline?.[0].items.map(item => item.title)).toEqual(['Contexte', 'Résultats'])
+      expect(outline?.[0].items[0].items.map(item => item.title)).toEqual(['Détails'])
+      expect(new TextDecoder('latin1').decode(bytes)).toMatch(/\/DisplayDocTitle true/)
+    } finally { await task.destroy() }
+  }, 30_000)
+
+  it('ignores an invalid language declaration', async () => {
+    const print = await printMarkdown('x', openMarkdown('---\nlang: not a tag!\n---\n\nText\n', schema).document.toJSON())
+    expect(print.language).toBeUndefined()
+  })
 })

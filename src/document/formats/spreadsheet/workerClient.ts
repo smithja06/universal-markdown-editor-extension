@@ -1,6 +1,7 @@
 import SpreadsheetWorker from './xlsx.worker?worker&inline'
 import type { Workbook } from './model'
 import type { SpreadsheetReply, SpreadsheetRequest } from './xlsxMessages'
+import type { StructureChange } from './restructure'
 
 let running = 0
 
@@ -15,7 +16,7 @@ async function requestWorkbook<Request extends SpreadsheetRequest>(request: Requ
     const result = await new Promise<SpreadsheetReply>((resolve, reject) => {
       abort = () => reject(new DOMException('Spreadsheet processing was cancelled.', 'AbortError'))
       signal?.addEventListener('abort', abort, { once: true })
-      timeout = setTimeout(() => reject(new Error('Spreadsheet processing exceeded its time limit.')), request.operation === 'calculate' ? 12_000 : 25_000)
+      timeout = setTimeout(() => reject(new Error('Spreadsheet processing exceeded its time limit.')), request.operation === 'calculate' || request.operation === 'restructure' ? 12_000 : 25_000)
       worker.onmessage = (event: MessageEvent<SpreadsheetReply>) => resolve(event.data)
       worker.onerror = () => reject(new Error('The spreadsheet worker stopped unexpectedly.'))
       worker.onmessageerror = () => reject(new Error('The spreadsheet worker returned an unreadable result.'))
@@ -39,6 +40,11 @@ export async function readXlsx(bytes: Uint8Array<ArrayBuffer>, signal?: AbortSig
 
 export async function writeXlsx(workbook: Workbook, signal?: AbortSignal, includeCalculated = false) {
   return (await requestWorkbook({ operation: 'write', workbook, includeCalculated }, signal)).bytes
+}
+
+/** Formula reference updates for a structural edit, computed by IronCalc in the isolated worker. */
+export async function restructureWorkbook(workbook: Workbook, change: StructureChange, signal?: AbortSignal) {
+  return (await requestWorkbook({ operation: 'restructure', workbook, change }, signal)).updates
 }
 
 export async function calculateWorkbook(workbook: Workbook, signal?: AbortSignal) {

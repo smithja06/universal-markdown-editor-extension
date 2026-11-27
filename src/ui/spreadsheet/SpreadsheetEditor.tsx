@@ -7,8 +7,12 @@ import { IconButton, Menu, Modal, type Item } from '../controls'
 import { axisMetrics, contains, defaultHeight, defaultWidth, fitSizes, intersects, rewriteSheetReferences, shiftCsvRows, shiftSheet } from './display'
 import { clipboardCharacterLimit, decodeTypedClipboard, encodeTypedClipboard, typedClipboardMime } from './clipboard'
 import { SpreadsheetGrid, type GridEditing } from './Grid'
+import { applySuggestion, formulaAssist } from './formulaAssist'
+import type { FormulaUpdates, StructureChange } from '../../document/formats/spreadsheet/restructure'
+import { FormulaAssistPanel } from './FormulaAssistPanel'
 import { SpreadsheetToolbar, type BorderMode, type ToolDialog } from './Toolbar'
-import { BorderDialog, ColorDialog, ConditionalDialog, ConfirmDialog, DialectDialog, ExportDialog, FormulaReference, InputDialog, LinkDialog,
+import { builtinThemes } from '../../document/formats/spreadsheet/themes'
+import { BorderDialog, ColorDialog, ConditionalDialog, ConfirmDialog, DialectDialog, ExportDialog, FormulaReference, InputDialog, LinkDialog, ThemeDialog,
   NumberDialog, RegionalDialog, WorkbookFind, type SpreadsheetExportRequest } from './dialogs'
 import './spreadsheet.css'
 
@@ -30,6 +34,8 @@ interface Props {
   canUndo?: boolean
   canRedo?: boolean
   onCsvDialect?: (delimiter: CsvDialect['delimiter']) => Promise<void>
+  /** Reports whether local calculation is enabled, so a host Save can refresh supported formula caches. */
+  onCalculationChange?: (allowed: boolean) => void
   /** Host controls placed beside the workbook actions. */
   headerActions?: ReactNode
 }
@@ -93,6 +99,20 @@ function addReferenceChanges(workbook: Workbook, original: string, replacement?:
   }) }
 }
 
+/** Writes IronCalc's reference updates into the formulas. Changed formulas lose their stored result until recalculated. */
+function withFormulaUpdates(workbook: Workbook, updates: FormulaUpdates): Workbook {
+  return { ...workbook, sheets: workbook.sheets.map(sheet => {
+    const changed = updates[sheet.id]
+    if (!changed) return sheet
+    const cells = { ...sheet.cells }
+    for (const [address, value] of Object.entries(changed)) {
+      const cell = cells[address]
+      if (cell?.kind === 'formula') cells[address] = { ...cell, value, cached: undefined, cachedError: undefined }
+    }
+    return { ...sheet, cells }
+  }) }
+}
+
 function complexSheetReferences(workbook: Workbook) {
   return workbook.sheets.some(sheet => Object.values(sheet.cells).some(cell => cell.kind === 'formula' &&
     /(?:\bINDIRECT\s*\(|\[[^\]]+\]|!\$?[A-Z]{1,3}:\$?[A-Z]{1,3}|!\$?\d+:\$?\d+|(?:'[^']+'|[\w.]+):(?:'[^']+'|[\w.]+)!)/i.test(String(cell.value))))
@@ -147,7 +167,7 @@ function currencyFormat(locale: string) {
 }
 
 export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly = false, status, onSave, saveLabel = 'Save draft', onOriginal, onExport,
-  onUndo, onRedo, canUndo, canRedo, onCsvDialect, headerActions }: Props) {
+  onUndo, onRedo, canUndo, canRedo, onCsvDialect, onCalculationChange, headerActions }: Props) {
   const [sheetId, setSheetId] = useState(workbook.sheets[0].id)
   const sheet = workbook.sheets.find(item => item.id === sheetId) ?? workbook.sheets[0]
   const [selection, setSelection] = useState<Selection>({ anchor: initialPoint, end: initialPoint })
@@ -158,6 +178,11 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
   const cell = sheet.cells[activeAddress]
   const style = cell?.style ?? {}
   const [formulaDraft, setFormulaDraft] = useState<{ address: string; value: string }>()
+  const [structuring, setStructuring] = useState(false)
+  const [assist, setAssist] = useState<{ field: 'bar' | 'cell'; text: string; cursor: number; index: number; dismissed: boolean }>()
+  const [cellCursor, setCellCursor] = useState<{ position: number; sequence: number }>()
+  const formulaBar = useRef<HTMLTextAreaElement>(null)
+  const assistId = useId()
   const [nameDraft, setNameDraft] = useState<string>()
   const [editing, setEditing] = useState<GridEditing>()
   const [dialog, setDialog] = useState<Dialog>()
@@ -187,6 +212,15 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
   const cancelCalculation = useRef<AbortController>(undefined)
   const bounds = useMemo(() => bounding(sheet), [sheet])
   const disabled = readOnly
+  // IronCalc writes its Office theme when a workbook has none, so that is the effective default.
+  const theme = workbook.theme ?? builtinThemes.find(item => item.name === 'Office')!
+  const assistState = useMemo(() => assist && format === 'xlsx' ? formulaAssist(assist.text, assist.cursor) : undefined, [assist, format])
+  const assistOpen = !!assistState?.suggestions.length && !assist?.dismissed
+  const assistActive = assistOpen && assistState ? `${assistId}-${assistState.suggestions[assist?.index ?? 0]?.name}` : undefined
+
+  const reportCalculation = useRef(onCalculationChange)
+  useEffect(() => { reportCalculation.current = onCalculationChange })
+  useEffect(() => { reportCalculation.current?.(allowedCalculation) }, [allowedCalculation])
 
   useEffect(() => {
     if (workbookRef.current !== workbook && !committed.current.has(workbook)) {
@@ -431,7 +465,52 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     if (direction) { move(direction); focus() }
   }
   function commitFormula() {
+    setAssist(undefined)
     if (formulaDraft?.address === activeAddress && writeCell(active, formulaDraft.value)) setFormulaDraft(undefined)
+  }
+  function trackAssist(field: 'bar' | 'cell', target: HTMLTextAreaElement) {
+    if (format !== 'xlsx') return
+    const text = target.value
+    const cursor = target.selectionStart ?? text.length
+    setAssist(previous => previous?.field === field && previous.text === text && previous.cursor === cursor ? previous
+      : { field, text, cursor, index: 0, dismissed: previous?.field === field && previous.text === text && previous.dismissed })
+  }
+  function writeAssisted(field: 'bar' | 'cell', text: string, cursor: number) {
+    if (field === 'bar') {
+      setFormulaDraft({ address: activeAddress, value: applyEditorText(formulaDraft?.address === activeAddress ? formulaDraft.value : cellInput(cell), text) })
+      requestAnimationFrame(() => formulaBar.current?.setSelectionRange(cursor, cursor))
+    } else {
+      setEditing(previous => previous && { ...previous, value: applyEditorText(previous.value, text) })
+      setCellCursor(previous => ({ position: cursor, sequence: (previous?.sequence ?? 0) + 1 }))
+    }
+    setAssist({ field, text, cursor, index: 0, dismissed: false })
+  }
+  function pickSuggestion(field: 'bar' | 'cell', index: number) {
+    if (!assist || !assistState?.suggestions[index]) return
+    const { value, cursor } = applySuggestion(assist.text, assistState.start, assist.cursor, assistState.suggestions[index].name)
+    writeAssisted(field, value, cursor)
+  }
+  /** Arrow keys move through suggestions, Tab or Enter insert one and Escape closes the list. */
+  function assistKey(field: 'bar' | 'cell', event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!assist || assist.field !== field || !assistOpen || !assistState) return false
+    const count = assistState.suggestions.length
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const step = event.key === 'ArrowDown' ? 1 : -1
+      setAssist({ ...assist, index: (assist.index + step + count) % count })
+      return true
+    }
+    if (event.key === 'Tab' || event.key === 'Enter' && !event.altKey && !event.shiftKey) {
+      event.preventDefault()
+      pickSuggestion(field, assist.index)
+      return true
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      setAssist({ ...assist, dismissed: true })
+      return true
+    }
+    return false
   }
   function commitName() {
     if (nameDraft === undefined) return
@@ -568,11 +647,24 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     update({ ...workbook, sheets: [...workbook.sheets, next] })
     switchSheet(next)
   }
+  /** IronCalc updates formula references for the change. A workbook edit made meanwhile cancels the operation. */
+  async function formulaUpdates(change: StructureChange) {
+    if (!formulaCount) return {}
+    const base = workbook
+    setStructuring(true)
+    try {
+      const updates = await (await import('../../document/formats/spreadsheet/workerClient')).restructureWorkbook(base, change)
+      if (workbookRef.current !== base) throw new Error('The workbook changed while Folio updated formula references. Try again.')
+      return updates
+    } finally { setStructuring(false) }
+  }
   function renameSheet(name: string) {
     validNewSheetName(name, workbook, sheet.id)
     if (name === sheet.name) return
-    if (complexSheetReferences(workbook)) throw new Error('This workbook has advanced formula references that Folio cannot update during sheet rename.')
-    update(addReferenceChanges(patchSheet(workbook, { ...sheet, name }), sheet.name, name))
+    const base = workbook, target = sheet
+    void formulaUpdates({ kind: 'rename', sheetId: target.id, name })
+      .then(updates => update(withFormulaUpdates(patchSheet(base, { ...target, name }), updates)))
+      .catch(error => setNotice('Folio kept the worksheet name. ' + (error instanceof Error ? error.message : '')))
   }
   function deleteSheet() {
     if (workbook.sheets.length <= 1) return
@@ -613,14 +705,20 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     }
     replaceSheet({ ...sheet, [key]: next })
   }
-  function structure(axis: Axis, index: number, insert: boolean) {
-    if (formulaCount) { setNotice('Row and column insertion and deletion require a workbook without formulas.'); return }
+  async function structure(axis: Axis, index: number, insert: boolean) {
     const limit = axis === 'row' ? spreadsheetLimits.rows : spreadsheetLimits.cols
     if (insert && bounds[axis] >= limit) { setNotice('This insertion would move cells beyond the worksheet boundary.'); return }
-    const next = shiftSheet(sheet, axis, index, insert)
+    const base = workbook, target = sheet
+    let updates: FormulaUpdates
+    try { updates = await formulaUpdates({ kind: insert ? 'insert' : 'delete', sheetId: target.id, axis, index }) }
+    catch (error) {
+      setNotice(`Folio left the worksheet unchanged because it cannot update every formula reference. ${error instanceof Error ? error.message : ''}`)
+      return
+    }
+    const next = shiftSheet(target, axis, index, insert)
     try {
-      if (workbook.csv) replaceCsvShape(next, shiftCsvRows(workbook.csv.rowWidths, axis, index, insert))
-      else replaceSheet(next)
+      if (base.csv) replaceCsvShape(next, shiftCsvRows(base.csv.rowWidths, axis, index, insert))
+      else update(withFormulaUpdates(patchSheet(base, next), updates))
     } catch (error) { report(error) }
   }
   function toggleHidden(axis: Axis, index?: number) {
@@ -650,8 +748,8 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     const index = point[axis]
     const frozen = axis === 'row' ? 'frozenRows' : 'frozenCols'
     return [
-      { label: 'Insert ' + name + (axis === 'row' ? ' above' : ' to the left'), disabled, run: () => structure(axis, index, true) },
-      { label: 'Delete ' + name, disabled, run: () => structure(axis, index, false) },
+      { label: 'Insert ' + name + (axis === 'row' ? ' above' : ' to the left'), disabled: disabled || structuring, run: () => void structure(axis, index, true) },
+      { label: 'Delete ' + name, disabled: disabled || structuring, run: () => void structure(axis, index, false) },
       { label: 'Resize ' + name + '…', disabled, run: () => { setResize({ axis, index }); setDialog('resize') } },
       { label: (axis === 'row' ? 'Auto-fit row height' : 'Auto-fit column width'), disabled, run: () => autoFit(axis, index) },
       { label: 'Hide ' + name, disabled, run: () => toggleHidden(axis, index) },
@@ -700,7 +798,7 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
       clearStyles={clearStyles} clearValues={clearValues} copyStyle={copyStyle} usableStyle={!!copied} applyCopiedStyle={applyCopiedStyle}
       border={setBorderMode} dialog={setDialog} merge={mergeRange} unmerge={unmerge} gridLines={sheet.gridLines}
       toggleGrid={() => replaceSheet({ ...sheet, gridLines: !sheet.gridLines })} find={() => setDialog('find')}
-      rangePng={() => openExport('png')} currency={currencyFormat(workbook.locale)} />
+      rangePng={() => openExport('png')} currency={currencyFormat(workbook.locale)} theme={theme} themes={format === 'xlsx'} />
     {workbook.csv?.ambiguous && <div className="folio-sheet-csv-banner" role="status"><CircleAlert size={15} />
       <span>Check the detected delimiter against the columns below.</span>
       {onCsvDialect && <button type="button" className="secondary-button" onClick={() => setDialog('dialect')}>Choose delimiter</button>}
@@ -713,25 +811,37 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
           if (event.key === 'Escape') { event.preventDefault(); setNameDraft(undefined); focus() }
         }} />
       <button type="button" title="Formula reference" aria-label="Open formula reference" className="folio-sheet-fx" onClick={() => setDialog('reference')}>ƒx</button>
-      <textarea aria-label="Formula bar" className="folio-sheet-formula-field" autoComplete="off" spellCheck={false} readOnly={readOnly} rows={1}
+      <textarea ref={formulaBar} aria-label="Formula bar" className="folio-sheet-formula-field" autoComplete="off" spellCheck={false} readOnly={readOnly} rows={1}
         title="Enter to apply. Alt+Enter inserts a line break."
+        aria-autocomplete={format === 'xlsx' ? 'list' : undefined}
+        aria-controls={assist?.field === 'bar' && assistOpen ? assistId : undefined}
+        aria-activedescendant={assist?.field === 'bar' ? assistActive : undefined}
         value={editorText(formulaDraft?.address === activeAddress ? formulaDraft.value : editing?.key === activeAddress ? editing.value : cellInput(cell))}
-        maxLength={spreadsheetLimits.cellLength} onChange={event => setFormulaDraft({ address: activeAddress,
-          value: applyEditorText(formulaDraft?.address === activeAddress ? formulaDraft.value : cellInput(cell), event.target.value) })} onBlur={commitFormula}
+        maxLength={spreadsheetLimits.cellLength} onChange={event => {
+          setFormulaDraft({ address: activeAddress,
+            value: applyEditorText(formulaDraft?.address === activeAddress ? formulaDraft.value : cellInput(cell), event.target.value) })
+          trackAssist('bar', event.target)
+        }} onBlur={commitFormula} onSelect={event => { if (formulaDraft) trackAssist('bar', event.currentTarget) }}
         onKeyDown={event => {
+          if (assistKey('bar', event)) return
           if (event.key === 'Enter' && !event.altKey) { event.preventDefault(); commitFormula(); focus() }
           if (event.key === 'Escape') { event.preventDefault(); setFormulaDraft(undefined); focus() }
         }} />
       {format === 'xlsx' && calculationLabel && <button className="folio-sheet-calculation" type="button" title="Formula calculation options"
         onClick={() => setDialog('calculation')}><Sigma size={13} />{calculationLabel}</button>}
+      {assistState && assist && (assist.field === 'bar' ? formulaDraft?.address === activeAddress : editing?.key === activeAddress) &&
+        <FormulaAssistPanel id={assistId} state={assistState} index={assist.index} open={assistOpen} pick={index => pickSuggestion(assist.field, index)} />}
     </div>
     <div className="folio-sheet-grid-frame">
       <SpreadsheetGrid sheet={sheet} locale={workbook.locale} date1904={workbook.date1904} calculated={sheetCalculation}
         range={range} active={active} scrollRef={scroll} editing={editing} readOnly={readOnly} header={workbook.csv?.header}
         onSelect={select} onSelectAxis={selectAxis} onBeginEdit={beginEditing}
         onEdit={value => setEditing(previous => previous && { ...previous, value: applyEditorText(previous.value, value) })}
-        onCommit={commitEditing} onCancel={() => { setEditing(undefined); focus() }} onKey={key}
-        onCopy={copy} onPaste={paste} onResize={resizeAxis} onAutoFit={autoFit} onContext={openContext} />
+        onCommit={direction => { setAssist(undefined); commitEditing(direction) }} onCancel={() => { setAssist(undefined); setEditing(undefined); focus() }} onKey={key}
+        onCopy={copy} onPaste={paste} onResize={resizeAxis} onAutoFit={autoFit} onContext={openContext}
+        onEditorKey={event => assistKey('cell', event)} onEditorCursor={field => trackAssist('cell', field)} editorCursor={cellCursor}
+        editorAssist={format === 'xlsx' ? { list: assistId, active: assist?.field === 'cell' ? assistActive : undefined,
+          expanded: assist?.field === 'cell' && assistOpen } : undefined} />
       {notice && <div role="status" className="folio-sheet-toast"><span>{notice}</span><IconButton label="Dismiss message" onClick={() => setNotice('')}><X size={14} /></IconButton></div>}
     </div>
     <footer className="folio-sheet-footer">
@@ -792,8 +902,9 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     {dialog === 'regional' && <RegionalDialog workbook={workbook} readOnly={readOnly} close={dismiss} change={update} />}
     {dialog === 'dialect' && workbook.csv && onCsvDialect && <DialectDialog csv={workbook.csv} close={dismiss} apply={onCsvDialect} />}
     {dialog === 'number' && <NumberDialog initial={style.numberFormat} close={dismiss} apply={numberFormat => stylePatch({ numberFormat })} />}
-    {dialog === 'fontColor' && <ColorDialog title="Font color" initial={style.color} close={dismiss} apply={color => stylePatch({ color })} />}
-    {dialog === 'fillColor' && <ColorDialog title="Fill color" initial={style.fill} close={dismiss} apply={fill => stylePatch({ fill })} />}
+    {dialog === 'fontColor' && <ColorDialog title="Font color" initial={style.color} theme={theme} close={dismiss} apply={color => stylePatch({ color })} />}
+    {dialog === 'fillColor' && <ColorDialog title="Fill color" initial={style.fill} theme={theme} close={dismiss} apply={fill => stylePatch({ fill })} />}
+    {dialog === 'theme' && <ThemeDialog current={workbook.theme} close={dismiss} apply={next => update({ ...workbook, theme: { ...next } })} />}
     {dialog === 'border' && <BorderDialog border={border} close={dismiss} apply={setBorder} />}
     {dialog === 'condition' && <ConditionalDialog rules={sheet.rules} range={range} close={dismiss} change={rules => replaceSheet({ ...sheet, rules })} />}
     {dialog === 'link' && <LinkDialog cell={cell} close={dismiss} apply={link => changeCells(normalizeRange(active, active), previous =>

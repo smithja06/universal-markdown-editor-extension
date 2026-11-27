@@ -1,12 +1,15 @@
-import { needsGlyph } from './coverage'
-import { marginSizes, pageDimensions, type Inline, type PdfPageOptions, type PrintBlock, type PrintDocument, type TableCell } from './model'
+import { codePointMarker, needsGlyph } from './coverage'
+import { documentLanguage, marginSizes, pageDimensions, runText, type Inline, type PdfPageOptions, type PrintBlock, type PrintDocument, type TableCell } from './model'
 
-export interface Coverage { body: Set<number>; mono: Set<number> }
+export interface Coverage { body: Set<number>; mono: Set<number>; symbols: Set<number> }
 type Content = Record<string, unknown> | string | Content[]
 
 export const bodyFont = 'FolioSans'
 export const monoFont = 'FolioMono'
+/** DejaVu Sans covers scripts and symbols Roboto lacks. One regular face is bundled for every style. */
+export const symbolFont = 'FolioSymbols'
 export const fontFiles = {
+  [symbolFont]: { normal: 'DejaVuSans.ttf', bold: 'DejaVuSans.ttf', italics: 'DejaVuSans.ttf', bolditalics: 'DejaVuSans.ttf' },
   [bodyFont]: { normal: 'Roboto-Regular.ttf', bold: 'Roboto-Medium.ttf', italics: 'Roboto-Italic.ttf', bolditalics: 'Roboto-MediumItalic.ttf' },
   // One monospaced face is bundled. Bold or italic code keeps its weight and slant as plain text.
   [monoFont]: { normal: 'DejaVuSansMono.ttf', bold: 'DejaVuSansMono.ttf', italics: 'DejaVuSansMono.ttf', bolditalics: 'DejaVuSansMono.ttf' },
@@ -49,26 +52,58 @@ export function wrapLiteral(text: string, columns: number) {
   return { lines, wrapped }
 }
 
-/** Splits text into runs whose glyphs exist in the body font, falling back to the bundled mono font. */
-function segments(text: string, coverage: Coverage, mono: boolean) {
-  const runs: { text: string; font?: string }[] = []
+export interface GlyphRun { text: string; font?: string; missing?: true }
+
+const joiner = (point: number) => point === 0x200d || point === 0x200c || point >= 0xfe00 && point <= 0xfe0f || point >= 0xe0100 && point <= 0xe01ef
+
+/**
+ * Splits text into runs by the first bundled font that has each glyph: the context font, DejaVu Sans, then DejaVu Sans
+ * Mono (code tries mono first). Characters no font covers become a visible, searchable code-point marker instead of a
+ * blank glyph.
+ */
+export function glyphRuns(text: string, coverage: Coverage, mono: boolean): GlyphRun[] {
+  const runs: GlyphRun[] = []
+  const order: [Set<number>, string | undefined][] = mono ? [[coverage.mono, undefined], [coverage.symbols, symbolFont]]
+    : [[coverage.body, undefined], [coverage.symbols, symbolFont], [coverage.mono, monoFont]]
+  let missing: string[] = []
+  const flush = () => {
+    if (!missing.length) return
+    runs.push({ text: codePointMarker(missing), missing: true })
+    missing = []
+  }
   for (const character of text) {
     const point = character.codePointAt(0)!
-    const primary = mono ? coverage.mono : coverage.body
-    const font = !needsGlyph(point) || primary.has(point) || !coverage.mono.has(point) ? undefined : monoFont
+    // Joiners and variation selectors inside an unsupported sequence belong to it and print nothing on their own.
+    if (missing.length && joiner(point)) continue
+    const choice = needsGlyph(point) ? order.find(([set]) => set.has(point)) : undefined
+    if (needsGlyph(point) && !choice) { missing.push(character); continue }
+    flush()
+    const font = choice?.[1]
     const last = runs.at(-1)
-    if (last && last.font === font) last.text += character
+    if (last && !last.missing && last.font === font) last.text += character
     else runs.push({ text: character, font })
   }
+  flush()
   return runs
 }
+
+/** The text as Folio prints it, with code-point markers for missing glyphs. */
+export function printedText(text: string, coverage: Coverage, mono: boolean) {
+  return glyphRuns(text, coverage, mono).map(run => run.text).join('')
+}
+
+const markerColor = '#8a4a14'
+const runContent = (run: GlyphRun) => run.missing ? { text: run.text, font: monoFont, color: markerColor } : { text: run.text, font: run.font }
 
 export function missingGlyphs(print: PrintDocument, coverage: Coverage) {
   const missing = new Map<string, number>()
   const visit = (text: string, mono: boolean) => {
-    for (const character of text) {
-      const point = character.codePointAt(0)!
-      if (needsGlyph(point) && !coverage.mono.has(point) && (mono || !coverage.body.has(point))) missing.set(character, (missing.get(character) ?? 0) + 1)
+    for (const run of glyphRuns(text, coverage, mono)) {
+      if (!run.missing) continue
+      for (const marker of run.text.slice(1, -1).split(' ')) {
+        const character = String.fromCodePoint(parseInt(marker.slice(2), 16))
+        missing.set(character, (missing.get(character) ?? 0) + 1)
+      }
     }
   }
   const inlines = (items: Inline[]) => { for (const item of items) if ('text' in item) visit(item.text, !!item.code) }
@@ -91,10 +126,11 @@ function inlineContent(inlines: Inline[], coverage: Coverage): Content[] {
   for (const inline of inlines) {
     if ('break' in inline) { result.push('\n'); continue }
     const decoration = [inline.underline || inline.link ? 'underline' : undefined, inline.strike ? 'lineThrough' : undefined].filter(Boolean)
-    for (const run of segments(inline.text, coverage, !!inline.code)) {
+    for (const run of glyphRuns(inline.text, coverage, !!inline.code)) {
       result.push({
         text: run.text, bold: inline.bold || undefined, italics: inline.italic || undefined,
-        font: run.font ?? (inline.code ? monoFont : undefined), fontSize: inline.code ? bodySize * 0.92 : undefined,
+        font: run.missing ? monoFont : run.font ?? (inline.code ? monoFont : undefined), fontSize: inline.code || run.missing ? bodySize * 0.92 : undefined,
+        ...(run.missing ? { color: markerColor } : {}),
         background: inline.code ? '#eef1ed' : undefined, decoration: decoration.length ? decoration : undefined,
         link: inline.link, color: inline.link ? '#1d5fa8' : undefined,
       })
@@ -109,7 +145,7 @@ function literalContent(text: string, columns: number, size: number, coverage: C
   // Separate nodes keep long literal text cheap to measure and paginate.
   for (let index = 0; index < lines.length; index += 200) {
     const chunk = lines.slice(index, index + 200).join('\n')
-    chunks.push({ text: segments(chunk, coverage, true).map(run => ({ text: run.text, font: run.font })), font: monoFont, fontSize: size,
+    chunks.push({ text: glyphRuns(chunk, coverage, true).map(runContent), font: monoFont, fontSize: size,
       lineHeight: 1.18, preserveLeadingSpaces: true, preserveTrailingSpaces: true })
   }
   return chunks
@@ -138,12 +174,23 @@ function tableBody(rows: TableCell[][], header: boolean, coverage: Coverage) {
   return { body, columns }
 }
 
-function blockContent(block: PrintBlock, options: PdfPageOptions, coverage: Coverage, inset: number): Content {
+/** Heading bookmark ids and parents, so the PDF outline mirrors the heading hierarchy. */
+type Outline = { next: number; stack: { level: number; id: string }[] }
+
+function blockContent(block: PrintBlock, options: PdfPageOptions, coverage: Coverage, inset: number, outline?: Outline): Content {
   const width = contentWidth(options) - inset
   switch (block.kind) {
     case 'heading': {
       const size = headingSizes[block.level - 1] ?? bodySize
-      return { text: inlineContent(block.inlines, coverage), fontSize: size, bold: true, margin: [0, block.level <= 2 ? 12 : 8, 0, 5], headlineLevel: block.level }
+      const heading: Record<string, unknown> = { text: inlineContent(block.inlines, coverage), fontSize: size, bold: true, margin: [0, block.level <= 2 ? 12 : 8, 0, 5], headlineLevel: block.level }
+      const label = runText(block.inlines).trim()
+      if (outline && label) {
+        while (outline.stack.length && outline.stack.at(-1)!.level >= block.level) outline.stack.pop()
+        const id = `folio-heading-${++outline.next}`
+        Object.assign(heading, { id, outline: true, outlineText: label.slice(0, 200), outlineParentId: outline.stack.at(-1)?.id, outlineExpanded: block.level <= 2 })
+        outline.stack.push({ level: block.level, id })
+      }
+      return heading
     }
     case 'paragraph': return { text: inlineContent(block.inlines, coverage), alignment: block.align, margin: [0, 0, 0, 7] }
     case 'rule': return { canvas: [{ type: 'line', x1: 0, y1: 4, x2: width, y2: 4, lineWidth: 0.6, lineColor: rule }], margin: [0, 4, 0, 10] }
@@ -155,7 +202,7 @@ function blockContent(block: PrintBlock, options: PdfPageOptions, coverage: Cove
     case 'literal': return { stack: literalContent(block.text, literalColumns(options, literalSize, inset), literalSize, coverage) }
     case 'quote': return {
       table: { widths: ['*'], body: [[{ stack: [
-        ...(block.label ? [{ text: block.label, bold: true, color: muted, margin: [0, 0, 0, 3] }] : []),
+        ...(block.label ? [{ text: glyphRuns(block.label, coverage, false).map(runContent), bold: true, color: muted, margin: [0, 0, 0, 3] }] : []),
         ...block.blocks.map(child => blockContent(child, options, coverage, inset + 14)),
       ] }]] },
       layout: { hLineWidth: () => 0, vLineWidth: (index: number) => index === 0 ? 2.5 : 0, vLineColor: () => '#9fb3a5',
@@ -166,7 +213,7 @@ function blockContent(block: PrintBlock, options: PdfPageOptions, coverage: Cove
       const items = block.items.map(item => {
         const stack = item.blocks.map(child => blockContent(child, options, coverage, inset + 18))
         if (item.checked === undefined || item.checked === null) return { stack }
-        const marker = { text: segments(item.checked ? '☑ ' : '☐ ', coverage, false).map(run => ({ text: run.text, font: run.font })) }
+        const marker = { text: glyphRuns(item.checked ? '☑ ' : '☐ ', coverage, false).map(runContent) }
         return { columns: [{ width: 14, ...marker }, { width: '*', stack }], columnGap: 2 }
       })
       const tasks = block.items.some(item => item.checked !== undefined && item.checked !== null)
@@ -187,22 +234,29 @@ function blockContent(block: PrintBlock, options: PdfPageOptions, coverage: Cove
       const scale = Math.min(1, width / block.width, maxHeight / block.height)
       return { stack: [
         { image: block.src, width: block.width * scale, height: block.height * scale, alignment: block.align ?? 'center' },
-        ...(block.caption ? [{ text: block.caption, italics: true, fontSize: bodySize * 0.88, color: muted, alignment: 'center', margin: [0, 3, 0, 0] }] : []),
+        ...(block.caption ? [{ text: glyphRuns(block.caption, coverage, false).map(runContent), italics: true, fontSize: bodySize * 0.88, color: muted, alignment: 'center', margin: [0, 3, 0, 0] }] : []),
       ], margin: [0, 3, 0, 9] }
     }
   }
 }
 
-/** Converts the print model to a pdfmake document definition. */
+/**
+ * Converts the print model to a pdfmake document definition. The PDF declares its language and shows its title, and
+ * top-level headings become a navigable outline. pdfmake does not emit a structure tree, so the file is not tagged.
+ */
 export function layoutPdf(print: PrintDocument, options: PdfPageOptions, coverage: Coverage) {
   const margin = marginSizes[options.margins].points
   const { width, height } = pageDimensions(options)
+  const outline: Outline = { next: 0, stack: [] }
+  const language = documentLanguage(print.language)
   return {
     info: { title: print.title, creator: 'Folio', producer: 'Folio' },
+    displayTitle: true,
+    ...(language ? { language } : {}),
     pageSize: { width, height },
     pageMargins: [margin, margin, margin, margin],
     defaultStyle: { font: bodyFont, fontSize: bodySize, lineHeight: 1.3, color: ink },
     footer: (page: number, pages: number) => ({ text: `${page} / ${pages}`, alignment: 'center', fontSize: 8, color: muted, margin: [0, Math.max(8, margin / 2 - 6), 0, 0] }),
-    content: print.blocks.map(block => blockContent(block, options, coverage, 0)),
+    content: print.blocks.map(block => blockContent(block, options, coverage, 0, outline)),
   }
 }

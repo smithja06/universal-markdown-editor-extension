@@ -54,6 +54,7 @@ export interface LiveDocumentSnapshot {
   notice?: string
   issues?: DocxIssue[]
   originalFingerprint?: string
+  nativeSave?: boolean
   revision?: number
   lineEnding: '\n' | '\r\n'
   dirty: boolean

@@ -15,6 +15,9 @@ import { DocxEditorProvider, docxViewType } from './docxEditor'
 import { PdfEditorProvider, pdfViewType } from './pdfEditor'
 import { SpreadsheetEditorProvider, csvViewType, xlsxViewType } from './spreadsheetEditor'
 import { savePdfCopy } from './pdfCopy'
+import { BinarySaver } from './binarySave'
+import { docxMaxFileBytes } from '../../src/document/formats/docx/model'
+import { spreadsheetLimits } from '../../src/document/formats/spreadsheet/model'
 
 const viewType = 'folio.markdown'
 const txtViewType = 'folio.txt'
@@ -241,6 +244,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
         }
         if (message.type === 'spreadsheetEdit' || message.type === 'spreadsheetCommand' || message.type === 'spreadsheetCancel' ||
           message.type === 'spreadsheetExport' || message.type === 'spreadsheetOriginal' || message.type === 'spreadsheetCsvDialect' ||
+          message.type === 'spreadsheetCalculation' ||
           message.type === 'docxFile' || message.type === 'cancelDocxFile' || message.type === 'pdfReload') return
         if (message.type === 'pdfExport') return void this.exportPdf(session, view, client, message)
         session.queued++
@@ -620,8 +624,9 @@ export async function activate(context: vscode.ExtensionContext) {
   const assets = vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview')
   const provider = new FolioEditorProvider(assets, context.workspaceState, scope)
   const txt = new FolioEditorProvider(assets, context.workspaceState, createHash('sha256').update(scope + '/txt').digest('hex'), 'txt')
+  // Save journals live in global storage so an interrupted save is found from any window that reopens the file.
   const docx = new DocxEditorProvider(assets, context.workspaceState, createHash('sha256').update(scope + '/docx').digest('hex'),
-    context.storageUri ?? context.globalStorageUri)
+    context.storageUri ?? context.globalStorageUri, new BinarySaver('DOCX', context.globalStorageUri, docxMaxFileBytes))
   context.subscriptions.push(provider, vscode.window.registerCustomEditorProvider(viewType, provider, {
     webviewOptions: { retainContextWhenHidden: true },
     supportsMultipleEditorsPerDocument: true,
@@ -636,7 +641,8 @@ export async function activate(context: vscode.ExtensionContext) {
   }))
   const backupRoot = context.storageUri ?? context.globalStorageUri
   for (const [format, viewType] of [['xlsx', xlsxViewType], ['csv', csvViewType]] as const) {
-    const spreadsheet = new SpreadsheetEditorProvider(format, assets, context.workspaceState, backupRoot)
+    const spreadsheet = new SpreadsheetEditorProvider(format, assets, context.workspaceState, backupRoot,
+      new BinarySaver(format === 'xlsx' ? 'XLSX' : 'CSV', context.globalStorageUri, spreadsheetLimits.fileBytes))
     context.subscriptions.push(spreadsheet, vscode.window.registerCustomEditorProvider(viewType, spreadsheet, {
       webviewOptions: { retainContextWhenHidden: true },
     }))

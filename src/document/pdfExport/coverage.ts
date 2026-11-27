@@ -54,7 +54,13 @@ export function fontCoverage(bytes: Uint8Array): Set<number> {
   return points
 }
 
-/** Characters that need no glyph: controls and whitespace handled by layout. */
+/** Characters that need no glyph: controls, whitespace handled by layout, joiners and variation selectors. */
 export function needsGlyph(point: number) {
-  return point > 0x20 && point !== 0x7f && !(point >= 0x80 && point < 0xa0) && point !== 0x200b && point !== 0xfeff
+  return point > 0x20 && point !== 0x7f && !(point >= 0x80 && point < 0xa0) && point !== 0x200b && point !== 0xfeff &&
+    point !== 0x200c && point !== 0x200d && !(point >= 0xfe00 && point <= 0xfe0f) && !(point >= 0xe0100 && point <= 0xe01ef)
+}
+
+/** The visible stand-in for characters no bundled font can draw, for example `[U+4E2D U+6587]`. */
+export function codePointMarker(characters: string[]) {
+  return '[' + characters.map(character => 'U+' + character.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')).join(' ') + ']'
 }

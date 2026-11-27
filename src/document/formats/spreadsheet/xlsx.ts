@@ -2,6 +2,7 @@ import { initSync } from '@ironcalc/wasm-xlsx'
 import { runCalculation, workbookWithCalculatedCaches } from './calculation'
 import { exportXlsx } from './xlsxExport'
 import { importXlsx } from './xlsxImport'
+import { restructureFormulas } from './restructure'
 import type { SpreadsheetReply, SpreadsheetRequest } from './xlsxMessages'
 
 export type { SpreadsheetReply, SpreadsheetRequest } from './xlsxMessages'
@@ -16,6 +17,7 @@ export function processSpreadsheet(request: SpreadsheetRequest, wasmBytes: Uint8
       case 'write': return { operation: 'write', bytes: exportXlsx(
         request.includeCalculated ? workbookWithCalculatedCaches(request.workbook) : request.workbook) }
       case 'calculate': return { operation: 'calculate', results: runCalculation(request.workbook) }
+      case 'restructure': return { operation: 'restructure', updates: restructureFormulas(request.workbook, request.change) }
     }
   } catch (error) {
     const message = error instanceof Error && error.name === 'RuntimeError' ? 'IronCalc could not process this workbook safely.'

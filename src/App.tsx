@@ -125,6 +125,8 @@ export default function App({ host }: { host: FolioHost }) {
   const started = !!editor && doc.status !== 'loading'
   const ready = started && !!doc.layout.activeId
   const liveWritable = !!doc.liveState?.available && !doc.liveState.readOnly && doc.liveState.conflict === undefined
+  // A VS Code DOCX writes in place only where its host qualifies native Save. Otherwise Save exports a reviewed copy.
+  const nativeDocxSave = !!host.workspaceDocx && !!doc.liveState?.nativeSave
   const editable = ready && !pdfDocument && !spreadsheet && (!liveDocument || liveWritable) && (source || !doc.previewIssue)
   const splitLayout = useSplitLayout(appearance.splitRatio, ratio => setAppearance({ splitRatio: ratio }))
   useSplitScroll(split && ready && appearance.syncScroll && !doc.previewIssue, editor, visualScroll, doc.sourceView, doc.scrollAnchors, doc.file.id)
@@ -603,8 +605,8 @@ export default function App({ host }: { host: FolioHost }) {
       { label: 'Version History', icon: <History size={16} />, disabled: !ready || pdfDocument, run: () => setDialog('history') },
       { label: '', divider: true },
     ]),
-    { id: 'document.save', label: host.workspaceDocx ? 'Export DOCX copy…' : localDraft && !liveDocument ? 'Save draft' : 'Save', icon: <Download size={16} />, shortcut: 'Ctrl+S', disabled: !ready || pdfDocument || (!!liveDocument && !liveWritable),
-      run: () => { if (host.workspaceDocx) void exportCopy(); else void doc.save() } },
+    { id: 'document.save', label: host.workspaceDocx && !nativeDocxSave ? 'Export DOCX copy…' : localDraft && !liveDocument ? 'Save draft' : 'Save', icon: <Download size={16} />, shortcut: 'Ctrl+S', disabled: !ready || pdfDocument || (!!liveDocument && !liveWritable),
+      run: () => { if (host.workspaceDocx && !nativeDocxSave) void exportCopy(); else void doc.save() } },
     ...(host.workspaceDocx && liveDocument ? [{ label: 'Revert to disk', disabled: !ready || !liveWritable, run: () => liveDocument.run('revert') }] : []),
     ...(liveDocument ? [] : [
       ...(spreadsheet ? [] : [{ id: 'document.save-as', label: docx ? 'Export DOCX copy…' : plainText ? 'Export TXT copy…' : pdfDocument ? 'Download original PDF' : 'Save as…', icon: <ArrowDownToLine size={16} />, shortcut: 'Ctrl+Shift+S', disabled: !ready,
@@ -762,7 +764,9 @@ export default function App({ host }: { host: FolioHost }) {
   }).concat(docx ? [] : [['Insert menu', '/ on an empty line'], ['Indent list item', 'Tab']])
 
   const statusLabel = doc.liveState
-    ? doc.liveState.conflict !== undefined ? 'Sync paused' : !doc.liveState.available ? 'File unavailable' : doc.liveState.readOnly ? 'Read-only' : doc.liveState.pending ? 'Syncing to VS Code…' : doc.liveState.dirty ? 'Unsaved in VS Code' : 'Saved in VS Code'
+    ? doc.liveState.conflict !== undefined ? 'Sync paused' : !doc.liveState.available ? 'File unavailable' : doc.liveState.readOnly ? 'Read-only' : doc.liveState.pending ? 'Syncing to VS Code…'
+      : host.workspaceDocx ? doc.liveState.dirty ? nativeDocxSave ? 'Unsaved · draft recoverable' : 'Draft only · not saved to file' : 'Saved to file'
+        : doc.liveState.dirty ? 'Unsaved in VS Code' : 'Saved in VS Code'
     : doc.status === 'loading' ? 'Opening workspace…' : !ready ? 'No open documents' : doc.status === 'pending' ? 'Saving draft…'
       : doc.status === 'unavailable' ? localDraft ? 'Draft could not be saved locally' : 'Local storage unavailable'
         : localDraft ? 'Draft saved locally' : 'Saved locally'

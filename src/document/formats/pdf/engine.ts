@@ -22,10 +22,13 @@ export interface PdfHandle extends PdfSummary {
 
 let browserRuntime: Promise<PdfRuntime> | undefined
 
-/** Loads pdf.js and its worker only when a PDF is opened or validated. */
+/**
+ * Loads pdf.js and its worker only when a PDF is opened or validated. pdf.js's legacy build carries polyfills for APIs
+ * its modern build requires, such as Math.sumPrecise and Uint8Array.fromBase64, which VS Code 1.100's Chromium 132 lacks.
+ */
 export function browserPdfRuntime() {
-  browserRuntime ??= Promise.all([import('pdfjs-dist'), import('./pdfjsWorker')])
-    .then(([lib, worker]) => ({ lib, createPort: worker.createPdfjsWorker }))
+  browserRuntime ??= Promise.all([import('pdfjs-dist/legacy/build/pdf.mjs'), import('./pdfjsWorker')])
+    .then(([lib, worker]) => ({ lib: lib as unknown as PdfLib, createPort: worker.createPdfjsWorker }))
     .catch(error => { browserRuntime = undefined; throw error })
   return browserRuntime
 }

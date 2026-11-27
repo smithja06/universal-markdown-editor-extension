@@ -132,7 +132,7 @@ test('DOCX offers reviewed copy export and verifies original and edited download
   await frame.getByRole('button', { name: 'Replace all' }).click()
   await expect(table.getByRole('cell', { name: 'Updated cell' })).toBeVisible()
   await frame.getByRole('button', { name: 'Close find' }).click()
-  await expect(frame.getByText('Unsaved in VS Code', { exact: true })).toBeVisible()
+  await expect(frame.getByText('Unsaved · draft recoverable', { exact: true })).toBeVisible()
   await action(page, 'Export', 'Export DOCX copy…')
   const review = frame.getByRole('dialog', { name: 'Export DOCX copy' })
   await expect(review).toContainText('Page layout and styles')
@@ -206,14 +206,14 @@ test('DOCX rejects an old fidelity review after Revert changes the native revisi
   await frame.getByRole('heading', { name: 'Same model' }).click()
   await page.keyboard.press('End')
   await page.keyboard.insertText(' edited')
-  await expect(frame.getByText('Unsaved in VS Code', { exact: true })).toBeVisible()
+  await expect(frame.getByText('Unsaved · draft recoverable', { exact: true })).toBeVisible()
   await action(page, 'Export', 'Export DOCX copy…')
   const review = frame.getByRole('dialog', { name: 'Export DOCX copy' })
   await expect(review).toBeVisible()
   await writeFile(path, word('Same model edited'))
   await expect(frame.getByText(/DOCX on disk changed/)).toBeVisible()
   await command('revert')
-  await expect(frame.getByText('Saved in VS Code', { exact: true })).toBeVisible()
+  await expect(frame.getByText('Saved to file', { exact: true })).toBeVisible()
   await review.getByRole('button', { name: 'Download copy' }).click()
   await expect(frame.getByText('The document changed. Start a new export from the current draft.')).toBeVisible()
 })
@@ -221,7 +221,7 @@ test('DOCX rejects an old fidelity review after Revert changes the native revisi
 test.describe('native DOCX Save As boundary', () => {
   test.use({ simpleFileDialog: true })
 
-  test('keeps the original, target and dirty draft safe on cancel and unqualified Save As', async ({ desktop }) => {
+  test('keeps the original and dirty draft on a cancelled Save As and writes only the new file', async ({ desktop }) => {
     const { page, workspace, command } = desktop
     const file = 'save-as.docx'
     const original = word('Draft for Save As')
@@ -243,10 +243,13 @@ test.describe('native DOCX Save As boundary', () => {
     await input.fill(destination)
     await input.press('Enter')
     await expect.poll(() => command('saveAsOutcome')).toBe('completed')
-    await expect(readFile(destination)).rejects.toHaveProperty('code', 'ENOENT')
+    // Save As writes a new file from the draft and leaves the opened package unchanged.
+    expect(JSON.stringify(readDocx(await readFile(destination)).document)).toContain('Draft for Save As edited')
     expect(await readFile(join(workspace, file))).toEqual(Buffer.from(original))
+    // VS Code opens the new file with the default editor because Folio editors are opt-in.
+    await expect.poll(() => command('activeTabDirty')).toBe(false)
+    await command('open', { file: 'new-copy.docx', editor: 'folio.docx' })
     await expect(folio(page).getByRole('heading', { name: 'Draft for Save As edited' })).toBeVisible()
-    await expect.poll(() => command('activeTabDirty')).toBe(true)
   })
 })
 
@@ -365,7 +368,7 @@ test('DOCX recovers an acknowledged draft after the actual extension host stops'
   await frame.getByRole('heading', { name: 'Before interruption' }).click()
   await page.keyboard.press('End')
   await page.keyboard.insertText(' edited')
-  await expect(frame.getByText('Unsaved in VS Code', { exact: true })).toBeVisible()
+  await expect(frame.getByText('Unsaved · draft recoverable', { exact: true })).toBeVisible()
   await expect.poll(() => command('activeTabDirty')).toBe(true)
   await restart('host')
   await command('revert')
@@ -393,7 +396,7 @@ test.describe('native DOCX backups', () => {
     await frame.getByRole('heading', { name: 'Original backup package' }).click()
     await page.keyboard.press('End')
     await page.keyboard.insertText(' edited')
-    await expect(frame.getByText('Unsaved in VS Code', { exact: true })).toBeVisible()
+    await expect(frame.getByText('Unsaved · draft recoverable', { exact: true })).toBeVisible()
     await expect.poll(() => command('activeTabDirty')).toBe(true)
     const replacement = word('Replacement from disk')
     await writeFile(target, replacement)
@@ -409,7 +412,7 @@ test.describe('native DOCX backups', () => {
     await frame.getByRole('heading', { name: 'Original backup package edited' }).click()
     await page.keyboard.press('End')
     await page.keyboard.insertText(' again')
-    await expect(frame.getByText('Unsaved in VS Code', { exact: true })).toBeVisible()
+    await expect(frame.getByText('Unsaved · draft recoverable', { exact: true })).toBeVisible()
     await command('undo')
     await expect(frame.getByRole('heading', { name: 'Original backup package edited', exact: true })).toBeVisible()
     await expect.poll(() => command('activeTabDirty')).toBe(true)

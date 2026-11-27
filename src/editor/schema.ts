@@ -2,7 +2,8 @@ import { Extension, Node, mergeAttributes, type Attributes, type Extensions } fr
 import StarterKit from '@tiptap/starter-kit'
 import Code from '@tiptap/extension-code'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
-import { TableKit } from '@tiptap/extension-table'
+import { TableKit, TableView } from '@tiptap/extension-table'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { TextStyleKit } from '@tiptap/extension-text-style'
 import TextAlign from '@tiptap/extension-text-align'
 import Superscript from '@tiptap/extension-superscript'
@@ -139,12 +140,39 @@ export const DocumentImage = Node.create({
   renderText: ({ node }) => node.attrs.alt,
 })
 
+/**
+ * Tiptap 3.35's column update sets `min-width` for a column that returns to automatic sizing but leaves its previous
+ * `width`, so Undo or a width reset kept the old rendering. Clear the stale width after each update.
+ */
+class FolioTableView extends TableView {
+  constructor(node: ProseMirrorNode, cellMinWidth: number, ...rest: unknown[]) {
+    super(node, cellMinWidth, ...(rest as [never]))
+    clearAutomaticWidths(node, this.colgroup)
+  }
+
+  update(node: ProseMirrorNode) {
+    const updated = super.update(node)
+    if (updated) clearAutomaticWidths(node, this.colgroup)
+    return updated
+  }
+}
+
+function clearAutomaticWidths(node: ProseMirrorNode, colgroup: HTMLTableColElement) {
+  let col = colgroup.firstElementChild as HTMLElement | null
+  node.firstChild?.forEach(cell => {
+    const widths: (number | undefined)[] | null = cell.attrs.colwidth
+    for (let index = 0; index < (cell.attrs.colspan ?? 1) && col; index++, col = col.nextElementSibling as HTMLElement | null) {
+      if (!widths?.[index]) col.style.removeProperty('width')
+    }
+  })
+}
+
 export function createExtensions(overrides: Extensions = []): Extensions {
   return [
     StarterKit.configure({ code: false, trailingNode: false, link: { openOnClick: false, autolink: true, isAllowedUri: value => safeUrl(value) } }),
     Code.extend({ excludes: 'code' }),
     TextStyleKit, TextAlign.configure({ types: ['paragraph', 'heading'] }), Superscript, Subscript,
-    TaskList, TaskItem.configure({ nested: true }), TableKit.configure({ table: { resizable: true } }),
+    TaskList, TaskItem.configure({ nested: true }), TableKit.configure({ table: { resizable: true, View: FolioTableView } }),
     Placeholder.configure({ placeholder: 'Start writing, or type / for commands…' }), SourceIdentity, Layout,
     ...[Callout, RawBlock, RawInline, MermaidBlock, BlockMath, InlineMath, WikiLink, Toc, DocumentImage]
       .map(extension => overrides.find(override => override.name === extension.name) ?? extension),

@@ -167,3 +167,30 @@ describe('IronCalc XLSX codec', () => {
     })
   })
 })
+
+describe("workbook themes", () => {
+  test('keeps the built-in theme snapshot in sync with IronCalc 0.9.1', async () => {
+    const { getThemeList, initSync } = await import('@ironcalc/wasm-xlsx')
+    initSync({ module: Uint8Array.from(readFileSync('node_modules/@ironcalc/wasm-xlsx/wasm_bg.wasm')) })
+    const { builtinThemes } = await import('./themes')
+    expect(getThemeList()).toEqual(builtinThemes)
+  })
+
+  test('writes the chosen theme and reads it back with the workbook', async () => {
+    const { builtinThemes } = await import('./themes')
+    const wasm = Uint8Array.from(readFileSync('node_modules/@ironcalc/wasm-xlsx/wasm_bg.wasm'))
+    const workbook = createWorkbook('xlsx')
+    workbook.theme = builtinThemes.find(theme => theme.name === 'Forest')!
+    workbook.sheets[0].cells.A1 = { kind: 'text', value: 'Themed', style: { fill: '#3a6b35' } }
+    const written = processSpreadsheet({ operation: 'write', workbook }, wasm)
+    if (written.operation !== 'write') throw new Error(written.message)
+    expect(strFromU8(unzipSync(written.bytes)['xl/theme/theme1.xml'])).toContain('3A6B35')
+    const read = processSpreadsheet({ operation: 'read', bytes: written.bytes }, wasm)
+    if (read.operation !== 'read') throw new Error(read.message)
+    expect(read.workbook.theme).toEqual(workbook.theme)
+    expect(read.workbook.sheets[0].cells.A1?.style?.fill?.toLowerCase()).toBe('#3a6b35')
+    expect(read.workbook.warnings.join(' ')).not.toMatch(/theme/i)
+    expect(processSpreadsheet({ operation: 'write', workbook: { ...workbook, theme: { ...workbook.theme, accent1: 'red' } } }, wasm))
+      .toMatchObject({ operation: 'error', message: 'The workbook theme is invalid.' })
+  })
+})

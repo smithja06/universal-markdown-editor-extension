@@ -51,6 +51,8 @@ function supportedElement(element: HTMLElement): boolean {
   if (tag === 'a' && !safeUrl(element.getAttribute('href') ?? '')) return false
   if (tag === 'img' && !safeUrl(element.getAttribute('src') ?? '', true)) return false
   if (tag === 'input' && element.getAttribute('type') !== 'checkbox') return false
+  if ((tag === 'td' || tag === 'th') && ['colwidth', 'data-colwidth'].some(name => element.hasAttribute(name) &&
+    !/^\d{1,4}(?:,\d{1,4})*$/.test(element.getAttribute(name) ?? ''))) return false
   if (tag === 'span' && element.hasAttribute('class') && !['image-caption', 'document-image', 'inline-math', 'wiki-link', 'raw-inline'].includes(element.className)) return false
   if (tag === 'pre' && element.hasAttribute('class') && !['raw-block', 'diagram'].includes(element.className)) return false
   if (tag === 'code' && element.hasAttribute('class') &&
@@ -90,7 +92,8 @@ export function readBlockHtml(raw: string, schema: Schema): ProseMirrorNode | un
   const legacy = element.localName === 'div' && element.getAttribute('data-folio-block') === '1'
   const block = legacy ? onlyElement(element) : element
   if (!block || legacy && element.attributes.length !== 1 || !blocks.has(block.localName) && block.localName !== 'img' || !supportedElement(block)) return undefined
-  const source = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true }, FORBID_TAGS: ['form', 'iframe', 'template', 'button'] })
+  // Table column widths use ProseMirror's non-standard `colwidth` attribute. supportedElement has already checked its digits.
+  const source = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true }, ADD_ATTR: ['colwidth'], FORBID_TAGS: ['form', 'iframe', 'template', 'button'] })
   const sanitized = templateFor(source)
   const sanitizedBlock = legacy ? onlyElement(onlyElement(sanitized) ?? sanitized) : onlyElement(sanitized)
   if (!sanitizedBlock) return undefined

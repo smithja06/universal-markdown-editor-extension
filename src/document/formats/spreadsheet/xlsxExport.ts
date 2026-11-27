@@ -1,4 +1,5 @@
 import { Model } from '@ironcalc/wasm-xlsx'
+import { isWorkbookTheme } from './themes'
 import { unzipSync, zipSync } from 'fflate'
 import { cellAddress, parseAddress, rangeSize, safeSpreadsheetLink, spreadsheetLimits, type Cell, type CellValue, type Sheet, type Workbook } from './model'
 import { addConditionalRule, encodeStyle } from './xlsxStyles'
@@ -12,6 +13,7 @@ const excelErrors = new Set(['#NULL!', '#DIV/0!', '#VALUE!', '#REF!', '#NAME?', 
 
 export function validateWorkbook(workbook: Workbook) {
   if (!workbook.sheets.length || workbook.sheets.length > spreadsheetLimits.sheets) throw new Error('The workbook has an unsupported sheet count.')
+  if (workbook.theme !== undefined && !isWorkbookTheme(workbook.theme)) throw new Error('The workbook theme is invalid.')
   const names = new Set<string>()
   let count = 0
   let metadataCharacters = 0
@@ -128,6 +130,7 @@ export function exportXlsx(workbook: Workbook) {
   validateWorkbook(workbook)
   const model = createEngine(workbook)
   try {
+    if (workbook.theme) model.setTheme(workbook.theme)
     workbook.sheets.forEach((sheet, index) => applySheet(model, index, sheet))
     model.setSelectedSheet(0)
     const enginePackage = model.toXlsx()

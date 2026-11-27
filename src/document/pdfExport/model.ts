@@ -32,6 +32,14 @@ export interface PrintDocument {
   source: 'markdown' | 'txt' | 'docx'
   blocks: PrintBlock[]
   notices: ExportNotice[]
+  /** BCP 47 language for the PDF catalog. Markdown front matter can set it; otherwise the export uses the reader's locale. */
+  language?: string
+}
+
+/** A canonical BCP 47 tag, or undefined for anything Intl does not accept. */
+export function documentLanguage(value: unknown) {
+  if (typeof value !== 'string' || !value.trim() || value.length > 35) return
+  try { return Intl.getCanonicalLocales(value.trim())[0] } catch { return }
 }
 
 export type PageSize = 'letter' | 'a4'

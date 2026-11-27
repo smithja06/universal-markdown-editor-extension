@@ -6,7 +6,6 @@ import { isGeneration, isId, isRecord } from '../../src/host/vscode/recovery'
 import { readLocalDocument } from './localDocumentFile'
 import { runDocxWorker } from './docxWorker'
 
-export const docxCopyNotice = 'DOCX edits are kept as a recoverable draft. Use Export DOCX copy to review fidelity changes and create a separate file.'
 export const docxExternalNotice = 'The DOCX on disk changed or became unavailable. This draft and its opened package are preserved. Use File → Revert to disk to load the current file, or export the draft as a copy.'
 
 export interface DocxPackage {
@@ -17,7 +16,7 @@ export interface DocxPackage {
   issues: DocxIssue[]
 }
 
-async function importPackage(bytes: Uint8Array<ArrayBuffer>, signal: AbortSignal): Promise<DocxPackage> {
+export async function importPackage(bytes: Uint8Array<ArrayBuffer>, signal: AbortSignal): Promise<DocxPackage> {
   const { document, issues } = await runDocxWorker({ operation: 'read', bytes }, signal)
   const source = JSON.stringify(document)
   readDocxSnapshot(source)
@@ -50,6 +49,12 @@ export class DocxDocument implements vscode.CustomDocument {
   dirty = false
   fromBackup = false
   restoredBackup?: vscode.Uri
+  /** SHA-256 the file on disk must still have for an in-place Save. It differs from the original after an interrupted save. */
+  disk?: string
+  /** Draft source that matches the file on disk. */
+  clean = ''
+  nativeSave = false
+  saveNotice?: string
   private operations = Promise.resolve()
 
   constructor(readonly uri: vscode.Uri) {}
@@ -58,9 +63,14 @@ export class DocxDocument implements vscode.CustomDocument {
     this.original = original
     this.source = source
     this.rich = rich
+    this.disk = original.fingerprint
+    this.clean = original.source
     this.failure = undefined
     this.revertError = undefined
   }
+
+  /** Whether the draft differs from the file Folio last read or wrote. */
+  get unsaved() { return this.source !== this.clean || this.disk !== this.original?.fingerprint }
 
   serialize<T>(operation: () => Promise<T>) {
     const result = this.operations.then(operation)

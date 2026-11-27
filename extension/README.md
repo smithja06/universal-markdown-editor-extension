@@ -11,16 +11,23 @@ Folio matches your VS Code color theme by default. To use Folio's own palette, o
 ## Plain text and Word documents
 
 - **Folio Plain Text Editor** opens `.txt` as literal text with find/replace, native Save, Undo/Redo and Revert. The qualified editing scope is local UTF-8 with optional BOM and uniform LF or CRLF, up to 16 MiB. Folio displays mixed and CR-only line endings read-only because VS Code's own Save can normalize them.
-- **Folio DOCX Editor** opens the supported `.docx` subset for visual editing, find/replace, native Undo/Redo, and recovery. Use **Export → Export DOCX copy…** to review fidelity changes and download a validated copy. **Download original** retrieves the opened package. **File → Revert to disk** loads the current file. Native Save and Save As report the copy workflow and leave the draft dirty. Complex or invalid packages open with an explanation.
+- **Folio DOCX Editor** opens the supported `.docx` subset for visual editing, table column resizing, find/replace, native Undo/Redo, and recovery. **Download original** retrieves the opened package. **File → Revert to disk** loads the current file. Complex or invalid packages open with an explanation.
+- **Folio XLSX Editor** and **Folio CSV Editor** open workbooks and CSV tables in a spreadsheet grid. They support formula suggestions, workbook themes, formatting, native Undo/Redo, Revert, recovery and reviewed copies. CSV still opens in VS Code's text editor by default, which saves the exact text.
+
+## Saving DOCX, XLSX and CSV
+
+On Windows, for a local file on a fixed NTFS drive, **Save** writes your edits back to the file you opened. Folio checks that the file has not changed since you opened it and locks it while writing, so a newer change from another app is never overwritten. The first Save of each file asks before replacing it with Folio's supported format and lists what the original loses, such as Word page layout or unsupported workbook features. **Save As** creates a new file and never replaces an existing one. If another app has the file open, or the file changed on disk, Folio keeps your draft and tells you why.
+
+Everywhere else, including macOS, Linux, Remote windows and other drives, Save is not available for these formats. Folio keeps a recoverable draft and the editor explains this. Use **Export DOCX copy…** or the spreadsheet **Export** menu to save a separate file. The status in the editor shows whether your edits are saved to the file or only kept as a recoverable draft.
 
 ## PDF viewing and export
 
 - **Folio PDF Viewer** opens local `.pdf` files read-only with page navigation, zoom and fit modes, embedded-text find with highlights, and text selection and copy. Pages without embedded text are labelled, and Folio does not perform OCR. Scripts, links, form fields and attachments in the PDF are inert. Password-protected PDFs open with an explanation. If the file changes on disk, choose **Reload from disk**. Folio never writes PDFs you view.
-- In the Markdown, TXT and DOCX editors, use **Export → Export PDF…** to choose the page size, orientation, margins and file name, review fidelity changes and a validated preview, then select **Save PDF copy…**. Folio saves only to a new local `.pdf` file and never replaces an existing one. If the document changes after the preview, export again from the current revision.
+- In the Markdown, TXT and DOCX editors, use **Export → Export PDF…** to choose the page size, orientation, margins and file name, review fidelity changes and a validated preview, then select **Save PDF copy…**. Folio saves only to a new local `.pdf` file and never replaces an existing one. If the document changes after the preview, export again from the current revision. Characters without a bundled font, such as CJK text and emoji, print as Unicode code points like `[U+4E2D]`. Exported PDFs include a document language, title and heading bookmarks, but they are not tagged and are not guaranteed to meet PDF/UA accessibility requirements.
 
 ## Install a VSIX
 
-This package requires desktop VS Code 1.100 or later. Release-candidate testing uses desktop VS Code on Windows. See the [platform qualification record](https://github.com/smithja06/universal-markdown-editor-extension/blob/main/docs/extension-qualification.md) for the tested build, filesystem, and coverage.
+This package requires desktop VS Code 1.100 or later. Release-candidate testing uses desktop VS Code 1.100, 1.147 and 1.148 on Windows. Other platforms are not yet qualified. See the [platform qualification record](https://github.com/smithja06/universal-markdown-editor-extension/blob/main/docs/extension-qualification.md) for the tested build, filesystem, and coverage.
 
 In the Command Palette, run **Extensions: Install from VSIX…** and select `folio.vsix`. Or run `code --install-extension path/to/folio.vsix`. Folio requires a trusted workspace. If the workspace is in Restricted Mode, continue using the native Text Editor or grant trust through VS Code when you trust that workspace.
 
@@ -50,4 +57,4 @@ npm ci
 npm run package:extension
 ```
 
-Install the resulting `extension/dist/folio.vsix`. The build uses the lockfile. The package includes Folio's MIT license, `EPL-1.0.txt`, and third-party notices, including `dist/PDF_THIRD_PARTY_NOTICES.txt` for pdf.js, pdfmake and the embedded PDF fonts. The top-level notices link to the upstream ELK, EMF GWT, and Xbase sources. This candidate is for local validation while the release source archive and distribution terms are reviewed. Run `npm run test:extension` for the isolated desktop tests. Set `FOLIO_VSCODE_EXECUTABLE` to the installed VS Code application binary if discovery fails.
+Install the resulting `extension/dist/folio.vsix`. The build uses the lockfile. The package includes Folio's MIT license, `EPL-1.0.txt`, `EPL-2.0.txt`, and third-party notices, including `dist/PDF_THIRD_PARTY_NOTICES.txt` for pdf.js, pdfmake and the embedded PDF fonts. The top-level notices link to the upstream ELK, EMF GWT, and Xbase sources. `npm run source:companion` builds the verified source archive for the Eclipse-licensed components. This candidate is for local validation. A public release will publish that archive beside the package. Run `npm run test:extension` for the isolated desktop tests. Set `FOLIO_VSCODE_EXECUTABLE` to the installed VS Code application binary if discovery fails.

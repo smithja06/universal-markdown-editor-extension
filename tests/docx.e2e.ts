@@ -328,3 +328,47 @@ test('competing Folio tabs leave the stored DOCX and the losing tab’s edits re
   await expect(editor(competing)).toContainText('First edit Project brief')
   await expect(editor(competing)).not.toContainText('Second edit')
 })
+
+test('DOCX column widths resize by pointer and keyboard, undo, and export to a fixed Word grid', async ({ page }) => {
+  await openDocx(page, 'Widths.docx', fixture())
+  const table = editor(page).getByRole('table')
+  await table.getByRole('cell', { name: 'Planned' }).click()
+  const firstColumn = table.getByRole('cell', { name: 'Planned' })
+  const before = (await firstColumn.boundingBox())!.width
+
+  // Keyboard path: the Table controls menu sets the whole column's width as one undoable edit.
+  await page.getByRole('button', { name: 'Table controls', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  await page.getByRole('menuitem', { name: /^Widen column/ }).press('Enter')
+  await expect.poll(async () => (await firstColumn.boundingBox())!.width).toBeGreaterThan(before + 12)
+  const widened = (await firstColumn.boundingBox())!.width
+  await editor(page).press('ControlOrMeta+z')
+  await expect.poll(async () => (await firstColumn.boundingBox())!.width).toBeLessThan(widened - 12)
+  await editor(page).press('ControlOrMeta+Shift+z')
+  await expect.poll(async () => (await firstColumn.boundingBox())!.width).toBeGreaterThan(widened - 2)
+
+  // Pointer path: drag the resize handle on the second column's right edge.
+  const second = table.getByRole('cell', { name: 'Open' })
+  const box = (await second.boundingBox())!
+  await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2)
+  await expect(page.locator('.column-resize-handle').first()).toBeVisible()
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width + 80, box.y + box.height / 2, { steps: 6 })
+  await page.mouse.up()
+  await expect.poll(async () => (await second.boundingBox())!.width).toBeGreaterThan(box.width + 50)
+  await expect(saved(page)).toBeVisible()
+
+  const copy = await download(page, /^Export DOCX copy/)
+  const { unzipSync, strFromU8 } = await import('fflate')
+  const xml = strFromU8(unzipSync(new Uint8Array(copy.bytes))['word/document.xml'])
+  const grid = [...xml.matchAll(/<w:gridCol w:w="(\d+)"\/>/g)].map(match => Number(match[1]))
+  expect(grid).toHaveLength(2)
+  expect(grid[0]).toBe(Math.round(widened) * 15)
+  expect(grid[1]).toBeGreaterThan(Math.round(box.width) * 15)
+  expect(xml).toContain('<w:tblLayout w:type="fixed"/>')
+
+  await openDocx(page, 'Widths copy.docx', copy.bytes)
+  const reopened = editor(page).getByRole('table')
+  await expect.poll(async () => Math.round((await reopened.getByRole('cell', { name: 'Planned' }).boundingBox())!.width)).toBe(Math.round(widened))
+  await expect(page.getByText(/Table formatting/)).toHaveCount(0)
+})

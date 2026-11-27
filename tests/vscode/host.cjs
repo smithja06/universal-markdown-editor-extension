@@ -15,6 +15,7 @@ class HeapProbe {}
 let attachmentFault
 let attachmentWriteOptions
 let saveAsOutcome
+let saveOutcome
 
 function fileStat(type, size = 0) { return { type, size, ctime: 0, mtime: 0 } }
 function virtualFile(uri) {
@@ -89,6 +90,15 @@ const operations = {
     if (!await vscode.workspace.applyEdit(edit)) throw new Error('VS Code refused the native test edit.')
   },
   save: () => vscode.commands.executeCommand('workbench.action.files.save'),
+  // A save that shows a modal confirmation must not block the bridge reply.
+  startSave() {
+    saveOutcome = 'pending'
+    void vscode.commands.executeCommand('workbench.action.files.save').then(
+      () => { saveOutcome = 'completed' },
+      error => { saveOutcome = String(error) },
+    )
+  },
+  saveOutcome: () => saveOutcome,
   saveAs() {
     saveAsOutcome = 'pending'
     void vscode.commands.executeCommand('workbench.action.files.saveAs').then(
@@ -224,6 +234,7 @@ let boundaryReads = 0
 let providerUnavailable = false
 let providerStatFailures = 0
 exports.activate = context => {
+  operations.storageInfo = () => ({ global: context.globalStorageUri.toString(), workspace: context.storageUri?.toString() ?? null })
   context.subscriptions.push(virtualChanges, vscode.workspace.registerFileSystemProvider(virtualRoot.scheme, {
     onDidChangeFile: virtualChanges.event,
     watch() { return new vscode.Disposable(() => undefined) },

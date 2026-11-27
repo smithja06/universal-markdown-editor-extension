@@ -1,5 +1,49 @@
 # VS Code platform qualification
 
+## Phase 10 qualification
+
+Windows 11 Pro 25H2 x64 (10.0.26200.9974), fixed NTFS `C:`, local `file:` workspaces, Node 24.13.0, npm 11.21.0, Playwright 1.65.1.
+
+| Host | Build | Result |
+| --- | --- | --- |
+| VS Code 1.147.0 portable zip (`8a14f0cc1b`) | Development bundle, full desktop suite | 81 passed, 1 failed of 82 in one uninterrupted run |
+| VS Code 1.100.0 portable zip (`19e0f9e6`, Electron 34.5.1, Chromium 132), the manifest minimum | Installed final VSIX | 26 passed, 1 failed of 27 |
+| VS Code 1.147.0 portable zip | Installed final VSIX | 26 passed, 1 failed of 27 |
+| VS Code 1.148.0 installed (`661626d0e7`) | Installed final VSIX | 26 passed, 1 failed of 27 |
+
+The failure is the same in every row. `PDF opens only through the opt-in viewer…` fails at its clipboard read-back because the Windows session refused clipboard access to every process. PowerShell `Set-Clipboard` failed too, and the session was idle for six days. Rerun it on an unlocked session. Installed runs set `FOLIO_TEST_VSIX=extension/dist/folio.vsix`, `FOLIO_VSCODE_EXECUTABLE` and `FOLIO_VSCODE_CLI_JS`. Before the pdf.js legacy switch, all PDF viewing and export failed on 1.100.0.
+
+```powershell
+$env:FOLIO_TEST_VSIX = 'extension/dist/folio.vsix'
+npx playwright test --config playwright.vscode.config.ts binarySave.vscode.ts spreadsheet.vscode.ts pdf.vscode.ts pdfExport.vscode.ts editor.vscode.ts multiformat.vscode.ts -g "native binary Save|XLSX|CSV|PDF|Markdown exports|TXT and DOCX export|opens optionally|TXT defaults to native|DOCX offers reviewed|DOCX flags|Restricted Mode|native DOCX backups|Save As" --output test-results/p10-installed
+```
+
+**Environment workaround.** A pending background update of the installed VS Code held the `vscode-updating` installer mutex. Every new instance logged `checkInnoSetupMutex: vscode-updating is held` and exited, so the harness could not start. Portable zip builds skip that mutex: `https://update.code.visualstudio.com/1.147.0/win32-x64-archive/stable` (zip SHA-256 `42d65f18009959964d7cff8ca6f33149a195d52c08622821c8c681a08469c26e`) and `https://update.code.visualstudio.com/1.100.0/win32-x64-archive/stable` (zip SHA-256 `6fa62a8f07a2b42993b19f81ed90c95a2de78299b7e227f226c76d87ceb06a9c`). Both carried valid Microsoft signatures. Point the harness at them with `FOLIO_VSCODE_EXECUTABLE`.
+
+**Native Save qualification boundary.** Qualified only on the environment above. The tests cover:
+
+- a competing process holding the file
+- external write, delete and rename-over attempts during the save
+- an external replacement before the save
+- verification rollback
+- stopped-write classification and recovery from a real journal
+- Save As refusing existing files
+- Undo past the save point
+- exact CSV bytes
+- three VS Code versions
+
+Not covered: disk-full and power loss during the write, other Windows volume types, macOS, Linux and Remote. The gate disables native Save there.
+
+**Readers.**
+
+- Word 365 16.0.20625 read the Folio DOCX with exact 180 pt and 72 pt fixed columns.
+- pypdf 7.1.1 strict and Windows.Data.Pdf read the Folio PDF.
+- Python `csv` parsed the native-saved CSV.
+- Excel 365 automation could not read any opened workbook in the locked session, including Excel's own, so it is not qualified in Phase 10.
+- LibreOffice is not installed.
+
+[Phase 10 record](phase-10-final-integration.md#11-test-commands-and-results)
+
 ## Phase 9 spreadsheet qualification
 
 Qualification used Windows 11 x64, desktop VS Code 1.147.0, Node 24.13.0 and Chromium 159.0.8154.6. Workspace fixtures were local drive-letter file URIs, plus an isolated virtual-workspace provider and an independently isolated Restricted Mode profile. Minimum-version desktop, other platforms, true Remote, additional providers and OS-native copy dialogs remain open.
