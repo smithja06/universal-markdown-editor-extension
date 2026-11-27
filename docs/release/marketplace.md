@@ -45,7 +45,7 @@ The Marketplace only shows images from public HTTPS URLs. The repository is priv
 
 ## Source companion hosting plan (not executed)
 
-The ELK corresponding-source archive must be publicly available beside each distributed VSIX before publication. Build it with `npm run source:companion`. The current local archive is `extension/dist/source-companion/folio-elk-source-companion.zip`, 22,222,039 bytes, SHA-256 `9021b673fb8fb987fb3e4bf1c787deac6ecbd50a217f9ae769d6f008310f9a99`. It is built from VSIX worker `dist/webview/assets/elk-XV6XMXQE-LmPXhOG2.js`, SHA-256 `52ee6432…96593b3aa4d`.
+The ELK corresponding-source archive must be publicly available beside each distributed VSIX before publication. Build it with `npm run source:companion`. The current local archive is `extension/dist/source-companion/folio-elk-source-companion.zip`, 22,222,039 bytes, SHA-256 `4c78507f3caaee00b89260dda518a698c5e451e9957f725a82e3d3ccd13e66be`. It is built from VSIX worker `dist/webview/assets/elk-XV6XMXQE-BXEA-SQ7.js`, SHA-256 `62921b92…f4ed4b6167b`. Rebuild it whenever the VSIX is repackaged, because the worker's name can change.
 
 Proposed URL structure, using a GitHub Release on a repository that is public at publication time:
 

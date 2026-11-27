@@ -35,7 +35,7 @@ All the items below passed except the noted ones. Both result boxes were ticked,
 
 ## Round 2 re-test
 
-Install the round 2 VSIX first (SHA-256 in `docs/phase-10.1-release-qualification.md`). Mark each box ☐ → ☑. Note anything confusing, slow or wrong.
+Install the round 2 VSIX first: SHA-256 `4e374c3437256c10178cc494ba80fa094fbcd12f897f0dab610da4a4656460ed`, built from `c311e8a`. Mark each box ☐ → ☑. Note anything confusing, slow or wrong.
 
 **Find and replace**
 - ☐ Open `plain.txt` with Folio. Ctrl+H, find a word that appears twice, type a replacement and click **Replace**: only the current match changes. Press Enter in the **Replace with** box: the next match changes.

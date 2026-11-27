@@ -6,12 +6,14 @@ Same host as Phase 10 (Windows 11 Pro x64, fixed NTFS `C:`, local `file:` worksp
 
 | Host | Build | Result |
 | --- | --- | --- |
-| VS Code 1.147.0 portable (`8a14f0cc1b`) | Development bundle, full desktop suite | **83 passed of 83** in one uninterrupted run, after the harness fix below. The run before it was 82 passed, 1 failed. |
-| VS Code 1.100.0 portable (`19e0f9e6`) | Installed VSIX `e44a231b…` | 28 passed of 28 |
-| VS Code 1.147.0 portable | Installed VSIX | 28 passed of 28 |
-| VS Code 1.148.0 installed (`661626d0e7`) | Installed VSIX | 28 passed of 28 |
+| VS Code 1.147.0 portable (`8a14f0cc1b`) | Development bundle, full desktop suite, `c311e8a` | **87 passed of 87** in one uninterrupted run. The run before it was 86 passed, 1 failed: a theme test still expected the old green dark background and was updated. |
+| VS Code 1.100.0 portable (`19e0f9e6`) | Installed VSIX `4e374c34…` | 32 passed of 32 |
+| VS Code 1.147.0 portable | Installed VSIX | 32 passed of 32 |
+| VS Code 1.148.0 installed (`661626d0e7`) | Installed VSIX | 32 passed of 32 |
 
-The PDF clipboard case passes on every host. The installed runs add `XLSX Save and Save As keep sheets, styles, merges, rules, theme and formulas`.
+Round 1 (`c7329eb`, VSIX `e44a231b…`) was 83 of 83 on the development bundle and 28 of 28 installed on each host.
+
+The PDF clipboard case passes on every host. The installed runs add `XLSX Save and Save As keep sheets, styles, merges, rules, theme and formulas`. Round 2 adds single Replace through the find form, Enter in the PDF page box, Ctrl+B/I/U in the grid, cell editor and formula bar without toggling the side bar, calculation on a typed formula, and the calculation banner after a cross-sheet row insert.
 
 **Harness change.** `tests/vscode/desktop.ts` no longer writes `extensions.autoUpdate` to the isolated profile. VS Code 1.147 migrates `false` to `"off"` by rewriting `settings.json` about two seconds after startup. A window reload during that write waited forever on VS Code's backup veto (`onBeforeShutdown … pending operations: veto.backups`). The recovery-after-reload case failed 3 of 13 repeats before the change and 0 of 12 after it. `extensions.autoCheckUpdates: false` still prevents updates.
 
@@ -32,7 +34,7 @@ The failure is the same in every row. `PDF opens only through the opt-in viewer�
 
 ```powershell
 $env:FOLIO_TEST_VSIX = 'extension/dist/folio.vsix'
-npx playwright test --config playwright.vscode.config.ts binarySave.vscode.ts spreadsheet.vscode.ts pdf.vscode.ts pdfExport.vscode.ts editor.vscode.ts multiformat.vscode.ts -g "native binary Save|XLSX|CSV|PDF|Markdown exports|TXT and DOCX export|opens optionally|TXT defaults to native|DOCX offers reviewed|DOCX flags|Restricted Mode|native DOCX backups|Save As" --output test-results/p10-installed
+npx playwright test --config playwright.vscode.config.ts binarySave.vscode.ts spreadsheet.vscode.ts pdf.vscode.ts pdfExport.vscode.ts editor.vscode.ts multiformat.vscode.ts -g "native binary Save|XLSX|CSV|PDF|Markdown exports|TXT and DOCX export|opens optionally|TXT defaults to native|TXT Replace changes|DOCX offers reviewed|DOCX flags|Restricted Mode|native DOCX backups|Save As" --output test-results/p10-installed
 ```
 
 **Environment workaround.** A pending background update of the installed VS Code held the `vscode-updating` installer mutex. Every new instance logged `checkInnoSetupMutex: vscode-updating is held` and exited, so the harness could not start. Portable zip builds skip that mutex: `https://update.code.visualstudio.com/1.147.0/win32-x64-archive/stable` (zip SHA-256 `42d65f18009959964d7cff8ca6f33149a195d52c08622821c8c681a08469c26e`) and `https://update.code.visualstudio.com/1.100.0/win32-x64-archive/stable` (zip SHA-256 `6fa62a8f07a2b42993b19f81ed90c95a2de78299b7e227f226c76d87ceb06a9c`). Both carried valid Microsoft signatures. Point the harness at them with `FOLIO_VSCODE_EXECUTABLE`.

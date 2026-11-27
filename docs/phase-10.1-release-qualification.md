@@ -15,7 +15,9 @@ Phase 10.1 closes the Phase 10 technical release blockers where this machine all
 | `6a23024` | README, release notes, Marketplace text and the source hosting plan |
 | `c7329eb` | Desktop harness fix for a VS Code settings-migration race on window reload |
 | `30109ac` | Acceptance checklist, this record and documentation updates |
-| (next commit) | Excel 365 result and `excel-report-check.py` |
+| `eb6d16a` | Excel 365 result and `excel-report-check.py` |
+| `c311e8a` | Acceptance round 1 fixes, tests, README and checklist (section 15) |
+| (next commit) | Round 2 records |
 
 ## 2. PDF clipboard qualification
 
@@ -132,7 +134,7 @@ No genuine product defect was found in this pass. The one desktop failure was a 
 
 ## 6. Full regression results
 
-All runs are on the final sources, `6a23024` code. Each count is one clean run, not accumulated retries.
+Each count is one clean run, not accumulated retries. The table records the round 1 candidate (`c7329eb`). Round 2 results for `c311e8a` are in section 15.
 
 | Check | Command | Result |
 | --- | --- | --- |
@@ -196,7 +198,7 @@ Notices were rechecked:
 | --- | --- |
 | Path | `C:\Users\xxjad\OneDrive\Desktop\Personal VSCode\universal-markdown-editor-extension\extension\dist\folio.vsix` |
 | Source commit | `c7329eb`, a clean tracked tree. The later documentation commit changes only `docs/`, which is not packaged. |
-| SHA-256 | `e44a231bb91e369328e75e0123f99bc47c3b34aecf96f54f9e7bdb7e2d5b0304` |
+| SHA-256 | Round 1: `e44a231bb91e369328e75e0123f99bc47c3b34aecf96f54f9e7bdb7e2d5b0304`. **Superseded by round 2**, section 15. |
 | Size | 8,814,429 bytes, 205 files |
 | Version | 0.1.0 (manifest), publisher `smithja06`. No public version assigned. |
 | Engine | `^1.100.0`. PDF verified on 1.100.0. |
@@ -224,16 +226,58 @@ Use a separate VS Code profile if you prefer to keep your normal profile untouch
 
 ## 12. Remaining blockers
 
-1. **Personal acceptance testing.** Complete the checklist.
+1. **Personal acceptance testing.** Round 1 found defects, now fixed (section 15). Complete the round 2 re-test in the checklist.
 2. **Source companion hosting.** Needs authorization: host it, record the URL in the notices, repackage and recheck.
 3. **Publication authorization.** Choose the Marketplace publisher and version. Decide on repository or source-repository visibility.
 
 ## 13. Exact actions required from the owner
 
-1. Install the VSIX and complete the checklist.
+1. Install the round 2 VSIX and complete the round 2 re-test in the checklist.
 2. Decide where the source companion is hosted and authorize the upload.
 3. Authorize publication, the version and the publisher when ready. Until then nothing is published.
 
 ## 14. Next Chat Starter
 
-Continue Folio from branch `phase-10.1-release-qualification` in the original checkout. Read this record, `docs/release/marketplace.md` and `docs/release/acceptance-checklist.md`. Do not publish, push, merge or tag without explicit authorization. Keep `KNO3 DATA.xlsx` untracked. Apply the owner's acceptance results. Excel 365 validation is complete. After hosting is authorized, record the companion URL, repackage, recheck the inventory and hashes, and update the verdicts.
+Continue Folio from branch `phase-10.1-release-qualification` in the original checkout. Read this record, `docs/release/marketplace.md` and `docs/release/acceptance-checklist.md`. Do not publish, push, merge or tag without explicit authorization. Keep `KNO3 DATA.xlsx` untracked. Apply the owner's round 2 acceptance results (section 15). Excel 365 validation is complete. After hosting is authorized, record the companion URL, repackage, recheck the inventory and hashes, and update the verdicts.
+
+## 15. Acceptance round 1 and the round 2 candidate
+
+The owner installed `e44a231b…` and worked through the checklist on November 27, 2026. Most items passed, and the notes found real defects. Both result boxes were ticked, with issues listed, so round 1 did not accept the release. Each defect was traced to its cause, fixed in `c311e8a` and covered by new tests. The Replace, Ctrl+B and separator tests were also run against the old code and failed there.
+
+| Owner's note | Cause | Fix and test |
+| --- | --- | --- |
+| Only **Replace all** works in TXT. | The Markdown, TXT, DOCX and PDF webviews used `enableForms: false`, so VS Code's sandbox dropped submit events. **Replace** is a submit button. The browser suite has no such sandbox, and the desktop suite only clicked **Replace all**. The same cause broke Enter in the PDF page box, the Export TXT copy dialog, workbook rename and Properties custom fields. | `enableForms: true`. CSP `form-action 'none'` still blocks real submission. Desktop: single Replace by click and by Enter, PDF page box Enter. |
+| Italic doesn't show in the DOCX editor, but Word shows it. | Only Inter's upright face was bundled, and `font-synthesis: none` prevented a synthesized slant. Markdown was affected too, and exported copies embedded only the upright face. | Bundle and embed Inter's italic face, and allow `font-synthesis: style`. Chromium: the italic face loads and emphasis is italic. |
+| Ctrl+B doesn't bold in XLSX. The side bar toggled when a cell was selected. | The grid handled Ctrl+B but let the key reach VS Code. The cell editor and formula bar ignored it. | One handler for Ctrl+B/I/U in the grid, cell editor and formula bar stops the key from reaching VS Code. A cell holds one style, so selected text formats the whole cell. Desktop: all three places, side bar unchanged. |
+| `=SUM(1,2,3)` shows "—". Row insert left unticked. | Imported workbooks open with stored results and calculation off. A new or rewritten formula has no stored result. | Typing a formula turns on calculation, with a notice. Missing results show **Not calculated** with a banner offering **Enable calculation**, or **Recalculate** after an error. The banner checks every worksheet. Unchanged formulas keep their last value while recalculating. Desktop: typed formula, revert then banner, cross-sheet row insert. |
+| A restored draft cannot be undone after restart. | Not a defect. VS Code keeps no undo history across restarts for any editor. | Checklist wording corrected: later edits undo, and **File: Revert File** discards the draft. |
+| Dark mode is dark green. | Folio Dark and the exported HTML dark mode used green-tinted greys. | Neutral greys close to VS Code Dark Modern. The accent is the only color. Tests updated to the new backgrounds. |
+| (Seen in the checklist's diff) | Once any join needed a separator, Folio put `<!--folio:boundary-->` between every changed block. New lists were written loose because mdast `spread` was unset. | Separators only where two blocks would merge, and tight lists unless an item holds several paragraphs. Unit tests; the separator test fails on the old code with 4 separators instead of 1. |
+
+**Round 2 regression (`c311e8a`).**
+
+| Check | Result |
+| --- | --- |
+| ESLint, TypeScript (app, tests, scripts and extension) | Pass, 0 warnings |
+| Unit and integration | 36 files, **322 passed** |
+| Standalone Chromium | **101 passed** of 101 |
+| Standalone production build | Pass |
+| Full desktop suite, VS Code 1.147.0 portable, development bundle | **87 passed of 87** in one uninterrupted run. The run before it was 86 passed, 1 failed: a theme test still expected the old green dark background. |
+| Installed VSIX, VS Code 1.100.0 portable | **32 passed** of 32 |
+| Installed VSIX, VS Code 1.147.0 portable | **32 passed** of 32 |
+| Installed VSIX, VS Code 1.148.0 installed | **32 passed** of 32 |
+
+The installed runbook adds `TXT Replace changes` to the filter in `docs/extension-qualification.md`. Its other three new cases match the existing `XLSX` term. Isolated profiles were used throughout.
+
+**Round 2 VSIX.**
+
+| Property | Value |
+| --- | --- |
+| Path | `extension/dist/folio.vsix` |
+| Source commit | `c311e8a`, a clean tracked tree |
+| SHA-256 | `4e374c3437256c10178cc494ba80fa094fbcd12f897f0dab610da4a4656460ed` |
+| Size | 9,051,240 bytes, 212 files. The 7 added files are Inter's italic subsets. |
+
+Two consecutive packages had identical entries, and the tested archive was restored afterwards. All files are within the allowlist. There are no source maps, tests, fixtures, Office or PDF documents, personal paths or credentials. A path-shaped text match is a coincidental byte sequence in base64 font data.
+
+**Source companion.** The ELK worker is now `dist/webview/assets/elk-XV6XMXQE-BXEA-SQ7.js`, SHA-256 `62921b92284f0b6f68bdcf259a2e4bd3977caf97cbd4236b4db58f4ed4b6167b`. Its imports of shared chunks were renamed, and the ELK code is unchanged. `npm run source:companion` re-verified all 8 pinned inputs and rebuilt the archive: 22,222,039 bytes, SHA-256 `4c78507f3caaee00b89260dda518a698c5e451e9957f725a82e3d3ccd13e66be`. It is still not uploaded.

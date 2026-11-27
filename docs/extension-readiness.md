@@ -2,7 +2,7 @@
 
 ## Phase 10.1 release candidate assessment
 
-Engineering qualification for the claimed Windows scope is complete: lint and both tsc clean; 320/320 unit; 101/101 Chromium; full desktop 83/83 on 1.147.0 in one run; installed VSIX 28/28 on each of 1.100.0, 1.147.0 and 1.148.0. Excel 365 validation passed. Release still needs the owner's personal acceptance testing, hosting of the source companion with notice and package updates, and publication authorization. See the [Phase 10.1 record](phase-10.1-release-qualification.md).
+Engineering qualification for the claimed Windows scope is complete after the acceptance round 1 fixes: lint and both tsc clean; 322/322 unit; 101/101 Chromium; full desktop 87/87 on 1.147.0 in one run; installed VSIX 32/32 on each of 1.100.0, 1.147.0 and 1.148.0. Excel 365 validation passed. Release still needs the owner's round 2 acceptance re-test, hosting of the source companion with notice and package updates, and publication authorization. See the [Phase 10.1 record](phase-10.1-release-qualification.md).
 
 ## Phase 10 release assessment
 

@@ -10,8 +10,9 @@ Phase 10.1 is on local branch `phase-10.1-release-qualification`, based on `orig
 - **Reproducible builds.** `.gitattributes` `* text=auto eol=lf`. Two consecutive packages have identical entries.
 - **Release materials.** README/Marketplace page, release notes, `docs/release/marketplace.md`, seven synthetic screenshots, `docs/release/acceptance-checklist.md`.
 - **Harness fix.** The isolated profile no longer sets `extensions.autoUpdate`. VS Code 1.147's migration rewrite raced window reloads.
-- **Results.** lint and both tsc clean; 320/320 unit; 101/101 Chromium; full desktop 83/83 on 1.147.0 in one run; installed VSIX 28/28 on each of 1.100.0, 1.147.0 and 1.148.0. VSIX `e44a231b…`.
-- **Open gates.** Personal acceptance testing, source-companion hosting (needs authorization), publication authorization.
+- **Acceptance round 1.** The owner's notes found real defects: single Replace, italic display, spreadsheet Ctrl+B, uncalculated formulas, a green dark theme and noisy Markdown list output. All are fixed in `c311e8a` with tests. The checklist records round 1 and lists the round 2 re-test.
+- **Results.** lint and both tsc clean; 322/322 unit; 101/101 Chromium; full desktop 87/87 on 1.147.0 in one run; installed VSIX 32/32 on each of 1.100.0, 1.147.0 and 1.148.0. VSIX `4e374c34…`.
+- **Open gates.** Round 2 acceptance re-test, source-companion hosting (needs authorization), publication authorization.
 
 ## Phase 10 final integration
 
