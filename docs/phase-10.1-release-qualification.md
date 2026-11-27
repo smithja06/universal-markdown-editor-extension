@@ -238,7 +238,7 @@ The current candidate is in section 17.
 
 1. **Personal acceptance testing: complete.** Round 1 and round 2 found defects, all fixed (sections 15 and 17). Round 3 on `6c4cde7f…` found no issues (section 18).
 2. **Source companion hosting: authorized and automated** (section 20). The archive is published as a GitHub Release asset when the `v1.0.0` tag is pushed.
-3. **Publication: authorized** as version 1.0.0 by publisher `smithja06` through the release workflow. It needs the owner's one-time Marketplace token setup and the tag push.
+3. **Publication: authorized** as version 1.0.0 by publisher `smithja06` through the release workflow. It needs the owner's one-time Trusted Publishing policy and `marketplace` environment, then the tag push. No token is stored.
 
 ## 13. Exact actions required from the owner
 
@@ -465,3 +465,5 @@ The owner authorized:
 **Regression with version 1.0.0 and the new ID.** Lint and both type checks are clean. Unit tests: 327 of 327. Chromium: 103 of 103. The full desktop suite passed 89 of 89 on VS Code 1.147.0. The installed runbook passed 34 of 34 on each of 1.100.0, 1.147.0 and 1.148.0. The local 1.0.0 VSIX is SHA-256 `94b65513…`, and the companion is `588fc73b…`. Its manifest records the ELK chunk above, and only the lockfile copied into the companion changed. The CI release will build its own VSIX with the same entries.
 
 The workflow has not run yet, because no tag has been pushed. Its first run is the first CI execution of these steps.
+
+**Publishing authentication (update).** Azure DevOps retires global personal access tokens on December 1, 2026. The owner's personal Microsoft account was also refused at dev.azure.com with AADSTS16000. The publish job therefore uses the Marketplace's Trusted Publishing: `vsce publish --oidc` (supported by vsce 4.1.1) with `id-token: write`, in the `marketplace` environment. The `VSCE_PAT` secret is no longer used. The owner creates the Trusted Publishing policy on the publisher management page.

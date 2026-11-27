@@ -68,15 +68,24 @@ https://github.com/smithja06/universal-markdown-editor-extension/releases/tag/v<
      - the companion's `manifest.json` records the exact ELK chunk inside the VSIX
    - creates the GitHub Release with the files, `SOURCE.md` and notes from `CHANGELOG.md`
    - downloads the archive without credentials to prove the link works
-2. **publish**, in the `marketplace` environment: publishes that same VSIX with `vsce`, using the `VSCE_PAT` secret. Without the secret it stops with an error after the GitHub Release already exists. Required reviewers on the environment make each publish wait for approval.
+2. **publish**, in the `marketplace` environment: publishes that same VSIX with `vsce publish --oidc`, using the Marketplace's **Trusted Publishing**. GitHub Actions proves through OpenID Connect that the run comes from this repository's `release.yml` in the `marketplace` environment, so no token is stored anywhere. Required reviewers on the environment make each publish wait for approval.
 
 The desktop VS Code suites need real VS Code windows. They stay a local qualification step before tagging. The CI-built VSIX has the same entries as a local build, and only zip timestamps differ.
 
+**Why not a personal access token.** Azure DevOps retires global personal access tokens on December 1, 2026. The Marketplace token is that kind: its organization is "All accessible organizations". The VS Code publishing guide now recommends Trusted Publishing for GitHub Actions. A personal Microsoft account signing in at dev.azure.com can also land on an Azure Portal sign-in that rejects it (AADSTS16000). Trusted Publishing avoids Azure DevOps entirely.
+
 **One-time setup by the owner.**
 
-1. On https://marketplace.visualstudio.com/manage, sign in and make sure a publisher with ID `smithja06` exists. Create it if needed.
-2. On https://dev.azure.com, open **User settings → Personal access tokens → New token**. Choose **Organization: All accessible organizations** and **Scopes: Custom defined → Marketplace → Manage**. Copy the token.
-3. In the GitHub repository, open **Settings → Environments → New environment** and name it `marketplace`. Optionally add yourself under **Required reviewers**. Add an environment secret named `VSCE_PAT` with the token.
+1. On https://marketplace.visualstudio.com/manage, sign in and make sure the publisher `smithja06` exists. Create it if needed. The ID cannot change later.
+2. Open the publisher and select **Trusted Publishing**, then **Create**. Enter exactly:
+   - Policy name: `Release workflow`
+   - Repository owner: `smithja06`
+   - Repository: `universal-markdown-editor-extension`
+   - Workflow: `release.yml`
+   - Environment: `marketplace`
+
+   Select **Create**. The guide notes that a policy for a private repository must be used within 48 hours to activate. This repository is public.
+3. In the GitHub repository, open **Settings → Environments → New environment** and name it `marketplace`. Optionally add yourself under **Required reviewers**. No secrets are needed.
 
 **Releasing a version.**
 

@@ -2,8 +2,10 @@
 #
 # 1. "release" runs the checks, builds the VSIX and the ELK corresponding-source archive from the tagged commit,
 #    verifies that they match each other and the notices, and creates the GitHub Release with both files.
-# 2. "publish" then publishes that same VSIX to the Visual Studio Marketplace. It runs in the "marketplace"
-#    environment and needs the VSCE_PAT secret. Add required reviewers to that environment to approve each publish.
+# 2. "publish" then publishes that same VSIX to the Visual Studio Marketplace with Trusted Publishing (OIDC), so no
+#    token is stored. It runs in the "marketplace" environment. The publisher's Trusted Publishing policy must name
+#    owner smithja06, repository universal-markdown-editor-extension, workflow release.yml and environment
+#    marketplace. Add required reviewers to that environment to approve each publish.
 #
 # The desktop VS Code suites need real VS Code windows and stay a local qualification step before tagging.
 name: Release
@@ -90,17 +92,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: marketplace
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: vsix
 
-      - name: Publish the released VSIX
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: |
-          if [ -z "$VSCE_PAT" ]; then
-            echo "::error::Add a VSCE_PAT secret to the marketplace environment to publish. The GitHub Release is already complete."
-            exit 1
-          fi
-          npx --yes @vscode/vsce@4.1.1 publish --packagePath folio-*.vsix
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Publish the released VSIX with Trusted Publishing
+        run: npx --yes @vscode/vsce@4.1.1 publish --oidc --packagePath folio-*.vsix
