@@ -6,14 +6,16 @@ Same host as Phase 10 (Windows 11 Pro x64, fixed NTFS `C:`, local `file:` worksp
 
 | Host | Build | Result |
 | --- | --- | --- |
-| VS Code 1.147.0 portable (`8a14f0cc1b`) | Development bundle, full desktop suite, `c311e8a` | **87 passed of 87** in one uninterrupted run. The run before it was 86 passed, 1 failed: a theme test still expected the old green dark background and was updated. |
-| VS Code 1.100.0 portable (`19e0f9e6`) | Installed VSIX `4e374c34…` | 32 passed of 32 |
-| VS Code 1.147.0 portable | Installed VSIX | 32 passed of 32 |
-| VS Code 1.148.0 installed (`661626d0e7`) | Installed VSIX | 32 passed of 32 |
+| VS Code 1.147.0 portable (`8a14f0cc1b`) | Development bundle, full desktop suite, `72a5c32` | **88 passed of 88** in one uninterrupted run |
+| VS Code 1.100.0 portable (`19e0f9e6`) | Installed VSIX `730c0db1…` | 33 passed of 33 |
+| VS Code 1.147.0 portable | Installed VSIX | 33 passed of 33 |
+| VS Code 1.148.0 installed (`661626d0e7`) | Installed VSIX | 33 passed of 33 |
+
+`c311e8a` (VSIX `4e374c34…`) was 87 of 87 on the development bundle, after one theme expectation was updated, and 32 of 32 installed on each host.
 
 Round 1 (`c7329eb`, VSIX `e44a231b…`) was 83 of 83 on the development bundle and 28 of 28 installed on each host.
 
-The PDF clipboard case passes on every host. The installed runs add `XLSX Save and Save As keep sheets, styles, merges, rules, theme and formulas`. Round 2 adds single Replace through the find form, Enter in the PDF page box, Ctrl+B/I/U in the grid, cell editor and formula bar without toggling the side bar, calculation on a typed formula, and the calculation banner after a cross-sheet row insert.
+The PDF clipboard case passes on every host. The installed runs add `XLSX Save and Save As keep sheets, styles, merges, rules, theme and formulas`. Round 2 adds single Replace through the find form, Enter in the PDF page box, Ctrl+B/I/U in the grid, cell editor and formula bar without toggling the side bar, calculation on a typed formula, and the calculation banner after a cross-sheet row insert. `72a5c32` adds DOCX native Save of font, size, color, highlight, strikethrough, alignment and indentation.
 
 **Harness change.** `tests/vscode/desktop.ts` no longer writes `extensions.autoUpdate` to the isolated profile. VS Code 1.147 migrates `false` to `"off"` by rewriting `settings.json` about two seconds after startup. A window reload during that write waited forever on VS Code's backup veto (`onBeforeShutdown … pending operations: veto.backups`). The recovery-after-reload case failed 3 of 13 repeats before the change and 0 of 12 after it. `extensions.autoCheckUpdates: false` still prevents updates.
 

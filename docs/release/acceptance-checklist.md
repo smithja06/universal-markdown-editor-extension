@@ -35,7 +35,21 @@ All the items below passed except the noted ones. Both result boxes were ticked,
 
 ## Round 2 re-test
 
-Install the round 2 VSIX first: SHA-256 `4e374c3437256c10178cc494ba80fa094fbcd12f897f0dab610da4a4656460ed`, built from `c311e8a`. Mark each box ☐ → ☑. Note anything confusing, slow or wrong.
+The round 2 candidate also contains two features requested after round 1: a table size picker that locks on click, and DOCX font, size, color, highlight, strikethrough, alignment and indentation.
+
+Install the round 2 VSIX first: SHA-256 `730c0db13528a93ac4d2b04402f001d042bed4286d89c428d79e9e7c27329168`, built from `72a5c32`. Mark each box ☐ → ☑. Note anything confusing, slow or wrong.
+
+**Table size picker (new)**
+- ☐ In `notes.md` choose **Insert → Table**. Move the pointer over the grid: the highlighted size follows it. Click a square: the line under the grid reads, for example, "3 × 4 table · Click another square to change the size."
+- ☐ Move the pointer across other squares and on to **Insert**: the size does not change, and squares you pass over only show a dashed preview. Click **Insert**: the table has the size you clicked. Click a different square first to change the size. Typing in **Rows** or **Columns** also keeps the size.
+- ☐ The same in your DOCX.
+
+**DOCX formatting (new)**
+- ☐ In your DOCX select some text. Change **Font family** (try Calibri and Georgia) and **Font size**, which is shown in points as in Word. Change **Text color** and **Text highlight**, and click **Strikethrough**.
+- ☐ Use **Alignment** for left, center, right and justified paragraphs. In **More formatting** use **Increase indentation** and **Decrease indentation** (Ctrl+] and Ctrl+[) on a paragraph or heading. Indentation is unavailable inside a list item, because Word lists use their own indentation.
+- ☐ Ctrl+S, close and reopen with Folio: all formatting is kept.
+- ☐ Open the saved file in Word: the font, size, color, strikethrough, alignment and indentation match. Folio's highlight colors appear as character shading, since Word's highlight tool has its own fixed colors.
+- ☐ In Word, make a document with a font, a size, a font color, a yellow highlight, centered and justified paragraphs and an indent, then open it with Folio: they show in Folio. Theme fonts or theme colors are listed in **DOCX import notes** as approximations.
 
 **Find and replace**
 - ☐ Open `plain.txt` with Folio. Ctrl+H, find a word that appears twice, type a replacement and click **Replace**: only the current match changes. Press Enter in the **Replace with** box: the next match changes.

@@ -17,7 +17,9 @@ Phase 10.1 closes the Phase 10 technical release blockers where this machine all
 | `30109ac` | Acceptance checklist, this record and documentation updates |
 | `eb6d16a` | Excel 365 result and `excel-report-check.py` |
 | `c311e8a` | Acceptance round 1 fixes, tests, README and checklist (section 15) |
-| (next commit) | Round 2 records |
+| `01df136` | Round 2 records |
+| `72a5c32` | Table size picker and DOCX formatting, with Word interop scripts (section 16) |
+| (next commit) | Section 16 records |
 
 ## 2. PDF clipboard qualification
 
@@ -226,6 +228,8 @@ Use a separate VS Code profile if you prefer to keep your normal profile untouch
 
 ## 12. Remaining blockers
 
+The current candidate is in section 16.
+
 1. **Personal acceptance testing.** Round 1 found defects, now fixed (section 15). Complete the round 2 re-test in the checklist.
 2. **Source companion hosting.** Needs authorization: host it, record the URL in the notices, repackage and recheck.
 3. **Publication authorization.** Choose the Marketplace publisher and version. Decide on repository or source-repository visibility.
@@ -269,7 +273,7 @@ The owner installed `e44a231b…` and worked through the checklist on November 2
 
 The installed runbook adds `TXT Replace changes` to the filter in `docs/extension-qualification.md`. Its other three new cases match the existing `XLSX` term. Isolated profiles were used throughout.
 
-**Round 2 VSIX.**
+**`c311e8a` VSIX (superseded by section 16).**
 
 | Property | Value |
 | --- | --- |
@@ -281,3 +285,75 @@ The installed runbook adds `TXT Replace changes` to the filter in `docs/extensio
 Two consecutive packages had identical entries, and the tested archive was restored afterwards. All files are within the allowlist. There are no source maps, tests, fixtures, Office or PDF documents, personal paths or credentials. A path-shaped text match is a coincidental byte sequence in base64 font data.
 
 **Source companion.** The ELK worker is now `dist/webview/assets/elk-XV6XMXQE-BXEA-SQ7.js`, SHA-256 `62921b92284f0b6f68bdcf259a2e4bd3977caf97cbd4236b4db58f4ed4b6167b`. Its imports of shared chunks were renamed, and the ELK code is unchanged. `npm run source:companion` re-verified all 8 pinned inputs and rebuilt the archive: 22,222,039 bytes, SHA-256 `4c78507f3caaee00b89260dda518a698c5e451e9957f725a82e3d3ccd13e66be`. It is still not uploaded.
+
+## 16. Owner requests after round 1 and the current candidate
+
+The owner asked for two features before the round 2 re-test. Both are in `72a5c32`.
+
+**Table size picker.** Each square used to set the size on mouse-enter, so moving the pointer to **Insert** changed the size. Now hovering follows the pointer until a click or a typed size locks the choice. Later hovering shows only a dashed preview, and a status line names the size. The same dialog serves Markdown and DOCX. The Chromium test hovers larger squares after the click and checks the inserted table's size.
+
+**DOCX formatting.** The toolbar now offers DOCX:
+
+- font family, with Aptos, Calibri and Cambria added to the list
+- size in points
+- text color and highlight
+- strikethrough
+- alignment
+- paragraph indentation, which is unavailable in list items because Word lists use their own indentation
+
+The model, reader and writer share `src/document/formats/docx/formatting.ts`, because Save requires a write followed by a read to be exact. The Word elements and their mappings:
+
+| Feature | Word element and mapping |
+| --- | --- |
+| Font | `w:rFonts`. Folio's bundled Inter is named Inter in Word. |
+| Size | `w:sz` and `w:szCs`, in half-points |
+| Color | `w:color` |
+| Highlight | `w:highlight` for Word's named highlight colors, otherwise `w:shd` shading |
+| Strikethrough | `w:strike` |
+| Alignment | `w:jc`: left, center, right or both (justified) |
+| Indentation | `w:ind w:left`, in 24 px or 360-twip steps |
+
+Run and paragraph properties are written in schema order. Import reads the same elements. Theme fonts, theme colors, double strikethrough, distributed alignment, hanging or first-line indents and indents in list paragraphs are kept as listed approximations. Pasted CSS such as `rgb()`, `#rgb`, points or font fallback lists is normalized.
+
+**Microsoft Word check.** `npm run interop:docx` writes a synthetic `folio-formatting.docx` and verifies Folio's own reopen. `scripts/interop/word-check.ps1` then opens it read-only through COM with macros forced off and writes what Word sees. No Office setting was changed and nothing was saved. Word 16.0 build 20625 reported:
+
+| Paragraph | What Word reported |
+| --- | --- |
+| Heading | Centered |
+| Georgia run | 14 pt, color `#2869A9`, struck through, right-aligned, 36 pt indent |
+| Highlighted run | Highlight index 7 (yellow) |
+| Shaded run | Shading `#FFF0A5`, justified |
+| Inter run | 10.5 pt, 108 pt indent |
+| List item | Bulleted and centered |
+
+There was no Protected View and no repair prompt. The first script version left its automation-only Word process running because of a PowerShell COM call form. That instance was stopped after confirming its `/Automation -Embedding` command line, and the corrected script exits cleanly.
+
+**Regression (`72a5c32`).**
+
+| Check | Result |
+| --- | --- |
+| ESLint, TypeScript (app, tests, scripts and extension) | Pass, 0 warnings |
+| Unit and integration | 36 files, **327 passed** |
+| Standalone Chromium | **102 passed** of 102 |
+| Full desktop suite, VS Code 1.147.0 portable | **88 passed of 88** in one uninterrupted run |
+| Installed VSIX on VS Code 1.100.0, 1.147.0 and 1.148.0 | **33 passed** of 33 on each |
+
+The new desktop case saves DOCX formatting with native Save and rereads the file. The DOCX tests updated for the new subset are two:
+
+- the rejected-mark case now uses inline code
+- the "unsupported run formatting" case now uses `w:caps`, because color is now supported
+
+**Current VSIX.**
+
+| Property | Value |
+| --- | --- |
+| Path | `extension/dist/folio.vsix` |
+| Source commit | `72a5c32`. Only `docs/` changed afterwards, and it is not packaged. |
+| SHA-256 | `730c0db13528a93ac4d2b04402f001d042bed4286d89c428d79e9e7c27329168` |
+| Size | 9,056,370 bytes, 212 files |
+
+Two consecutive packages had identical entries, and the tested archive was restored afterwards. The inventory checks pass. Text scans hit only a coincidental byte sequence in base64 font data.
+
+**Source companion.** The ELK worker is now `dist/webview/assets/elk-XV6XMXQE-CTwVByd_.js`, SHA-256 `73a7025f1abaa2e655200b6621204eaeede74b1d70ae662128ddd53cdae61185`. The archive was rebuilt with all 8 pinned inputs verified: 22,222,039 bytes, SHA-256 `89178e378ae24a0f5bac605b5a45fef4eda716a1a057985c85166750ba6b7854`. It is not uploaded.
+
+**Pushed.** `phase-10.1-release-qualification` was pushed to `origin` through `01df136` at the owner's request. `72a5c32` and later are local until the owner asks to push them.
