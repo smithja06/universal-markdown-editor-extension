@@ -1,6 +1,6 @@
 # Phase 10.1 release blocker closure and release candidate qualification
 
-Phase 10.1 closes the Phase 10 technical release blockers where this machine allows, qualifies the native Save path under injected faults, prepares release documentation, and produces a local release candidate. Nothing was pushed, merged, tagged or published. The repository stays private. `KNO3 DATA.xlsx` was not read, changed, copied or used anywhere and stays untracked.
+Phase 10.1 closes the Phase 10 technical release blockers where this machine allows, qualifies the native Save path under injected faults, prepares release documentation, and produces a local release candidate. Nothing was merged, tagged or published. The owner later asked for the branch to be pushed (sections 16 to 18). The repository was described here as private, but on November 27, 2026 the anonymous GitHub API showed `smithja06/universal-markdown-editor-extension` as public, and its visibility was not changed by this work. `KNO3 DATA.xlsx` was not read, changed, copied or used anywhere and stays untracked.
 
 ## 1. Starting Git checkpoint
 
@@ -21,7 +21,10 @@ Phase 10.1 closes the Phase 10 technical release blockers where this machine all
 | `72a5c32` | Table size picker and DOCX formatting, with Word interop scripts (section 16) |
 | `e98db32` | Section 16 records |
 | `63894ca` | Caret placement and Backspace indentation (section 17) |
-| (next commit) | Section 17 records |
+| `1ade28c` | Section 17 records |
+| `e039e6b` | Section 18, acceptance round 3 |
+| `9d8ac20` | Extension icon (section 19) |
+| (next commit) | Section 19 records |
 
 ## 2. PDF clipboard qualification
 
@@ -200,7 +203,7 @@ Notices were rechecked:
 
 | Property | Value |
 | --- | --- |
-| Path | `C:\Users\xxjad\OneDrive\Desktop\Personal VSCode\universal-markdown-editor-extension\extension\dist\folio.vsix` |
+| Path | `extension\dist\folio.vsix` in the repository checkout |
 | Source commit | `c7329eb`, a clean tracked tree. The later documentation commit changes only `docs/`, which is not packaged. |
 | SHA-256 | Round 1: `e44a231bb91e369328e75e0123f99bc47c3b34aecf96f54f9e7bdb7e2d5b0304`. **Superseded by round 2**, section 15. |
 | Size | 8,814,429 bytes, 205 files |
@@ -223,7 +226,7 @@ Verified:
 [`docs/release/acceptance-checklist.md`](release/acceptance-checklist.md). Install with:
 
 ```powershell
-code --install-extension "C:\Users\xxjad\OneDrive\Desktop\Personal VSCode\universal-markdown-editor-extension\extension\dist\folio.vsix"
+code --install-extension ".\extension\dist\folio.vsix"
 ```
 
 Use a separate VS Code profile if you prefer to keep your normal profile untouched.
@@ -385,7 +388,7 @@ Tests:
 | Full desktop suite, VS Code 1.147.0 portable | **89 passed of 89** in one uninterrupted run |
 | Installed VSIX on VS Code 1.100.0, 1.147.0 and 1.148.0 | **34 passed** of 34 on each |
 
-**Current VSIX.**
+**`63894ca` VSIX (accepted in round 3, superseded by the icon build in section 19).**
 
 | Property | Value |
 | --- | --- |
@@ -417,3 +420,28 @@ Two gates remain, both owner decisions:
 
 1. Source companion hosting. The current archive is `b70c0718…`, which matches this VSIX's ELK worker. After hosting, record the URL in `extension/THIRD_PARTY_NOTICES.md`, repackage, rebuild the companion and recheck it.
 2. Publication authorization: the publisher, the version and the repository visibility.
+
+## 19. Extension icon, repository visibility and the final candidate
+
+**Icon.** The owner asked for an extension icon matching the brand mark in the top left of the editors.
+
+- **Source:** `docs/media/icon/folio-icon.svg`. It draws the same rounded tile in the forest accent `#226548`, with a subtle vertical gradient and top highlight, and the white Lucide `file-text` glyph at the editor's stroke weight.
+- **Output:** `scripts/make-icon.mjs` renders `extension/media/icon.png` (256 × 256 RGBA) with Playwright's Chromium.
+- **Manifest:** `extension/package.json` sets `icon` and a matching dark `galleryBanner`, and the file allowlist includes the PNG.
+- **Notices:** `extension/THIRD_PARTY_NOTICES.md` quotes the glyph's ISC License. `file-text` is not one of Lucide's Feather-derived icons.
+
+**Build side effect avoided.** The first package placed the SVG under `extension/`. The webview build's Tailwind pass scans that folder, picked up the word `transform` and added an unused `.transform` utility, which renamed several chunks and the ELK worker. Moving the SVG to `docs/` restored the CSS and every chunk exactly.
+
+**Final candidate.**
+
+| Property | Value |
+| --- | --- |
+| Source commit | `9d8ac20` |
+| SHA-256 | `54677dac4fee7541767c2145bb8e2d68916365360661ed143272827133e398ba` |
+| Size | 9,070,155 bytes, 213 files |
+
+A file-by-file comparison with the accepted `6c4cde7f…` differs only in the icon, `extension/package.json`, `THIRD_PARTY_NOTICES.md`, `extension.vsixmanifest` and `[Content_Types].xml`. The ELK worker is still `elk-XV6XMXQE-BeFJUSYP.js`. The rebuilt source companion is again `b70c0718…` and matches it. The installed runbook passed 34 of 34 on VS Code 1.100.0, 1.147.0 and 1.148.0 with this VSIX.
+
+**Repository visibility.** On November 27, 2026 the anonymous GitHub API returned `smithja06/universal-markdown-editor-extension` as public. Earlier documents assumed it was private. This work did not change its visibility. Because the repository is public, four doc lines quoting the local checkout path with the Windows user name were replaced with repository-relative paths. Earlier commits still contain them. Removing them from history would mean rewriting it, which needs the owner's decision.
+
+**Hosting plan.** `docs/release/marketplace.md` now orders the steps so the notices name the release URL before the final build, and it describes an optional GitHub Actions release workflow.

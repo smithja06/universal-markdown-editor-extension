@@ -242,7 +242,7 @@ Development-time failures resolved during Phase 10:
 
 ## 18. Next Chat Starter
 
-> Continue Folio in the original checkout `C:\Users\xxjad\OneDrive\Desktop\Personal VSCode\universal-markdown-editor-extension` on branch `phase-10-final-integration` (final commit is the Phase 10 docs commit on top of `db1429c`, base `origin/main` `98cd8ed`). Read `docs/phase-10-final-integration.md`, `docs/PROJECT_HANDOFF.md` and `docs/release-capabilities.md`. Keep the user's untracked `KNO3 DATA.xlsx` uncommitted. The user's decisions:
+> Continue Folio in the original checkout on branch `phase-10-final-integration` (final commit is the Phase 10 docs commit on top of `db1429c`, base `origin/main` `98cd8ed`). Read `docs/phase-10-final-integration.md`, `docs/PROJECT_HANDOFF.md` and `docs/release-capabilities.md`. Keep the user's untracked `KNO3 DATA.xlsx` uncommitted. The user's decisions:
 >
 > - Native in-place Save is approved only where tests prove safety, and is on by default there.
 > - Reviewed-copy-only workflows are acceptable on unqualified platforms, and no unqualified platform may be claimed.

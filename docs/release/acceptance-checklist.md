@@ -7,7 +7,7 @@ Use synthetic files only. Do not use personal workbooks or documents. About 30�
 1. Use your normal desktop VS Code 1.148 on Windows. Folio adds editors only through **Open with Folio**, so your defaults do not change. To keep your normal profile untouched, create a profile first: **Profiles: New Profile…**, named for example "Folio test", and switch to it.
 2. Install the candidate. Use the **Extensions: Install from VSIX…** command and pick the file, or run:
    ```powershell
-   code --install-extension "C:\Users\xxjad\OneDrive\Desktop\Personal VSCode\universal-markdown-editor-extension\extension\dist\folio.vsix"
+   code --install-extension ".\extension\dist\folio.vsix"
    ```
    Check the SHA-256 in `docs/phase-10.1-release-qualification.md` first: `Get-FileHash <path> -Algorithm SHA256`. Installing a newer candidate over an older one replaces it. Reload open VS Code windows afterwards.
 3. Make a test folder on `C:` outside OneDrive, for example `C:\FolioTest`. Open it with **File → Open Folder** and trust it.

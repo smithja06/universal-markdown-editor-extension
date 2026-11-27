@@ -7,9 +7,9 @@ Same host as Phase 10 (Windows 11 Pro x64, fixed NTFS `C:`, local `file:` worksp
 | Host | Build | Result |
 | --- | --- | --- |
 | VS Code 1.147.0 portable (`8a14f0cc1b`) | Development bundle, full desktop suite, `63894ca` | **89 passed of 89** in one uninterrupted run |
-| VS Code 1.100.0 portable (`19e0f9e6`) | Installed VSIX `6c4cde7f…` | 34 passed of 34 |
-| VS Code 1.147.0 portable | Installed VSIX | 34 passed of 34 |
-| VS Code 1.148.0 installed (`661626d0e7`) | Installed VSIX | 34 passed of 34 |
+| VS Code 1.100.0 portable (`19e0f9e6`) | Installed VSIX `6c4cde7f…`, and again with the icon build `54677dac…` | 34 passed of 34 each time |
+| VS Code 1.147.0 portable | Installed VSIX, both builds | 34 passed of 34 each time |
+| VS Code 1.148.0 installed (`661626d0e7`) | Installed VSIX, both builds | 34 passed of 34 each time |
 
 `72a5c32` (VSIX `730c0db1…`) was 88 of 88 on the development bundle and 33 of 33 installed on each host.
 

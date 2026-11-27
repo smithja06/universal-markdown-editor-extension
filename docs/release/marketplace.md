@@ -41,13 +41,13 @@ $env:FOLIO_SCREENSHOTS = '1'
 npx playwright test --config playwright.vscode.config.ts --output test-results/screens
 ```
 
-The Marketplace only shows images from public HTTPS URLs. The repository is private, so the extension README does not embed the screenshots. After authorization, add them to the README with public URLs, for example from the release page or a public docs location, and repackage.
+The Marketplace only shows images from public HTTPS URLs. The extension README does not embed the screenshots yet. The repository `smithja06/universal-markdown-editor-extension` is public (checked November 27, 2026, through the anonymous GitHub API), so the screenshots can use `raw.githubusercontent.com` URLs pinned to a release tag. Add them after authorization, then repackage.
 
 ## Source companion hosting plan (not executed)
 
-The ELK corresponding-source archive must be publicly available beside each distributed VSIX before publication. Build it with `npm run source:companion`. The current local archive is `extension/dist/source-companion/folio-elk-source-companion.zip`, 22,222,039 bytes, SHA-256 `b70c071821988d93d71330b90ebb122f68d76125b35d97a090b300143f05eb53`. It is built from VSIX worker `dist/webview/assets/elk-XV6XMXQE-BeFJUSYP.js`, SHA-256 `e93f3694…295c3bcdf6a`. Rebuild it whenever the VSIX is repackaged, because the worker's name can change.
+The ELK corresponding-source archive must be publicly available beside each distributed VSIX before publication. Build it with `npm run source:companion`. The current local archive is `extension/dist/source-companion/folio-elk-source-companion.zip`, 22,222,039 bytes, SHA-256 `b70c071821988d93d71330b90ebb122f68d76125b35d97a090b300143f05eb53`. It is built from VSIX worker `dist/webview/assets/elk-XV6XMXQE-BeFJUSYP.js`, SHA-256 `e93f3694…295c3bcdf6a`. Rebuild it whenever the VSIX is repackaged, because the worker's name can change. Edits to any file under `extension/`, including the notices and the manifest, can change it, because the webview build's Tailwind pass scans that folder for class names.
 
-Proposed URL structure, using a GitHub Release on a repository that is public at publication time:
+Proposed URL structure, using a GitHub Release on the public repository:
 
 ```
 https://github.com/<owner>/<public-repo>/releases/tag/v<version>
@@ -61,10 +61,15 @@ https://github.com/<owner>/<public-repo>/releases/download/v<version>/folio-elk-
 
 `SOURCE.md` lists the archive's checksum and the packaged ELK worker hash. Keep the archive available for at least as long as that VSIX version is distributed. Release assets are immutable per tag.
 
-Steps after authorization:
+Steps after authorization. The release URL is known before anything is uploaded, so the notices can name it first:
 
-1. Decide where to host: a public repository release, or a separate public source-only repository if the main repository stays private.
-2. Build the final VSIX and the companion from the same commit. The worker hash in `manifest.json` must equal the hash of the packaged `elk-*.js`.
-3. Upload both with their `.sha256` files.
-4. Replace the sentence "Before any public distribution, host that archive…" in `extension/THIRD_PARTY_NOTICES.md` with the durable URL. Repackage, then recheck the inventory and notices. The VSIX hash changes.
-5. Then, and only then, publish the VSIX.
+1. Choose the version and its tag, for example `v0.1.0`.
+2. Replace the sentence "Before any public distribution, host that archive…" in `extension/THIRD_PARTY_NOTICES.md` with `https://github.com/smithja06/universal-markdown-editor-extension/releases/download/v<version>/folio-elk-source-companion-<version>.zip`. Commit.
+3. From that commit, build the final VSIX, then the companion. The worker hash in `manifest.json` must equal the hash of the packaged `elk-*.js`.
+4. Create the tag and the GitHub Release, and upload the VSIX, the companion, both `.sha256` files and `SOURCE.md`. Check that the companion URL downloads anonymously.
+5. Then, and only then, publish the same VSIX to the Marketplace.
+
+**Automation option.** A GitHub Actions workflow can run steps 3 and 4 whenever a `v*` tag is pushed. It would install dependencies, run the tests, `npm run package:extension` and `npm run source:companion`, check the worker hashes, and attach the files to the release. With a Marketplace token stored as a repository secret, it could also publish. Each release then gets its own matching archive, and earlier archives stay available under their own tags. Two cautions:
+
+- The CI build differs from a local build only in zip timestamps, so the hashes recorded in these documents would be the CI ones.
+- Publishing from CI needs the owner's explicit authorization and a token.
