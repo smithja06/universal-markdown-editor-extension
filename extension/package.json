@@ -1,8 +1,8 @@
 {
-  "name": "folio-markdown-editor",
-  "displayName": "Folio Markdown Editor",
+  "name": "folio-universal-editor",
+  "displayName": "Folio Universal Editor",
   "description": "Opt-in editors for Markdown, plain text, Word documents and spreadsheets, plus a read-only PDF viewer.",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "publisher": "smithja06",
   "license": "MIT",
   "icon": "media/icon.png",

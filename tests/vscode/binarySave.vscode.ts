@@ -9,7 +9,7 @@ import { createSheet, createWorkbook } from '../../src/document/formats/spreadsh
 import { builtinThemes } from '../../src/document/formats/spreadsheet/themes'
 import { processSpreadsheet } from '../../src/document/formats/spreadsheet/xlsx'
 import { encodeJournal, journalPath } from '../../extension/src/verifiedReplace'
-import { test } from './desktop'
+import { extensionId, test } from './desktop'
 
 function folio(page: Page) {
   return page.locator('iframe.webview:visible').first().contentFrame().locator('iframe#active-frame').contentFrame()
@@ -202,7 +202,7 @@ test.describe('native binary Save on a qualified local NTFS workspace', () => {
       : index < previous.length ? previous[index] : replacement[index])
     expect(sha(partial)).not.toBe(sha(previous))
     await writeFile(path, partial)
-    const journals = join(dirname(workspace), 'profile', 'User', 'globalStorage', 'smithja06.folio-markdown-editor', 'save-journals')
+    const journals = join(dirname(workspace), 'profile', 'User', 'globalStorage', extensionId, 'save-journals')
     await mkdir(journals, { recursive: true })
     const journal = journalPath(journals, path)
     await writeFile(journal, encodeJournal({ version: 1, path, expected: sha(previous), next: sha(replacement), created: Date.now(), previous, replacement }))

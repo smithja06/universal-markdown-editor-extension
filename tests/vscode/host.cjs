@@ -63,7 +63,7 @@ const operations = {
   },
   openWithFolio: ({ file }) => vscode.commands.executeCommand('folio.openWith', uri(file)),
   openWithFolioMenus() {
-    const { menus } = vscode.extensions.getExtension('smithja06.folio-markdown-editor').packageJSON.contributes
+    const { menus } = vscode.extensions.getExtension('smithja06.folio-universal-editor').packageJSON.contributes
     return ['explorer/context', 'editor/title/context', 'commandPalette'].map(menu => menus[menu].find(item => item.command === 'folio.openWith')?.when ?? null)
   },
   activeNativeUri: () => vscode.window.activeTextEditor?.document.uri.toString() ?? null,
@@ -76,7 +76,7 @@ const operations = {
   clipboard: () => vscode.env.clipboard.readText(),
   setClipboard: ({ text }) => vscode.env.clipboard.writeText(text),
   workspaceTrust: () => vscode.workspace.isTrusted,
-  folioActive: () => vscode.extensions.getExtension('smithja06.folio-markdown-editor')?.isActive ?? false,
+  folioActive: () => vscode.extensions.getExtension('smithja06.folio-universal-editor')?.isActive ?? false,
   editorChoices() { void vscode.commands.executeCommand('workbench.action.reopenWithEditor') },
   activeNativeLine: () => vscode.window.activeTextEditor?.selection.active.line ?? null,
   async read({ file, virtual }) {

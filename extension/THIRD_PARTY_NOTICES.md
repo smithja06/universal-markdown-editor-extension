@@ -1,4 +1,4 @@
-# Third-party notices for Folio Markdown Editor
+# Third-party notices for Folio Universal Editor
 
 Folio's own code is licensed under MIT. The components listed here and in `dist/webview/THIRD_PARTY_NOTICES.md` retain their own licenses. The generated file records the detected packages and their available license texts, including EPL 2.0, Apache 2.0, and the SIL Open Font License.
 
@@ -78,7 +78,7 @@ authorization of the copyright holder.
 
 The EPL 2.0 text is in `EPL-2.0.txt` (copied from the elkjs 0.12.1 package) and the EPL 1.0 text in `EPL-1.0.txt`. Folio selects the EPL 2.0 for elkjs and ELK.
 
-**Corresponding source.** `npm run source:companion` (scripts/elk-source-companion.mjs) downloads the pinned elkjs and ELK commits, the EMF GWT, Xtext Xbase, Guava GWT and GWT source JARs and the published elkjs package. It verifies each SHA-256 (and the lockfile integrity for the npm package) and writes `folio-elk-source-companion.zip` with build instructions, the licenses, Folio's lockfile and build configuration, and the hash of the packaged ELK chunk. The `.melk` option sources and the MELK generator source are in the ELK archive. The generator itself is a build tool and is not distributed. Before any public distribution, host that archive at a durable public URL beside the release and record the URL here. Until then the archive is local only.
+**Corresponding source.** `npm run source:companion` (scripts/elk-source-companion.mjs) downloads the pinned elkjs and ELK commits, the EMF GWT, Xtext Xbase, Guava GWT and GWT source JARs and the published elkjs package. It verifies each SHA-256 (and the lockfile integrity for the npm package) and writes `folio-elk-source-companion.zip` with build instructions, the licenses, Folio's lockfile and build configuration, and the hash of the packaged ELK chunk. The `.melk` option sources and the MELK generator source are in the ELK archive. The generator itself is a build tool and is not distributed. The archive for this version is published beside the release: [folio-elk-source-companion-1.0.0.zip](https://github.com/smithja06/universal-markdown-editor-extension/releases/download/v1.0.0/folio-elk-source-companion-1.0.0.zip). Its `manifest.json` records the SHA-256 of the ELK chunk in this package. Each Folio version has its own archive under its own release tag.
 
 ## PDF viewer and export
 

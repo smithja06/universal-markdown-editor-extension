@@ -1,11 +1,15 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
 import { chromium, test as base, type Browser, type Page } from '@playwright/test'
+
+/** The extension's identity and version, from the manifest the tests package. */
+export const extensionManifest = JSON.parse(readFileSync('extension/package.json', 'utf8')) as { publisher: string; name: string; version: string }
+export const extensionId = `${extensionManifest.publisher}.${extensionManifest.name}`
 
 const prefix = 'folio-vscode-test-'
 const timeout = 15_000
@@ -57,7 +61,7 @@ async function stopProcess(child: ChildProcess) {
 }
 
 async function stageExtension(extensions: string, delayEdits: boolean) {
-  const staged = join(extensions, 'smithja06.folio-markdown-editor-0.1.0')
+  const staged = join(extensions, `${extensionId}-${extensionManifest.version}`)
   const dist = join(staged, 'dist')
   const webview = join(dist, 'webview')
   const build = process.env.FOLIO_BENCHMARK === '1' && process.env.FOLIO_BENCHMARK_BUILD || 'extension/dist'
@@ -101,7 +105,7 @@ async function installVsix(profile: string, extensions: string, vsix: string) {
   const run = promisify(execFile)
   await run(app, [...args, '--install-extension', resolve(vsix)], options)
   const { stdout } = await run(app, [...args, '--list-extensions', '--show-versions'], options)
-  if (!stdout.includes('smithja06.folio-markdown-editor@0.1.0')) throw new Error('The expected VSIX was not installed.')
+  if (!stdout.includes(`${extensionId}@${extensionManifest.version}`)) throw new Error('The expected VSIX was not installed.')
 }
 
 export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtualWorkspace: boolean; simpleFileDialog: boolean; secondWorkspace: boolean; hotExit: 'off' | 'onExitAndWindowClose'; restricted: boolean; customDialogs: boolean }>({

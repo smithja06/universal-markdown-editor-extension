@@ -1,0 +1,106 @@
+# Releases Folio Universal Editor when a version tag such as v1.0.0 is pushed.
+#
+# 1. "release" runs the checks, builds the VSIX and the ELK corresponding-source archive from the tagged commit,
+#    verifies that they match each other and the notices, and creates the GitHub Release with both files.
+# 2. "publish" then publishes that same VSIX to the Visual Studio Marketplace. It runs in the "marketplace"
+#    environment and needs the VSCE_PAT secret. Add required reviewers to that environment to approve each publish.
+#
+# The desktop VS Code suites need real VS Code windows and stay a local qualification step before tagging.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Test, build and create the GitHub Release
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint and type checks
+        run: |
+          npm run lint
+          npx tsc --noEmit
+          npx tsc --project extension/tsconfig.json
+
+      - name: Unit and integration tests
+        run: npx vitest run
+
+      - name: Browser tests
+        run: |
+          npx playwright install chromium
+          npx playwright test --workers=2 --retries=1
+
+      - name: Build the VSIX
+        run: npm run package:extension
+
+      - name: Build the ELK corresponding-source archive
+        run: npm run source:companion
+
+      - name: Verify and prepare the release files
+        run: node scripts/release-assets.mjs "$GITHUB_REF_NAME"
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" release/*.vsix release/*.zip release/*.sha256 release/SOURCE.md \
+            --verify-tag --title "Folio Universal Editor $version" --notes-file release/RELEASE_NOTES.md
+
+      - name: Check the source archive downloads without signing in
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          curl --fail --location --silent --show-error --output companion.zip \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/folio-elk-source-companion-${version}.zip"
+          sha256sum --check <(sed 's/  .*$/  companion.zip/' "release/folio-elk-source-companion-${version}.zip.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: release/folio-*.vsix
+          if-no-files-found: error
+
+  publish:
+    name: Publish to the Visual Studio Marketplace
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: marketplace
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+
+      - name: Publish the released VSIX
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::error::Add a VSCE_PAT secret to the marketplace environment to publish. The GitHub Release is already complete."
+            exit 1
+          fi
+          npx --yes @vscode/vsce@4.1.1 publish --packagePath folio-*.vsix

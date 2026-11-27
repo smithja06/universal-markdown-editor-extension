@@ -1,4 +1,4 @@
-# Folio Markdown Editor
+# Folio Universal Editor
 
 Folio adds optional, local-first editors to desktop VS Code. You can write Markdown visually or as source, edit plain text, supported Word documents, Excel workbooks and CSV files, view PDFs read-only, and export reviewed PDF copies. VS Code's built-in editors stay the default. You choose Folio per file.
 

@@ -1,6 +1,6 @@
-# Folio Markdown Editor changelog
+# Folio Universal Editor changelog
 
-## 0.1.0 (release candidate, not yet published)
+## 1.0.0
 
 First release of Folio's optional VS Code editors. Qualified on desktop VS Code 1.100.0, 1.147.0 and 1.148.0 on Windows 11 x64. Other platforms are not yet qualified.
 
@@ -27,4 +27,4 @@ First release of Folio's optional VS Code editors. Qualified on desktop VS Code 
 ### Privacy and licensing
 
 - No telemetry, and no network access for document content.
-- MIT licensed. The package includes third-party notices for Mermaid's Eclipse Layout Kernel runtime (EPL 2.0 and EPL 1.0 texts, Unicode License), pdf.js, pdfmake and its fonts, IronCalc, and the DOCX and workbook codecs. A corresponding-source archive for the Eclipse-licensed components will be published beside the release.
+- MIT licensed. The package includes third-party notices for Mermaid's Eclipse Layout Kernel runtime (EPL 2.0 and EPL 1.0 texts, Unicode License), pdf.js, pdfmake and its fonts, IronCalc, and the DOCX and workbook codecs. The corresponding-source archive for the Eclipse-licensed components is published beside each GitHub Release.
