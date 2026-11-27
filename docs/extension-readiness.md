@@ -2,7 +2,7 @@
 
 ## Phase 10.1 release candidate assessment
 
-Engineering qualification for the claimed Windows scope is complete after the acceptance round 1 and 2 fixes, the table picker and DOCX formatting: lint and both tsc clean; 327/327 unit; 103/103 Chromium; full desktop 89/89 on 1.147.0 in one run; installed VSIX 34/34 on each of 1.100.0, 1.147.0 and 1.148.0; Word 16.0 reads the DOCX formatting fixture correctly. Excel 365 validation passed. Release still needs the owner's round 2 acceptance re-test, hosting of the source companion with notice and package updates, and publication authorization. See the [Phase 10.1 record](phase-10.1-release-qualification.md).
+Engineering qualification for the claimed Windows scope is complete after the acceptance round 1 and 2 fixes, the table picker and DOCX formatting: lint and both tsc clean; 327/327 unit; 103/103 Chromium; full desktop 89/89 on 1.147.0 in one run; installed VSIX 34/34 on each of 1.100.0, 1.147.0 and 1.148.0; Word 16.0 reads the DOCX formatting fixture correctly. Excel 365 validation passed. Personal acceptance testing passed in round 3 with no issues. Release still needs hosting of the source companion with notice and package updates, and publication authorization. See the [Phase 10.1 record](phase-10.1-release-qualification.md).
 
 ## Phase 10 release assessment
 

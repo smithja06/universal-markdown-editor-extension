@@ -232,19 +232,18 @@ Use a separate VS Code profile if you prefer to keep your normal profile untouch
 
 The current candidate is in section 17.
 
-1. **Personal acceptance testing.** Round 1 found defects, now fixed (section 15). Complete the round 2 re-test in the checklist.
+1. **Personal acceptance testing: complete.** Round 1 and round 2 found defects, all fixed (sections 15 and 17). Round 3 on `6c4cde7f…` found no issues (section 18).
 2. **Source companion hosting.** Needs authorization: host it, record the URL in the notices, repackage and recheck.
 3. **Publication authorization.** Choose the Marketplace publisher and version. Decide on repository or source-repository visibility.
 
 ## 13. Exact actions required from the owner
 
-1. Install the round 2 VSIX and complete the round 2 re-test in the checklist.
-2. Decide where the source companion is hosted and authorize the upload.
-3. Authorize publication, the version and the publisher when ready. Until then nothing is published.
+1. Decide where the source companion is hosted and authorize the upload.
+2. Authorize publication, the version and the publisher when ready. Until then nothing is published.
 
 ## 14. Next Chat Starter
 
-Continue Folio from branch `phase-10.1-release-qualification` in the original checkout. Read this record, `docs/release/marketplace.md` and `docs/release/acceptance-checklist.md`. Do not publish, push, merge or tag without explicit authorization. Keep `KNO3 DATA.xlsx` untracked. Apply the owner's round 2 acceptance results (section 15). Excel 365 validation is complete. After hosting is authorized, record the companion URL, repackage, recheck the inventory and hashes, and update the verdicts.
+Continue Folio from branch `phase-10.1-release-qualification` in the original checkout. Read this record, `docs/release/marketplace.md` and `docs/release/acceptance-checklist.md`. Do not publish, push, merge or tag without explicit authorization. Keep `KNO3 DATA.xlsx` untracked. Personal acceptance is complete (section 18). Excel 365 validation is complete. After hosting is authorized, record the companion URL, repackage, recheck the inventory and hashes, and update the verdicts.
 
 ## 15. Acceptance round 1 and the round 2 candidate
 
@@ -400,3 +399,21 @@ Two consecutive packages had identical entries, and the tested archive was resto
 **Source companion.** The worker is now `dist/webview/assets/elk-XV6XMXQE-BeFJUSYP.js`, SHA-256 `e93f36945c1718c1c2a299369958060b1ea55ae5286a79497181f295c3bcdf6a`. The archive was rebuilt with all 8 inputs verified: 22,222,039 bytes, SHA-256 `b70c071821988d93d71330b90ebb122f68d76125b35d97a090b300143f05eb53`. It is not uploaded.
 
 **Push status.** `origin` has commits through `01df136`. `72a5c32` and later are local.
+
+## 18. Acceptance round 3
+
+The owner installed `6c4cde7f…` (from `63894ca`) and completed the four round 3 checks:
+
+- caret placement beside lines and between paragraphs, in DOCX and Markdown
+- DOCX text color in the editor, after reopening and in Word
+- Backspace removing indentation one step at a time
+- table column resizing
+
+All four passed. The owner reported: "I did all tests, no issues found." The DOCX text-color note from round 2 is therefore closed. It did not recur once caret placement was fixed.
+
+**Personal acceptance testing is complete for `6c4cde7f…`.** The **Accept for publication** box in the checklist is left for the owner. Acceptance is not authorization to publish.
+
+Two gates remain, both owner decisions:
+
+1. Source companion hosting. The current archive is `b70c0718…`, which matches this VSIX's ELK worker. After hosting, record the URL in `extension/THIRD_PARTY_NOTICES.md`, repackage, rebuild the companion and recheck it.
+2. Publication authorization: the publisher, the version and the repository visibility.

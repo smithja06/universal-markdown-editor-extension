@@ -114,12 +114,16 @@ Everything passed except the notes above, so round 2 did not accept the release 
 
 Install the round 3 VSIX: SHA-256 `6c4cde7f6535d4841b972719e844032d092afbec824366f5a0a278202b60f9fc`, built from `63894ca`.
 
-- ☐ In your DOCX and in `notes.md`, click to the right of the text on several lines, including short lines, a heading and a list item: the caret goes to the end of that line. Click in the space between two paragraphs: the caret goes to the nearer line. Shift+click to the right of a later line selects up to its end.
-- ☐ Select a few words by clicking to the right of a line and pressing Shift+Home, or by dragging. Choose **Text color → Ocean** or **Brick**: the words change color in the editor. Save and reopen: the color is kept. Word shows the same color.
-- ☐ Indent a paragraph twice. Put the caret at its start and press Backspace: one indentation step goes. Press Backspace again: the indentation is gone. Press it once more: the paragraph joins the one above, as before.
-- ☐ Table columns still resize by dragging a column border, in DOCX and Markdown.
+- [x] In your DOCX and in `notes.md`, click to the right of the text on several lines, including short lines, a heading and a list item: the caret goes to the end of that line. Click in the space between two paragraphs: the caret goes to the nearer line. Shift+click to the right of a later line selects up to its end.
+- [x] &#x20;Select a few words by clicking to the right of a line and pressing Shift+Home, or by dragging. Choose **Text color → Ocean** or **Brick**: the words change color in the editor. Save and reopen: the color is kept. Word shows the same color.
+- [x] &#x20;Indent a paragraph twice. Put the caret at its start and press Backspace: one indentation step goes. Press Backspace again: the indentation is gone. Press it once more: the paragraph joins the one above, as before.
+- [x] &#x20;Table columns still resize by dragging a column border, in DOCX and Markdown.
+
+## Round 3 result (November 27, 2026, VSIX `6c4cde7f…`)
+
+The owner completed every round 3 check and reported: "I did all tests, no issues found." No issues remain from rounds 1 to 3.
 
 ## Result
 
 - ☐ Accept for publication, or
-- ☐ Issues found (list them): \_\_\_\_\_\_\_\_CHECK NOTES ABOVE ONLY A FEW LEFT\_\_\_\_\_\_\_\_\_\_\_\_
+- ☐ Issues found (list them): \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
