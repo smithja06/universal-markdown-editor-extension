@@ -149,7 +149,9 @@ export const test = base.extend<{ desktop: Desktop; delayEdits: boolean; virtual
         })), writeFile(join(profile, 'User', 'settings.json'), JSON.stringify({
         'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': restricted,
         'security.workspace.trust.startupPrompt': 'never',
-        'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': false,
+        // No extensions.autoUpdate: VS Code 1.147 migrates `false` to "off" by rewriting settings.json shortly after
+        // startup, and a window reload racing that write can hang on the backup veto. Without update checks nothing updates.
+        'telemetry.telemetryLevel': 'off', 'update.mode': 'none',
         'extensions.autoCheckUpdates': false, 'chat.disableAIFeatures': true,
         'files.autoSave': 'off', 'files.hotExit': hotExit,
         'files.simpleDialog.enable': simpleFileDialog,
