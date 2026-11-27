@@ -2,10 +2,11 @@ import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowUpToLine, Bol
   Link2, Merge, Minus, PaintBucket, PaintRoller, Percent, Plus, Redo2, Rows3, Search, Strikethrough, Type, Underline, Undo2, WrapText } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { CellStyle } from '../../document/formats/spreadsheet/model'
+import { themeTint, type WorkbookTheme } from '../../document/formats/spreadsheet/themes'
 import { IconButton, Menu } from '../controls'
 import { decimalFormat, formats } from './display'
 
-export type ToolDialog = 'number' | 'fontColor' | 'fillColor' | 'border' | 'condition' | 'link'
+export type ToolDialog = 'number' | 'fontColor' | 'fillColor' | 'border' | 'condition' | 'link' | 'theme'
 export type BorderMode = 'all' | 'outside' | 'top' | 'right' | 'bottom' | 'left' | 'none'
 type StyleUpdate = Partial<CellStyle> | ((style: CellStyle) => CellStyle)
 
@@ -24,12 +25,16 @@ function Group({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export function SpreadsheetToolbar({ style, readOnly, canUndo, canRedo, undo, redo, stylePatch, clearStyles, clearValues,
-  copyStyle, usableStyle, applyCopiedStyle, border, dialog, merge, unmerge, gridLines, toggleGrid, find, rangePng, currency }: {
+  copyStyle, usableStyle, applyCopiedStyle, border, dialog, merge, unmerge, gridLines, toggleGrid, find, rangePng, currency, theme, themes }: {
   style: CellStyle; readOnly: boolean; canUndo: boolean; canRedo: boolean; undo(): void; redo(): void
   stylePatch: (update: StyleUpdate) => void; clearStyles(): void; clearValues(): void
   copyStyle(): void; usableStyle: boolean; applyCopiedStyle(): void; border: (mode: BorderMode) => void
   dialog: (name: ToolDialog) => void; merge: (center: boolean) => void; unmerge(): void; gridLines: boolean; toggleGrid(): void
   find(): void; rangePng(): void; currency: string
+  /** The workbook theme in effect. Accent styles follow it. */
+  theme: WorkbookTheme
+  /** Whether the format stores a workbook theme (XLSX). */
+  themes: boolean
 }) {
   const size = style.size ?? 11
   const setSize = (next: number) => { if (Number.isFinite(next)) stylePatch({ size: Math.min(96, Math.max(6, Math.round(next))) }) }
@@ -92,9 +97,12 @@ export function SpreadsheetToolbar({ style, readOnly, canUndo, canRedo, undo, re
       <Menu label="Cell styles and themes" disabled={readOnly} items={[
         ...presets.map(preset => ({ label: preset.label, run: () => stylePatch(preset.style) })),
         { divider: true, label: '' },
-        { label: 'Forest palette', run: () => stylePatch({ color: '#1d5b43', fill: '#e1f0e6' }) },
-        { label: 'Slate palette', run: () => stylePatch({ color: '#344258', fill: '#e7ecf4' }) },
-        { label: 'Sand palette', run: () => stylePatch({ color: '#745020', fill: '#fff0d7' }) },
+        ...(['accent1', 'accent2', 'accent3'] as const).map((slot, index) => ({
+          label: `Accent ${index + 1} · ${theme.name}`,
+          run: () => stylePatch({ color: theme.dk2.toLowerCase(), fill: themeTint(theme[slot], 0.8) }),
+        })),
+        { label: `Strong accent · ${theme.name}`, run: () => stylePatch({ color: theme.lt1.toLowerCase(), fill: theme.accent1.toLowerCase(), bold: true }) },
+        ...(themes ? [{ divider: true, label: '' }, { label: 'Workbook theme…', run: () => dialog('theme') }] : []),
       ]}><Layers3 size={17} /><ChevronDown size={10} /></Menu>
     </Group>
     <Group label="Alignment and layout">

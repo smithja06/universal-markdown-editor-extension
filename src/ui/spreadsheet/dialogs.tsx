@@ -1,4 +1,5 @@
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
+import { builtinThemes, themeSlots, themeSwatches, type WorkbookTheme } from '../../document/formats/spreadsheet/themes'
 import { ArrowDownToLine, CircleAlert, FileSpreadsheet, Info, LoaderCircle, Search, Trash2 } from 'lucide-react'
 import { cellAddress, parseRange, rangeAddress, rangeSize, safeSpreadsheetLink, spreadsheetLimits, type Border, type Cell, type CellValue,
   type ConditionalRule, type CsvDialect, type Point, type Range, type Sheet, type SpreadsheetFormat, type Workbook } from '../../document/formats/spreadsheet/model'
@@ -67,14 +68,47 @@ export function NumberDialog({ initial, close, apply }: { initial?: string; clos
     }} />
 }
 
-export function ColorDialog({ title, initial, close, apply }: { title: string; initial?: string; close(): void; apply(value?: string): void }) {
-  const [color, setColor] = useState(initial && /^#[a-f0-9]{6}$/i.test(initial) ? initial : '#216447')
+const slotNames: Record<string, string> = { dk1: 'Dark 1', lt1: 'Light 1', dk2: 'Dark 2', lt2: 'Light 2', accent1: 'Accent 1', accent2: 'Accent 2',
+  accent3: 'Accent 3', accent4: 'Accent 4', accent5: 'Accent 5', accent6: 'Accent 6' }
+
+export function ColorDialog({ title, initial, theme, close, apply }: {
+  title: string; initial?: string; theme?: WorkbookTheme; close(): void; apply(value?: string): void
+}) {
+  const [color, setColor] = useState(initial && /^#[a-f0-9]{6}$/i.test(initial) ? initial.toLowerCase() : '#216447')
   const palette = ['#18241e', '#ffffff', '#216447', '#457255', '#2a5d9f', '#70429c', '#9b3240', '#a96824', '#f0e6bd', '#dcece3', '#dfedfa', '#f7dddf']
   return <FormModal title={title} close={close} submit={() => apply(color)}>
     <label>Custom color <input data-dialog-focus aria-label="Custom color" type="color" value={color} onChange={event => setColor(event.target.value)} /></label>
+    {theme && <fieldset className="folio-sheet-theme-colors"><legend>Theme colors · {theme.name}</legend>
+      <div className="folio-sheet-palette">{themeSwatches(theme).map(({ slot, color: value }) => <button key={slot} type="button"
+        title={`${slotNames[slot]} ${value}`} aria-label={`Choose ${slotNames[slot]} ${value}`} aria-pressed={value === color}
+        style={{ backgroundColor: value }} onClick={() => setColor(value)} />)}</div>
+    </fieldset>}
     <div className="folio-sheet-palette">{palette.map(value => <button key={value} type="button" title={value} aria-label={'Choose ' + value}
       aria-pressed={value === color} style={{ backgroundColor: value }} onClick={() => setColor(value)} />)}</div>
     <button type="button" className="secondary-button" onClick={() => { apply(undefined); close() }}>Use default</button>
+  </FormModal>
+}
+
+/** Picks one of IronCalc's built-in workbook themes. The theme is saved with XLSX copies and native saves. */
+export function ThemeDialog({ current, close, apply }: { current?: WorkbookTheme; close(): void; apply(theme: WorkbookTheme): void }) {
+  const [name, setName] = useState(current?.name ?? 'Office')
+  const known = builtinThemes.some(theme => theme.name === current?.name && themeSlots.every(slot => theme[slot] === current?.[slot]))
+  return <FormModal title="Workbook theme" close={close} label="Apply theme" submit={() => {
+    const theme = builtinThemes.find(item => item.name === name)
+    if (!theme) throw new Error('Choose a workbook theme.')
+    apply(theme)
+  }}>
+    <p>The theme sets the colors offered in color pickers and accent styles, and Excel uses it for theme-based colors. Cells keep their current colors.</p>
+    {current && !known && <p>This workbook uses a custom “{current.name}” theme. Choosing a built-in theme replaces it.</p>}
+    <div className="folio-sheet-theme-list" role="radiogroup" aria-label="Built-in themes">
+      {builtinThemes.map(theme => <label key={theme.name} className={theme.name === name ? 'is-active' : undefined}>
+        <input type="radio" name="theme" value={theme.name} checked={theme.name === name} onChange={() => setName(theme.name)}
+          data-dialog-focus={theme.name === name ? '' : undefined} />
+        <span>{theme.name}</span>
+        <span className="folio-sheet-theme-swatches" aria-hidden="true">{themeSwatches(theme).slice(4).map(({ slot, color }) =>
+          <i key={slot} style={{ backgroundColor: color }} />)}</span>
+      </label>)}
+    </div>
   </FormModal>
 }
 

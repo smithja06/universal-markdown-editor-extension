@@ -11,7 +11,8 @@ import { applySuggestion, formulaAssist } from './formulaAssist'
 import type { FormulaUpdates, StructureChange } from '../../document/formats/spreadsheet/restructure'
 import { FormulaAssistPanel } from './FormulaAssistPanel'
 import { SpreadsheetToolbar, type BorderMode, type ToolDialog } from './Toolbar'
-import { BorderDialog, ColorDialog, ConditionalDialog, ConfirmDialog, DialectDialog, ExportDialog, FormulaReference, InputDialog, LinkDialog,
+import { builtinThemes } from '../../document/formats/spreadsheet/themes'
+import { BorderDialog, ColorDialog, ConditionalDialog, ConfirmDialog, DialectDialog, ExportDialog, FormulaReference, InputDialog, LinkDialog, ThemeDialog,
   NumberDialog, RegionalDialog, WorkbookFind, type SpreadsheetExportRequest } from './dialogs'
 import './spreadsheet.css'
 
@@ -211,6 +212,8 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
   const cancelCalculation = useRef<AbortController>(undefined)
   const bounds = useMemo(() => bounding(sheet), [sheet])
   const disabled = readOnly
+  // IronCalc writes its Office theme when a workbook has none, so that is the effective default.
+  const theme = workbook.theme ?? builtinThemes.find(item => item.name === 'Office')!
   const assistState = useMemo(() => assist && format === 'xlsx' ? formulaAssist(assist.text, assist.cursor) : undefined, [assist, format])
   const assistOpen = !!assistState?.suggestions.length && !assist?.dismissed
   const assistActive = assistOpen && assistState ? `${assistId}-${assistState.suggestions[assist?.index ?? 0]?.name}` : undefined
@@ -795,7 +798,7 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
       clearStyles={clearStyles} clearValues={clearValues} copyStyle={copyStyle} usableStyle={!!copied} applyCopiedStyle={applyCopiedStyle}
       border={setBorderMode} dialog={setDialog} merge={mergeRange} unmerge={unmerge} gridLines={sheet.gridLines}
       toggleGrid={() => replaceSheet({ ...sheet, gridLines: !sheet.gridLines })} find={() => setDialog('find')}
-      rangePng={() => openExport('png')} currency={currencyFormat(workbook.locale)} />
+      rangePng={() => openExport('png')} currency={currencyFormat(workbook.locale)} theme={theme} themes={format === 'xlsx'} />
     {workbook.csv?.ambiguous && <div className="folio-sheet-csv-banner" role="status"><CircleAlert size={15} />
       <span>Check the detected delimiter against the columns below.</span>
       {onCsvDialect && <button type="button" className="secondary-button" onClick={() => setDialog('dialect')}>Choose delimiter</button>}
@@ -899,8 +902,9 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     {dialog === 'regional' && <RegionalDialog workbook={workbook} readOnly={readOnly} close={dismiss} change={update} />}
     {dialog === 'dialect' && workbook.csv && onCsvDialect && <DialectDialog csv={workbook.csv} close={dismiss} apply={onCsvDialect} />}
     {dialog === 'number' && <NumberDialog initial={style.numberFormat} close={dismiss} apply={numberFormat => stylePatch({ numberFormat })} />}
-    {dialog === 'fontColor' && <ColorDialog title="Font color" initial={style.color} close={dismiss} apply={color => stylePatch({ color })} />}
-    {dialog === 'fillColor' && <ColorDialog title="Fill color" initial={style.fill} close={dismiss} apply={fill => stylePatch({ fill })} />}
+    {dialog === 'fontColor' && <ColorDialog title="Font color" initial={style.color} theme={theme} close={dismiss} apply={color => stylePatch({ color })} />}
+    {dialog === 'fillColor' && <ColorDialog title="Fill color" initial={style.fill} theme={theme} close={dismiss} apply={fill => stylePatch({ fill })} />}
+    {dialog === 'theme' && <ThemeDialog current={workbook.theme} close={dismiss} apply={next => update({ ...workbook, theme: { ...next } })} />}
     {dialog === 'border' && <BorderDialog border={border} close={dismiss} apply={setBorder} />}
     {dialog === 'condition' && <ConditionalDialog rules={sheet.rules} range={range} close={dismiss} change={rules => replaceSheet({ ...sheet, rules })} />}
     {dialog === 'link' && <LinkDialog cell={cell} close={dismiss} apply={link => changeCells(normalizeRange(active, active), previous =>
