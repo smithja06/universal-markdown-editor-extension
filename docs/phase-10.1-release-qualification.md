@@ -24,7 +24,8 @@ Phase 10.1 closes the Phase 10 technical release blockers where this machine all
 | `1ade28c` | Section 17 records |
 | `e039e6b` | Section 18, acceptance round 3 |
 | `9d8ac20` | Extension icon (section 19) |
-| (next commit) | Section 19 records |
+| `38e56e3` | Section 19 records |
+| (next commits) | Version 1.0.0, the name Folio Universal Editor and the release workflow (section 20) |
 
 ## 2. PDF clipboard qualification
 
@@ -236,8 +237,8 @@ Use a separate VS Code profile if you prefer to keep your normal profile untouch
 The current candidate is in section 17.
 
 1. **Personal acceptance testing: complete.** Round 1 and round 2 found defects, all fixed (sections 15 and 17). Round 3 on `6c4cde7f…` found no issues (section 18).
-2. **Source companion hosting.** Needs authorization: host it, record the URL in the notices, repackage and recheck.
-3. **Publication authorization.** Choose the Marketplace publisher and version. Decide on repository or source-repository visibility.
+2. **Source companion hosting: authorized and automated** (section 20). The archive is published as a GitHub Release asset when the `v1.0.0` tag is pushed.
+3. **Publication: authorized** as version 1.0.0 by publisher `smithja06` through the release workflow. It needs the owner's one-time Marketplace token setup and the tag push.
 
 ## 13. Exact actions required from the owner
 
@@ -445,3 +446,22 @@ A file-by-file comparison with the accepted `6c4cde7f…` differs only in the ic
 **Repository visibility.** On November 27, 2026 the anonymous GitHub API returned `smithja06/universal-markdown-editor-extension` as public. Earlier documents assumed it was private. This work did not change its visibility. Because the repository is public, four doc lines quoting the local checkout path with the Windows user name were replaced with repository-relative paths. Earlier commits still contain them. Removing them from history would mean rewriting it, which needs the owner's decision.
 
 **Hosting plan.** `docs/release/marketplace.md` now orders the steps so the notices name the release URL before the final build, and it describes an optional GitHub Actions release workflow.
+
+## 20. Version 1.0.0, the name Folio Universal Editor and the automatic release
+
+The owner authorized:
+
+- pushing the branch, to be merged to `main` by the owner
+- version **1.0.0**, with publisher **`smithja06`**
+- the display name **Folio Universal Editor**
+- an **automatic GitHub Actions release**
+
+**Naming.** The display name is now Folio Universal Editor. The extension ID changed from `smithja06.folio-markdown-editor` to `smithja06.folio-universal-editor`, because the ID can only change before the first Marketplace publish. The repository's npm package name follows. The Markdown custom editor keeps its own label, **Folio Markdown Editor**, beside the DOCX, PDF, XLSX and CSV editors. The desktop harness now reads the ID and version from `extension/package.json` instead of hardcoding them. Anyone with a pre-1.0.0 test build should uninstall `smithja06.folio-markdown-editor`.
+
+**Corresponding source.** `extension/THIRD_PARTY_NOTICES.md` names `https://github.com/smithja06/universal-markdown-editor-extension/releases/download/v1.0.0/folio-elk-source-companion-1.0.0.zip`. That link becomes live when the workflow creates the v1.0.0 release.
+
+**Release workflow.** `.github/workflows/release.yml` and `scripts/release-assets.mjs` are described in `docs/release/marketplace.md`. A local dry run of `release-assets.mjs v1.0.0` passed. A wrong tag (`v1.0.1`) was refused. With version 1.0.0 the ELK chunk is still `elk-XV6XMXQE-BeFJUSYP.js`, the same as in the accepted build.
+
+**Regression with version 1.0.0 and the new ID.** Lint and both type checks are clean. Unit tests: 327 of 327. Chromium: 103 of 103. The full desktop suite passed 89 of 89 on VS Code 1.147.0. The installed runbook passed 34 of 34 on each of 1.100.0, 1.147.0 and 1.148.0. The local 1.0.0 VSIX is SHA-256 `94b65513…`, and the companion is `588fc73b…`. Its manifest records the ELK chunk above, and only the lockfile copied into the companion changed. The CI release will build its own VSIX with the same entries.
+
+The workflow has not run yet, because no tag has been pushed. Its first run is the first CI execution of these steps.

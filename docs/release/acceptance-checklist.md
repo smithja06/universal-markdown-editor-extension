@@ -1,4 +1,4 @@
-# Folio 0.1.0 personal acceptance checklist
+# Folio personal acceptance checklist (rounds 1 to 3, version 0.1.0 candidates)
 
 Use synthetic files only. Do not use personal workbooks or documents. About 30–45 minutes for a full pass.
 
@@ -17,7 +17,7 @@ Use synthetic files only. Do not use personal workbooks or documents. About 30�
    - Make a DOCX in Word with a heading, a bulleted list and a 3×3 table.
    - Use any PDF Folio exports in the PDF step.
 
-Uninstall afterwards with `code --uninstall-extension smithja06.folio-markdown-editor`, or delete the test profile.
+Uninstall afterwards with `code --uninstall-extension smithja06.folio-universal-editor` (builds before 1.0.0 used `smithja06.folio-markdown-editor`), or delete the test profile.
 
 ## Round 1 (November 27, 2026, VSIX `e44a231b…`)
 

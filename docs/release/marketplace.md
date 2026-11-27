@@ -1,15 +1,16 @@
-# Folio Marketplace and release materials (prepared, not published)
+# Folio Universal Editor: Marketplace and release materials
 
-This file holds the materials for a first public release. Nothing here has been uploaded, and publication needs the owner's explicit authorization. The extension's `README.md` is the Marketplace page body, and `CHANGELOG.md` is the release notes.
+This file holds the materials for the 1.0.0 release. The owner authorized version 1.0.0, publisher `smithja06`, the display name Folio Universal Editor and an automatic GitHub Actions release. Nothing is released until the owner pushes the `v1.0.0` tag. The extension's `README.md` is the Marketplace page body, and `CHANGELOG.md` is the release notes.
 
 ## Listing metadata
 
 | Field | Value |
 | --- | --- |
-| Display name | Folio Markdown Editor |
+| Display name | Folio Universal Editor |
 | Short description (manifest `description`) | Opt-in editors for Markdown, plain text, Word documents and spreadsheets, plus a read-only PDF viewer. |
-| Publisher | `smithja06` (manifest value; confirm the Marketplace publisher before publishing) |
-| Version | 0.1.0 (assign the public version at publication) |
+| Extension ID | `smithja06.folio-universal-editor`. Builds before 1.0.0 used `smithja06.folio-markdown-editor`. |
+| Publisher | `smithja06` |
+| Version | 1.0.0 |
 | License | MIT, with third-party notices |
 | Suggested categories | Other, Visualization (only `Other` is in the manifest today) |
 | Suggested keywords | markdown, wysiwyg, docx, xlsx, csv, pdf, spreadsheet, editor |
@@ -43,33 +44,46 @@ npx playwright test --config playwright.vscode.config.ts --output test-results/s
 
 The Marketplace only shows images from public HTTPS URLs. The extension README does not embed the screenshots yet. The repository `smithja06/universal-markdown-editor-extension` is public (checked November 27, 2026, through the anonymous GitHub API), so the screenshots can use `raw.githubusercontent.com` URLs pinned to a release tag. Add them after authorization, then repackage.
 
-## Source companion hosting plan (not executed)
+## Source companion hosting and the release workflow
 
-The ELK corresponding-source archive must be publicly available beside each distributed VSIX before publication. Build it with `npm run source:companion`. The current local archive is `extension/dist/source-companion/folio-elk-source-companion.zip`, 22,222,039 bytes, SHA-256 `b70c071821988d93d71330b90ebb122f68d76125b35d97a090b300143f05eb53`. It is built from VSIX worker `dist/webview/assets/elk-XV6XMXQE-BeFJUSYP.js`, SHA-256 `e93f3694…295c3bcdf6a`. Rebuild it whenever the VSIX is repackaged, because the worker's name can change. Edits to any file under `extension/`, including the notices and the manifest, can change it, because the webview build's Tailwind pass scans that folder for class names.
-
-Proposed URL structure, using a GitHub Release on the public repository:
+The ELK corresponding-source archive must be publicly available beside each distributed VSIX. Every release publishes it as a GitHub Release asset:
 
 ```
-https://github.com/<owner>/<public-repo>/releases/tag/v<version>
-  folio-<version>.vsix
-  folio-<version>.vsix.sha256
-  folio-elk-source-companion-<version>.zip
-  folio-elk-source-companion-<version>.zip.sha256
+https://github.com/smithja06/universal-markdown-editor-extension/releases/tag/v<version>
+  folio-<version>.vsix                          + .sha256
+  folio-elk-source-companion-<version>.zip      + .sha256
   SOURCE.md
-https://github.com/<owner>/<public-repo>/releases/download/v<version>/folio-elk-source-companion-<version>.zip
 ```
 
-`SOURCE.md` lists the archive's checksum and the packaged ELK worker hash. Keep the archive available for at least as long as that VSIX version is distributed. Release assets are immutable per tag.
+`extension/THIRD_PARTY_NOTICES.md` names the archive's permanent link for the version in `extension/package.json`, for 1.0.0 `…/releases/download/v1.0.0/folio-elk-source-companion-1.0.0.zip`. Release assets stay under their tag, so each version keeps its own archive.
 
-Steps after authorization. The release URL is known before anything is uploaded, so the notices can name it first:
+**Workflow** (`.github/workflows/release.yml`). It runs when a `v*` tag is pushed and has two jobs.
 
-1. Choose the version and its tag, for example `v0.1.0`.
-2. Replace the sentence "Before any public distribution, host that archive…" in `extension/THIRD_PARTY_NOTICES.md` with `https://github.com/smithja06/universal-markdown-editor-extension/releases/download/v<version>/folio-elk-source-companion-<version>.zip`. Commit.
-3. From that commit, build the final VSIX, then the companion. The worker hash in `manifest.json` must equal the hash of the packaged `elk-*.js`.
-4. Create the tag and the GitHub Release, and upload the VSIX, the companion, both `.sha256` files and `SOURCE.md`. Check that the companion URL downloads anonymously.
-5. Then, and only then, publish the same VSIX to the Marketplace.
+1. **release**, on `windows-latest`:
+   - installs dependencies and runs lint, both type checks, the unit tests and the Chromium suite
+   - builds the VSIX, then the companion
+   - runs `scripts/release-assets.mjs`, which refuses to continue unless:
+     - the tag equals `v` + the manifest version
+     - the packaged notices name this version's archive URL
+     - the companion's `manifest.json` records the exact ELK chunk inside the VSIX
+   - creates the GitHub Release with the files, `SOURCE.md` and notes from `CHANGELOG.md`
+   - downloads the archive without credentials to prove the link works
+2. **publish**, in the `marketplace` environment: publishes that same VSIX with `vsce`, using the `VSCE_PAT` secret. Without the secret it stops with an error after the GitHub Release already exists. Required reviewers on the environment make each publish wait for approval.
 
-**Automation option.** A GitHub Actions workflow can run steps 3 and 4 whenever a `v*` tag is pushed. It would install dependencies, run the tests, `npm run package:extension` and `npm run source:companion`, check the worker hashes, and attach the files to the release. With a Marketplace token stored as a repository secret, it could also publish. Each release then gets its own matching archive, and earlier archives stay available under their own tags. Two cautions:
+The desktop VS Code suites need real VS Code windows. They stay a local qualification step before tagging. The CI-built VSIX has the same entries as a local build, and only zip timestamps differ.
 
-- The CI build differs from a local build only in zip timestamps, so the hashes recorded in these documents would be the CI ones.
-- Publishing from CI needs the owner's explicit authorization and a token.
+**One-time setup by the owner.**
+
+1. On https://marketplace.visualstudio.com/manage, sign in and make sure a publisher with ID `smithja06` exists. Create it if needed.
+2. On https://dev.azure.com, open **User settings → Personal access tokens → New token**. Choose **Organization: All accessible organizations** and **Scopes: Custom defined → Marketplace → Manage**. Copy the token.
+3. In the GitHub repository, open **Settings → Environments → New environment** and name it `marketplace`. Optionally add yourself under **Required reviewers**. Add an environment secret named `VSCE_PAT` with the token.
+
+**Releasing a version.**
+
+1. Bump `version` in `extension/package.json` and add a `## <version>` section to `extension/CHANGELOG.md`.
+2. Update the archive link in `extension/THIRD_PARTY_NOTICES.md` to the new tag.
+3. Run the local qualification, including the desktop suites, then merge to `main`.
+4. On `main`, run `git tag v<version>` and `git push origin v<version>`.
+5. Watch the **Actions** tab. If required reviewers are set, approve the `publish` job.
+
+If a release fails before the GitHub Release exists, fix the cause, delete the tag locally and remotely, and push it again. If it fails after the release exists, either delete the release and tag and push the tag again, or rerun only the `publish` job.
