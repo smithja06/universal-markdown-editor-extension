@@ -1,6 +1,6 @@
 # Phase 10 final integration
 
-> **Phase 10.1 update.** The release blockers recorded here were worked in Phase 10.1 ([Phase 10.1 record](phase-10.1-release-qualification.md)). The PDF clipboard case passes on an interactive session. Native Save passed fault-injection qualification. XLSX passed independent openpyxl validation, but the Excel 365 check remains a manual owner step. The source companion is verified, with hosting still unauthorized.
+> **Phase 10.1 update.** The release blockers recorded here were worked in Phase 10.1 ([Phase 10.1 record](phase-10.1-release-qualification.md)). The PDF clipboard case passes on an interactive session. Native Save passed fault-injection qualification. XLSX passed independent openpyxl validation and the Excel 365 check. The source companion is verified, with hosting still unauthorized.
 
 Phase 10 turns the Phase 9 multi-format editor into an integrated release candidate. It adds verified native Save for DOCX, XLSX and CSV on qualified Windows volumes, verified formula assistance and formula-aware structure edits, workbook themes, DOCX and Markdown table widths, PDF Unicode fallback and navigation metadata, pdf.js support for the minimum VS Code version, and the ELK source companion and notice corrections. **Folio is not yet ready for public release.** The remaining items are listed in [Remaining release blockers](#15-remaining-release-blockers). Nothing was published, pushed, merged or tagged.
 

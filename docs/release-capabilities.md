@@ -7,7 +7,7 @@
 | Capability | Phase 10 | Phase 10.1 |
 | --- | --- | --- |
 | Native DOCX/XLSX Save | Implemented on qualified Windows; disk-full and power loss covered by design only | **Implemented, fault-qualified.** Disk-full, flush, rollback, journal and killed-writer tests pass. No power-loss claim. |
-| XLSX interoperability | Excel 365 reread of the Phase 10 output not completed | **Independent check passed** with openpyxl 3.1.5 and the Folio reopen check. **Excel 365 open** (manual owner steps). |
+| XLSX interoperability | Excel 365 reread of the Phase 10 output not completed | **Qualified.** openpyxl 3.1.5, the Folio reopen check and Excel 365 (16.0 build 20625) all pass: no repair, and Excel recalculation equals the stored results. |
 | PDF viewer copy | Failed on a locked session | **Passes** on an interactive session |
 | Third-party source and notices | Content complete; hosting outstanding | Unchanged: verified, **hosting blocks publication**. The DOCX codec notices are now referenced. |
 | Platform qualification | Windows 1.100.0, 1.147.0, 1.148.0 | Unchanged; macOS, Linux, WSL and Remote are not claimed |

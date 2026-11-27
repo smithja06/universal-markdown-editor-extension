@@ -6,12 +6,12 @@ Phase 10.1 is on local branch `phase-10.1-release-qualification`, based on `orig
 
 - **Native Save** is qualified under injected faults: disk-full mid-write, failed flush, failed rollback, journal storage failure, cancellation, an earlier-journal conflict, ambiguous bytes, and a writer process killed mid-write. A stale-journal defect is fixed in `verifiedReplace.ts`. There is no power-loss claim.
 - **PDF clipboard** passes on an interactive session. The Phase 10 failure was the locked session.
-- **XLSX interop.** Folio fixtures, IronCalc structure edits and native Save/Save As outputs pass the independent openpyxl 3.1.5 check and Folio's reopen comparison. Microsoft Excel validation is **open**: Office's first-run privacy dialog blocks automation, and the owner must run the manual steps.
+- **XLSX interop.** Folio fixtures, IronCalc structure edits and native Save/Save As outputs pass the independent openpyxl 3.1.5 check and Folio's reopen comparison. **Excel 365 (16.0 build 20625) validation passed** on all four files after the owner ran `excel-check.ps1`, checked by `scripts/interop/excel-report-check.py`.
 - **Reproducible builds.** `.gitattributes` `* text=auto eol=lf`. Two consecutive packages have identical entries.
 - **Release materials.** README/Marketplace page, release notes, `docs/release/marketplace.md`, seven synthetic screenshots, `docs/release/acceptance-checklist.md`.
 - **Harness fix.** The isolated profile no longer sets `extensions.autoUpdate`. VS Code 1.147's migration rewrite raced window reloads.
 - **Results.** lint and both tsc clean; 320/320 unit; 101/101 Chromium; full desktop 83/83 on 1.147.0 in one run; installed VSIX 28/28 on each of 1.100.0, 1.147.0 and 1.148.0. VSIX `e44a231b…`.
-- **Open gates.** Excel 365 manual check, personal acceptance testing, source-companion hosting (needs authorization), publication authorization.
+- **Open gates.** Personal acceptance testing, source-companion hosting (needs authorization), publication authorization.
 
 ## Phase 10 final integration
 
