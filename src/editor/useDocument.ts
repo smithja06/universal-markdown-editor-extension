@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { CaretPlacement } from './caretPlacement'
 import { useEditor } from '@tiptap/react'
 import { Extension } from '@tiptap/core'
 import { EditorState, Plugin, Selection, TextSelection } from '@tiptap/pm/state'
@@ -102,7 +103,7 @@ export function useDocument(notify: (message: string) => void, visualScroll: Ref
   }, [])
 
   const editor = useEditor({
-    extensions: [...createExtensions(resources ? [...nodeViewExtensions, workspaceImageExtension(resources)] : nodeViewExtensions), VisualSearchDecorations, Extension.create({
+    extensions: [...createExtensions(resources ? [...nodeViewExtensions, workspaceImageExtension(resources)] : nodeViewExtensions), VisualSearchDecorations, CaretPlacement, Extension.create({
       name: 'workspaceEditing',
       addProseMirrorPlugins: () => [new Plugin({ filterTransaction: transaction => {
         if (!transaction.docChanged || transaction.getMeta('folio.host') === true) return true
