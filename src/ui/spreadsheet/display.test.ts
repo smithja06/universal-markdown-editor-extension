@@ -23,7 +23,8 @@ describe('sheet display and structural edits', () => {
     const cell = { kind: 'formula', value: '=1+1', cached: 3 } as const
     expect(displayCell(cell, 'en-US', false)).toBe('3')
     expect(displayCell(cell, 'en-US', false, 2)).toBe('2')
-    expect(displayCell({ kind: 'formula', value: '=1+1' }, 'en-US', false)).toBe('—')
+    expect(displayCell({ kind: 'formula', value: '=1+1' }, 'en-US', false)).toBe('Not calculated')
+    expect(displayCell({ kind: 'formula', value: '=1+1' }, 'en-US', false, undefined, 'Calculating…')).toBe('Calculating…')
   })
 
   it('moves cells, dimensions, and intersecting merges for a row insertion', () => {

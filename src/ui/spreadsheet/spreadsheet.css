@@ -147,6 +147,7 @@
 .folio-sheet-cell-text { display: block; overflow: hidden; white-space: pre; text-overflow: clip; }
 .folio-sheet-cell.is-wrapped .folio-sheet-cell-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .folio-sheet-cell.is-cached .folio-sheet-cell-text { opacity: .72; }
+.folio-sheet-cell.is-uncalculated .folio-sheet-cell-text { color: var(--muted); font-style: italic; }
 .folio-sheet-cell.is-csv-header { background: var(--quiet); font-weight: 650; }
 .folio-sheet-cell.has-link .folio-sheet-cell-text { text-decoration: underline; text-decoration-color: var(--accent); }
 .folio-sheet-cell.is-selected::before,

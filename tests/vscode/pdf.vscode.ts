@@ -31,6 +31,13 @@ test('PDF opens only through the opt-in viewer and supports navigation, zoom, se
 
   await frame.getByRole('button', { name: 'Next page' }).click()
   await expect(frame.getByRole('textbox', { name: 'Page number' })).toHaveValue('2')
+  // The page box is a form, so this also proves the webview allows submit events.
+  await frame.getByRole('textbox', { name: 'Page number' }).fill('3')
+  await frame.getByRole('textbox', { name: 'Page number' }).press('Enter')
+  await expect(frame.getByRole('region', { name: 'Page 3 of 3' })).toBeInViewport()
+  await frame.getByRole('textbox', { name: 'Page number' }).fill('2')
+  await frame.getByRole('textbox', { name: 'Page number' }).press('Enter')
+  await expect(frame.getByRole('region', { name: 'Page 2 of 3' })).toBeInViewport()
   const zoom = frame.getByRole('combobox', { name: 'Zoom' })
   await zoom.selectOption('1')
   await frame.getByRole('button', { name: 'Zoom in' }).click()

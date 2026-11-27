@@ -1,5 +1,16 @@
 # Folio VSIX distribution record
 
+## Phase 10.1 distribution record
+
+[Phase 10.1 record](phase-10.1-release-qualification.md)
+
+Candidate `extension/dist/folio.vsix` from `9d8ac20` (the accepted round 3 code plus the extension icon): SHA-256 `54677dac4fee7541767c2145bb8e2d68916365360661ed143272827133e398ba`, 9,070,155 bytes, 213 files. Apart from the icon, the manifest, the notices and the zip content-type list, every file is byte-identical to the accepted `6c4cde7f…` from `63894ca`, which had 212 files. It supersedes `730c0db1…` from `72a5c32` and `4e374c34…` from `c311e8a`. It is local only. The round 1 candidate was `e44a231b…` from `c7329eb`, 205 files. The 7 added files are Inter's italic font subsets.
+
+- **Reproducibility.** `.gitattributes` checks out text with LF on every platform. Two consecutive `npm run package:extension` builds produced 212 entries with identical SHA-256. Only the zip timestamps differ, so the archive hash changes between builds while the content does not.
+- **Inventory.** 212 files, all within the manifest allowlist. No source maps, tests, fixtures, logs, archives, Office or PDF documents. No personal paths, names or credentials: the only key-shaped match is inside the base64-inlined IronCalc WASM, and the only path-shaped text match is a coincidental byte sequence inside base64-inlined font data. Lazy workers: `csvWorker`, `pdfjsWorker`, `searchWorker` and `workerClient`. IronCalc WASM ships on disk (`dist/spreadsheet.wasm`, 2,546,925 bytes) and in the webview assets.
+- **Notices.** All required notices are present. `THIRD_PARTY_NOTICES.md` now also points to `dist/DOCX_THIRD_PARTY_NOTICES.txt` for fflate, saxes and xmlchars.
+- **Source companion.** Rebuilt and verified for the round 2 VSIX: SHA-256 `b70c071821988d93d71330b90ebb122f68d76125b35d97a090b300143f05eb53`, worker `elk-XV6XMXQE-BeFJUSYP.js` `e93f3694…295c3bcdf6a`. The worker's name and hash changed because its import names of shared chunks changed; the ELK code is unchanged. **Not uploaded.** The URL plan is in `docs/release/marketplace.md`. Publication stays blocked until it is hosted, recorded and repackaged.
+
 ## Phase 10 distribution record
 
 Final candidate: `extension/dist/folio.vsix` built from the Phase 10 documentation commit, whose code is identical to `db1429c`, 205 entries, 8,814,394 bytes, SHA-256 `aa1f09b71d4628573a83a94349f4ee59a9f038cd5a114a24af14a8058bf3d1c3`.

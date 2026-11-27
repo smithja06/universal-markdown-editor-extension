@@ -3,7 +3,7 @@
 :root {
   font-family: "Inter Variable", Inter, system-ui, sans-serif;
   font-size: 14px;
-  font-synthesis: none;
+  font-synthesis: style;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
@@ -40,20 +40,21 @@ button:disabled { cursor: default; }
 }
 
 .app[data-theme="dark"] {
-  --ui: #1c2420;
-  --paper: #202a25;
-  --canvas: #151c18;
-  --quiet: #222d27;
-  --hover: #29372f;
-  --ink: #ebf1eb;
-  --text: #d7e2d9;
-  --muted: #acb9af;
-  --soft: #a2b1a6;
-  --line: #34423a;
-  --line-strong: #47594d;
+  /* Neutral greys close to VS Code Dark Modern. The accent picker supplies the only color. */
+  --ui: #181818;
+  --paper: #1f1f1f;
+  --canvas: #141414;
+  --quiet: #242424;
+  --hover: #2a2d2e;
+  --ink: #ededed;
+  --text: #d4d4d4;
+  --muted: #a6a6a6;
+  --soft: #9d9d9d;
+  --line: #2b2b2b;
+  --line-strong: #454545;
   --danger: #f2aa9d;
-  --shadow: #0004;
-  --drop: #243b2eef;
+  --shadow: #0006;
+  --drop: #2a2d2eef;
   --warning: #e1b884;
   color-scheme: dark;
 }
@@ -308,7 +309,7 @@ kbd { font: 11px/1.4 "Cascadia Code", Consolas, monospace; color: var(--muted); 
 .callout-label::before { width: 15px; height: 15px; display: inline-grid; place-items: center; border: 1px solid currentColor; border-radius: 50%; font: 700 10px/1 Georgia, serif; content: "i"; }
 .callout[data-folio-kind="tip"] .callout-label::before { content: "✦"; font: 11px/1 system-ui; }
 .callout[data-folio-kind="warning"] .callout-label::before, .callout[data-folio-kind="caution"] .callout-label::before { content: "!"; }
-.app[data-theme="dark"] .callout { --callout-text: #cbe1d3; --callout-base: #293c31; --callout-line: #41564a; }
+.app[data-theme="dark"] .callout { --callout-text: #d4d4d4; --callout-base: #262626; --callout-line: #3a3a3a; }
 
 .content-card { margin: 1.05em 0; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--quiet); overflow: hidden; }
 .content-card-head { display: flex; align-items: center; gap: 8px; padding: 5px 10px; min-height: 37px; border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 700; color: var(--accent); }
@@ -507,6 +508,8 @@ kbd { font: 11px/1.4 "Cascadia Code", Consolas, monospace; color: var(--muted); 
 .table-picker button { aspect-ratio: 1; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--quiet); }
 .table-picker button.selected { border-color: var(--accent-outline); background: var(--accent-surface); }
 .table-picker button:hover { border-color: var(--accent); }
+.table-picker button.preview:not(.selected) { border-style: dashed; border-color: var(--accent-outline); }
+.table-picker-status { margin: 6px 0 0; text-align: center; color: var(--muted); font-size: 12px; }
 .diagram-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
 .diagram-editor > div { display: grid; grid-template-rows: auto 1fr; gap: 5px; color: var(--text); font-size: 12px; font-weight: 600; }
 .dialog-preview { display: grid; place-items: center; min-height: 100px; padding: 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--quiet); }

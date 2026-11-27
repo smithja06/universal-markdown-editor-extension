@@ -184,7 +184,7 @@ test('keeps adjacent tables distinct when Word opens them', () => {
 
 test.each([
   ['unsupported block', document({ type: 'image', attrs: { src: 'https://example.test/image.png' } })],
-  ['unsupported mark', document(paragraph({ ...text('strike'), marks: [{ type: 'strike' }] }))],
+  ['unsupported mark', document(paragraph({ ...text('code'), marks: [{ type: 'code' }] }))],
   ['invalid heading level', document({ type: 'heading', attrs: { level: 7 }, content: [text('Invalid')] })],
   ['unsafe link', document(paragraph({ ...text('script'), marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)' } }] }))],
   ['invisible XML control', document(paragraph(text('before\u0000after')))],
@@ -246,4 +246,27 @@ test('keeps automatic columns beside resized ones and rejects widths outside the
   expect(readDocx(writeDocx(model)).document).toEqual(canonicalDocx(model))
   expect(() => canonicalDocx(document({ type: 'table', content: [{ type: 'tableRow', content: [
     { type: 'tableCell', attrs: { colwidth: [5] }, content: [paragraph(text('Narrow'))] }] }] }))).toThrow(/24 to 2000/)
+})
+
+test('writes Folio text styles and paragraph layout as Word run and paragraph properties in schema order', () => {
+  const read = openParts(document(
+    { type: 'paragraph', attrs: { textAlign: 'justify', indent: '48px' }, content: [
+      { type: 'text', text: 'Styled', marks: [{ type: 'bold' }, { type: 'underline' }, { type: 'strike' },
+        { type: 'textStyle', attrs: { fontFamily: 'Inter Variable', fontSize: '20px', color: '#16724f', backgroundColor: '#ffff00' } }] },
+      { type: 'text', text: 'Shaded', marks: [{ type: 'textStyle', attrs: { backgroundColor: '#fff0a5' } }] },
+    ] },
+  ))
+  const body = read('word/document.xml')
+  const [properties] = elements(body, 'pPr')
+  expect([...properties.children].map(child => child.localName)).toEqual(['ind', 'jc'])
+  expect(elements(properties, 'ind')[0].getAttributeNS(word, 'left')).toBe('720')
+  expect(elements(properties, 'jc')[0].getAttributeNS(word, 'val')).toBe('both')
+  const [styled, shaded] = elements(body, 'rPr')
+  expect([...styled.children].map(child => child.localName)).toEqual(['rFonts', 'b', 'bCs', 'strike', 'color', 'sz', 'szCs', 'highlight', 'u'])
+  expect(elements(styled, 'rFonts')[0].getAttributeNS(word, 'ascii')).toBe('Inter')
+  expect(elements(styled, 'sz')[0].getAttributeNS(word, 'val')).toBe('30')
+  expect(elements(styled, 'color')[0].getAttributeNS(word, 'val')).toBe('16724F')
+  expect(elements(styled, 'highlight')[0].getAttributeNS(word, 'val')).toBe('yellow')
+  expect([...shaded.children].map(child => child.localName)).toEqual(['shd'])
+  expect(elements(shaded, 'shd')[0].getAttributeNS(word, 'fill')).toBe('FFF0A5')
 })

@@ -9,6 +9,8 @@ interface GridProps {
   locale: string
   date1904: boolean
   calculated?: Record<string, CellValue>
+  /** A calculation is running, so formulas without a result are pending rather than uncalculated. */
+  calculating?: boolean
   range: Range
   active: Point
   scrollRef: RefObject<HTMLDivElement | null>
@@ -59,7 +61,7 @@ function cellStyle(style?: CellStyle): CSSProperties {
 
 const frozenViewLimit = 80
 
-export function SpreadsheetGrid({ sheet, locale, date1904, calculated, range, active, scrollRef, editing, readOnly, header,
+export function SpreadsheetGrid({ sheet, locale, date1904, calculated, calculating, range, active, scrollRef, editing, readOnly, header,
   onSelect, onSelectAxis, onBeginEdit, onEdit, onCommit, onCancel, onKey, onCopy, onPaste, onResize, onAutoFit, onContext,
   onEditorKey, onEditorCursor, editorCursor, editorAssist }: GridProps) {
   const rows = useMemo(() => axisMetrics(spreadsheetLimits.rows, defaultHeight, wrapHeights(sheet, locale, date1904), sheet.hiddenRows), [sheet, locale, date1904])
@@ -140,7 +142,8 @@ export function SpreadsheetGrid({ sheet, locale, date1904, calculated, range, ac
     const endRow = merge?.endRow ?? row
     const endCol = merge?.endCol ?? col
     const look = conditional({ row, col }, cell, result)
-    const display = displayCell(cell, locale, date1904, result)
+    const missing = cell?.kind === 'formula' && result === undefined && cell.cached === undefined
+    const display = displayCell(cell, locale, date1904, result, calculating ? 'Calculating…' : undefined)
     const width = cols.offset(endCol + 1) - cols.offset(col)
     const height = rows.offset(endRow + 1) - rows.offset(row)
     const style = cellStyle(cell?.style)
@@ -150,13 +153,13 @@ export function SpreadsheetGrid({ sheet, locale, date1904, calculated, range, ac
       aria-rowindex={row + 1} aria-rowspan={merge ? endRow - row + 1 : undefined}
       aria-colspan={merge ? endCol - col + 1 : undefined} aria-selected={selected} aria-label={address + (display ? ' ' + display : '')}
       className={['folio-sheet-cell', focused && 'is-active', selected && 'is-selected', merge && 'is-merged', cell?.link && 'has-link',
-        cell?.kind === 'formula' && result === undefined && 'is-cached', cell?.style?.wrap && 'is-wrapped', header && row === 1 && 'is-csv-header'].filter(Boolean).join(' ')}
+        cell?.kind === 'formula' && result === undefined && 'is-cached', missing && 'is-uncalculated', cell?.style?.wrap && 'is-wrapped', header && row === 1 && 'is-csv-header'].filter(Boolean).join(' ')}
       data-row={row} data-col={col} data-address={address} data-top={selected && row <= range.row}
       data-bottom={selected && endRow >= range.endRow} data-left={selected && col <= range.col} data-right={selected && endCol >= range.endCol}
       style={{ ...style, left: colX(col), top: detached ? rowY(row) : 0, width, height, zIndex: frozenZ(row, col) + (merge ? 1 : 0),
         backgroundColor: !bar && look.color || cell?.style?.fill, color: cell?.style?.color ?? (!bar && look.color || cell?.style?.fill ? '#18241e' : undefined),
         textAlign: cell?.style?.horizontal ?? (typeof value === 'number' ? 'right' : undefined) }}
-      title={cell?.link ? cell.link : cell?.kind === 'formula' ? String(cell.value) + (result === undefined ? ' · Stored or unavailable result' : '') : undefined}
+      title={cell?.link ? cell.link : cell?.kind === 'formula' ? String(cell.value) + (missing ? calculating ? ' · Calculating' : ' · Not calculated' : result === undefined ? ' · Stored result' : '') : undefined}
       onDoubleClick={() => { if (!readOnly) onBeginEdit({ row, col }) }}
       onContextMenu={event => onContext(event, { row, col })}>
       {bar && <span className="folio-sheet-data-bar" aria-hidden="true" style={{ width: Math.max(2, (look.bar ?? 0) * 100) + '%', backgroundColor: look.color }} />}

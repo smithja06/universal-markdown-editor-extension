@@ -1,14 +1,15 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { expect, type Page } from '@playwright/test'
 import { readDocx } from '../../src/document/formats/docx/read'
 import { writeDocx } from '../../src/document/formats/docx/write'
-import { createWorkbook } from '../../src/document/formats/spreadsheet/model'
+import { createSheet, createWorkbook } from '../../src/document/formats/spreadsheet/model'
+import { builtinThemes } from '../../src/document/formats/spreadsheet/themes'
 import { processSpreadsheet } from '../../src/document/formats/spreadsheet/xlsx'
 import { encodeJournal, journalPath } from '../../extension/src/verifiedReplace'
-import { test } from './desktop'
+import { extensionId, test } from './desktop'
 
 function folio(page: Page) {
   return page.locator('iframe.webview:visible').first().contentFrame().locator('iframe#active-frame').contentFrame()
@@ -51,6 +52,55 @@ const headings = (bytes: Uint8Array) => JSON.stringify(readDocx(Uint8Array.from(
 
 test.describe('native binary Save on a qualified local NTFS workspace', () => {
   test.use({ customDialogs: true, simpleFileDialog: true })
+
+  test('DOCX Save keeps font, size, color, highlight, strikethrough, alignment and indentation', async ({ desktop }) => {
+    const { page, workspace, command } = desktop
+    const path = join(workspace, 'styled.docx')
+    await writeFile(path, word('Styled heading'))
+    await command('open', { file: 'styled.docx', editor: 'folio.docx' })
+    const frame = folio(page)
+    const heading = frame.getByRole('heading', { name: 'Styled heading' })
+    await heading.click()
+    await page.keyboard.press('Home')
+    await page.keyboard.press('Shift+End')
+    // Narrow windows move these toolbar menus into More formatting.
+    const choose = async (menu: RegExp, item: string, compact: string) => {
+      const trigger = frame.getByRole('button', { name: menu })
+      if (await trigger.isVisible()) {
+        await trigger.click()
+        await frame.getByRole('menuitem', { name: item, exact: true }).click()
+      } else {
+        await frame.getByRole('button', { name: 'More formatting', exact: true }).click()
+        await frame.getByRole('menuitem', { name: compact, exact: true }).click()
+      }
+    }
+    await choose(/^Font family/, 'Georgia', 'Font family – Georgia')
+    await choose(/^Font size in points/, '14', 'Font size – 14 pt')
+    await choose(/^Text color/, 'Ocean', 'Text color – Ocean')
+    await choose(/^Text highlight/, 'Lemon', 'Text highlight – Lemon')
+    await choose(/^Alignment/, 'Align center', 'Align center')
+    await frame.getByRole('button', { name: 'More formatting', exact: true }).click()
+    await frame.getByRole('menuitem', { name: /^Increase indentation/ }).click()
+    const strike = frame.getByRole('button', { name: 'Strikethrough', exact: true })
+    if (await strike.isVisible()) await strike.click()
+    else {
+      await frame.getByRole('button', { name: 'More formatting', exact: true }).click()
+      await frame.getByRole('menuitem', { name: 'Strikethrough', exact: true }).click()
+    }
+    await expect(heading.locator('s')).toHaveText('Styled heading')
+    await expect(heading).toHaveCSS('text-align', 'center')
+    await expect.poll(() => command('activeTabDirty')).toBe(true)
+
+    await confirmSave(page, command, /Replace styled\.docx with the Folio draft\?/)
+    await expect.poll(() => command('activeTabDirty')).toBe(false)
+    const saved = readDocx(Uint8Array.from(await readFile(path)))
+    expect(saved.document.content?.[0]).toMatchObject({ type: 'heading', attrs: { level: 1, textAlign: 'center', indent: '24px' } })
+    expect(saved.document.content?.[0].content?.[0].marks).toEqual([
+      { type: 'strike' },
+      { type: 'textStyle', attrs: { fontFamily: 'Georgia', fontSize: '18.67px', color: '#2869a9', backgroundColor: '#fff0a5' } },
+    ])
+    expect(saved.issues.filter(issue => issue.effect !== 'preserved')).toEqual([])
+  })
 
   test('DOCX Save confirms once, writes in place and refuses locked or externally changed files', async ({ desktop }) => {
     const { page, workspace, command } = desktop
@@ -152,7 +202,7 @@ test.describe('native binary Save on a qualified local NTFS workspace', () => {
       : index < previous.length ? previous[index] : replacement[index])
     expect(sha(partial)).not.toBe(sha(previous))
     await writeFile(path, partial)
-    const journals = join(dirname(workspace), 'profile', 'User', 'globalStorage', 'smithja06.folio-markdown-editor', 'save-journals')
+    const journals = join(dirname(workspace), 'profile', 'User', 'globalStorage', extensionId, 'save-journals')
     await mkdir(journals, { recursive: true })
     const journal = journalPath(journals, path)
     await writeFile(journal, encodeJournal({ version: 1, path, expected: sha(previous), next: sha(replacement), created: Date.now(), previous, replacement }))
@@ -198,6 +248,69 @@ test.describe('native binary Save on a qualified local NTFS workspace', () => {
     const restored = processSpreadsheet({ operation: 'read', bytes: Uint8Array.from(await readFile(path)) }, wasm)
     if (restored.operation !== 'read') throw new Error(restored.message)
     expect(restored.workbook.sheets[0].cells.A1?.value).toBe('Opened')
+  })
+
+  test('XLSX Save and Save As keep sheets, styles, merges, rules, theme and formulas', async ({ desktop }) => {
+    const { page, workspace, command } = desktop
+    const wasm = new Uint8Array(await readFile('node_modules/@ironcalc/wasm-xlsx/wasm_bg.wasm'))
+    const workbook = createWorkbook('xlsx')
+    workbook.theme = builtinThemes.find(theme => theme.name === 'Forest')!
+    const [summary] = workbook.sheets
+    summary.name = 'Summary'
+    const data = createSheet('Data 2026')
+    workbook.sheets.push(data, createSheet('Notes'))
+    Object.assign(summary.cells, {
+      A1: { kind: 'text', value: 'Saved title', style: { bold: true, font: 'Georgia', size: 16, fill: '#3a6b35', color: '#ffffff' } },
+      A2: { kind: 'text', value: '00420' },
+      A3: { kind: 'number', value: 19.99, style: { numberFormat: '"$"#,##0.00', borders: { bottom: { color: '#9b3240', style: 'double' } } } },
+      A4: { kind: 'formula', value: "=SUM('Data 2026'!B1:B2)", cached: 30 },
+      C1: { kind: 'number', value: 12 },
+    })
+    summary.merges = [{ row: 6, col: 1, endRow: 6, endCol: 3 }]
+    summary.cells.A6 = { kind: 'text', value: 'Merged', style: { horizontal: 'center' } }
+    summary.rules = [{ id: crypto.randomUUID(), range: { row: 1, col: 3, endRow: 1, endCol: 3 }, operator: 'greater', value: '10', valueType: 'number', color: '#f7dddf' }]
+    data.cells.B1 = { kind: 'number', value: 10 }
+    data.cells.B2 = { kind: 'number', value: 20 }
+    const written = processSpreadsheet({ operation: 'write', workbook }, wasm)
+    if (written.operation !== 'write') throw new Error(written.message)
+    const path = join(workspace, 'native-rich.xlsx')
+    await writeFile(path, written.bytes)
+    await command('open', { file: 'native-rich.xlsx', editor: 'folio.xlsx' })
+    const frame = folio(page)
+    await expect(frame.getByRole('gridcell', { name: 'A2 00420' })).toBeVisible()
+    await editCell(page, 'C2', 'Edited in Folio')
+    await confirmSave(page, command, /Replace native-rich\.xlsx with the Folio draft\?/)
+    await expect.poll(() => command('activeTabDirty')).toBe(false)
+    const destination = join(workspace, 'native-rich save as.xlsx')
+    await editCell(page, 'C3', 'Save As copy')
+    await command('saveAs')
+    const input = page.locator('.quick-input-widget input:visible')
+    await input.fill(destination)
+    await input.press('Enter')
+    await expect.poll(() => command('saveAsOutcome')).toBe('completed')
+    for (const [file, extra] of [[path, undefined], [destination, 'Save As copy']] as const) {
+      const read = processSpreadsheet({ operation: 'read', bytes: Uint8Array.from(await readFile(file)) }, wasm)
+      if (read.operation !== 'read') throw new Error(read.message)
+      const sheet = read.workbook.sheets[0]
+      expect(read.workbook.sheets.map(item => item.name)).toEqual(['Summary', 'Data 2026', 'Notes'])
+      expect(read.workbook.theme?.name).toBe('Forest')
+      expect(sheet.cells.A2).toMatchObject({ kind: 'text', value: '00420' })
+      expect(sheet.cells.A1.style).toMatchObject({ bold: true, font: 'Georgia', size: 16 })
+      expect(sheet.cells.A1.style?.fill?.toLowerCase()).toBe('#3a6b35')
+      expect(sheet.cells.A3.style?.numberFormat).toBe('"$"#,##0.00')
+      expect(sheet.cells.A3.style?.borders?.bottom?.style).toBe('double')
+      expect(sheet.cells.A4).toMatchObject({ kind: 'formula', value: "=SUM('Data 2026'!B1:B2)" })
+      expect(sheet.merges).toEqual([{ row: 6, col: 1, endRow: 6, endCol: 3 }])
+      expect(sheet.rules).toHaveLength(1)
+      expect(sheet.cells.C2?.value).toBe('Edited in Folio')
+      if (extra) expect(sheet.cells.C3?.value).toBe(extra)
+      else expect(sheet.cells.C3).toBeUndefined()
+    }
+    if (process.env.FOLIO_INTEROP_OUT) {
+      await mkdir(process.env.FOLIO_INTEROP_OUT, { recursive: true })
+      await copyFile(path, join(process.env.FOLIO_INTEROP_OUT, 'folio-native-save.xlsx'))
+      await copyFile(destination, join(process.env.FOLIO_INTEROP_OUT, 'folio-native-save-as.xlsx'))
+    }
   })
 
   test('CSV Save keeps literal values, the dialect and untouched bytes', async ({ desktop }) => {

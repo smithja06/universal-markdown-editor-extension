@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import '@fontsource-variable/inter'
+import '@fontsource-variable/inter/wght-italic.css'
 import '@fontsource-variable/manrope'
 import './styles.css'
 import App from './App'

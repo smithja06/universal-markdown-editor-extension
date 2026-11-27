@@ -13,11 +13,11 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --text: #edf2ef;
-    --muted: #b9c7be;
-    --page: #202823;
-    --surface: #2a362e;
-    --border: #55665b;
+    --text: #ededed;
+    --muted: #b3b3b3;
+    --page: #1f1f1f;
+    --surface: #2a2a2a;
+    --border: #4a4a4a;
     --link: #9bd7b7;
     --keyword: #debbfa;
     --literal: #ffbe9f;

@@ -101,6 +101,64 @@ test('TXT replaces literal matches, reflects edits from the native buffer and re
   await expect.poll(async () => (await read(file)).dirty).toBe(false)
 })
 
+test('DOCX clicks beside or between lines reach the nearest line, and Backspace removes an indent step', async ({ desktop }) => {
+  const { page, workspace, command } = desktop
+  const paragraph = (text: string, attrs?: Record<string, string>) => ({ type: 'paragraph', ...(attrs ? { attrs } : {}), content: [{ type: 'text', text }] })
+  await writeFile(join(workspace, 'clicks.docx'), writeDocx({ type: 'doc', content: [
+    { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Heading text' }] },
+    paragraph('Short one'), paragraph('Short two'), paragraph('Indented line', { indent: '48px' }),
+    { type: 'bulletList', content: [{ type: 'listItem', content: [paragraph('List item')] }] },
+  ] }))
+  await command('open', { file: 'clicks.docx', editor: 'folio.docx' })
+  const frame = folio(page)
+  const editor = frame.getByRole('textbox', { name: 'Visual document editor' })
+  const caret = () => editor.evaluate(() => { const selection = getSelection()!; return [selection.anchorNode?.textContent, selection.anchorOffset] })
+  const right = async (text: string, offset: number) => {
+    const line = await frame.getByText(text, { exact: true }).boundingBox()
+    const box = await editor.boundingBox()
+    // A point in the editor's right padding, level with the line.
+    await editor.click({ position: { x: box!.width - Math.min(offset, 30), y: line!.y + line!.height / 2 - box!.y } })
+  }
+  await right('Short one', 10)
+  expect(await caret()).toEqual(['Short one', 9])
+  await right('List item', 10)
+  expect(await caret()).toEqual(['List item', 9])
+  // In the gap below a paragraph, the caret goes to the closer line, not the start of the next paragraph.
+  const one = await frame.getByText('Short one', { exact: true }).boundingBox()
+  const box = await editor.boundingBox()
+  await editor.click({ position: { x: box!.width / 2, y: one!.y + one!.height + 2 - box!.y } })
+  expect(await caret()).toEqual(['Short one', 9])
+
+  const indented = frame.getByText('Indented line', { exact: true })
+  await indented.click()
+  await page.keyboard.press('Home')
+  await page.keyboard.press('Backspace')
+  await expect(indented).toHaveCSS('margin-left', '24px')
+  await page.keyboard.press('Backspace')
+  await expect(indented).toHaveCSS('margin-left', '0px')
+  await expect(frame.getByText('Short two', { exact: true })).toBeVisible()
+  await expect(indented).toHaveText('Indented line')
+  await expect.poll(() => command('activeTabDirty')).toBe(true)
+})
+
+test('TXT Replace changes only the current match through the find form', async ({ desktop }) => {
+  const { page, workspace, command, read } = desktop
+  const file = 'single.txt'
+  await writeFile(join(workspace, file), 'one two one\n')
+  await command('open', { file, editor: 'folio.txt' })
+  const frame = folio(page)
+  await frame.getByRole('textbox', { name: 'Plain text editor' }).press('ControlOrMeta+h')
+  await frame.getByRole('textbox', { name: 'Find text' }).fill('one')
+  await expect(frame.getByText('1 of 2 matches')).toBeVisible()
+  const replacement = frame.getByRole('textbox', { name: 'Replace with' })
+  await replacement.fill('three')
+  await frame.getByRole('button', { name: 'Replace', exact: true }).click()
+  await expect.poll(async () => (await read(file)).text).toBe('three two one\n')
+  await expect(frame.getByText('1 match replaced.')).toBeVisible()
+  await replacement.press('Enter')
+  await expect.poll(async () => (await read(file)).text).toBe('three two three\n')
+})
+
 test('DOCX offers reviewed copy export and verifies original and edited downloads', async ({ desktop }) => {
   const { page, workspace, command } = desktop
   const file = 'review.docx'

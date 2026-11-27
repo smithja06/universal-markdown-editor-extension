@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { lazy, Suspense, type CSSProperties } from 'react'
 import '@fontsource-variable/inter'
+import '@fontsource-variable/inter/wght-italic.css'
 import '@fontsource-variable/manrope'
 import '../../styles.css'
 import './scrollbars.css'

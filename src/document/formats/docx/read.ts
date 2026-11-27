@@ -1,5 +1,6 @@
 import type { JSONContent } from '@tiptap/core'
 import { canonicalDocx, docxColumnWidth, safeDocxLink, type DocxIssue } from './model'
+import { editorFont, halfPointsToPixels, indentFromTwips, normalizeFont, wordHighlights, docxFontSize, type DocxTextStyle } from './formatting'
 import { enabled, readNumbering, readStyles, rejectHiddenProperties } from './readDefinitions'
 import {
   isWord, readPackage, relatedPart, relationshipAttribute, wordAttr, wordChild, wordChildren,
@@ -49,6 +50,8 @@ const drawingNamespaces = new Set([
 ])
 const mainDefinitionRelationships = new Set(['numbering', 'settings', 'styles'])
 const passiveRunMetadata = new Set(['lang', 'noProof', 'rPr', 'lastRenderedPageBreak'])
+/** Run properties read by textStyle and the strikethrough check. Complex-script size follows the main size. */
+const textStyleElements = ['rFonts', 'sz', 'szCs', 'color', 'highlight', 'shd', 'strike', 'dstrike']
 const unsupportedRevisions = /^(?:ins|del|moveFrom.*|moveTo.*|customXml(?:Ins|Del|Move).*|.*PrChange|tblGridChange|cellIns|cellDel|cellMerge)$/
 
 type Mark = NonNullable<JSONContent['marks']>[number]
@@ -201,6 +204,49 @@ export function readDocx(bytes: Uint8Array<ArrayBuffer>): { document: JSONConten
     return false
   }
 
+  /** Reads the font, size, color and highlight Folio edits. Theme-based or unusual values are approximated. */
+  function textStyle(properties: XmlElement): { style?: DocxTextStyle; approximated: boolean } {
+    const style: DocxTextStyle = {}
+    let approximated = false
+    const fonts = wordChild(properties, 'rFonts')
+    if (fonts) {
+      const ascii = wordAttr(fonts, 'ascii')
+      const other = wordAttr(fonts, 'hAnsi')
+      const name = normalizeFont(ascii ?? other)
+      if (wordAttr(fonts, 'asciiTheme') || wordAttr(fonts, 'hAnsiTheme')) approximated = true
+      else if (ascii !== undefined || other !== undefined) {
+        if (!name || ascii !== undefined && other !== undefined && ascii !== other) approximated = true
+        if (name) style.fontFamily = editorFont(name)
+      }
+    }
+    const size = wordChild(properties, 'sz')
+    if (size) {
+      const value = Number(wordAttr(size))
+      if (Number.isInteger(value) && value >= docxFontSize.minHalfPoints && value <= docxFontSize.maxHalfPoints) style.fontSize = halfPointsToPixels(value)
+      else approximated = true
+    }
+    const color = wordChild(properties, 'color')
+    if (color) {
+      const value = wordAttr(color)
+      if (wordAttr(color, 'themeColor')) approximated = true
+      if (value && /^[0-9a-f]{6}$/i.test(value)) style.color = '#' + value.toLowerCase()
+      else if (value !== 'auto') approximated = true
+    }
+    const highlight = wordChild(properties, 'highlight')
+    const highlightValue = highlight && wordAttr(highlight)
+    if (highlightValue && Object.hasOwn(wordHighlights, highlightValue)) style.backgroundColor = wordHighlights[highlightValue]
+    else if (highlight && highlightValue !== 'none') approximated = true
+    const shading = wordChild(properties, 'shd')
+    if (shading && !style.backgroundColor) {
+      const pattern = wordAttr(shading)
+      const fill = wordAttr(shading, 'fill')
+      if (wordAttr(shading, 'themeFill')) approximated = true
+      if ((pattern === 'clear' || pattern === 'nil') && fill && /^[0-9a-f]{6}$/i.test(fill)) style.backgroundColor = '#' + fill.toLowerCase()
+      else if (!(pattern === 'nil' || (pattern === 'clear' && (fill === undefined || fill === 'auto')))) approximated = true
+    }
+    return { style: Object.keys(style).length ? style : undefined, approximated }
+  }
+
   function run(element: XmlElement, location: string, result: JSONContent[], link?: Mark) {
     requireContainer(element, location)
     const properties = wordChild(element, 'rPr')
@@ -216,6 +262,14 @@ export function readDocx(bytes: Uint8Array<ArrayBuffer>): { document: JSONConten
       if (boldActive) marks.push({ type: 'bold' })
       if (italicActive) marks.push({ type: 'italic' })
       if (underline && wordAttr(underline) !== 'none') marks.push({ type: 'underline' })
+      const styleResult = textStyle(properties)
+      const strike = wordChild(properties, 'strike')
+      const doubleStrike = wordChild(properties, 'dstrike')
+      if (strike && enabled(strike) || doubleStrike && enabled(doubleStrike)) marks.push({ type: 'strike' })
+      if (styleResult.style) marks.push({ type: 'textStyle', attrs: styleResult.style })
+      if (styleResult.approximated || doubleStrike && enabled(doubleStrike)) {
+        approximate('run-formatting', 'Text formatting', location, 'Some fonts, colors, underlines or character styles use Folio defaults.')
+      }
       const runStyle = wordChild(properties, 'rStyle')
       const style = runStyle && wordAttr(runStyle)
       if (style) styles.checkCharacter(style)
@@ -225,7 +279,7 @@ export function readDocx(bytes: Uint8Array<ArrayBuffer>): { document: JSONConten
           case 'bCs': return enabled(child) !== boldActive
           case 'iCs': return enabled(child) !== italicActive
           case 'rStyle': return !(style === 'Hyperlink' && link || style === 'DefaultParagraphFont')
-          default: return !['b', 'i', 'u'].includes(child.tag.local) && !passiveRunMetadata.has(child.tag.local)
+          default: return !['b', 'i', 'u', ...textStyleElements].includes(child.tag.local) && !passiveRunMetadata.has(child.tag.local)
         }
       })
       if (custom || (underline && (
@@ -324,13 +378,36 @@ export function readDocx(bytes: Uint8Array<ArrayBuffer>): { document: JSONConten
     }
     const heading = outlineLevel === '9' ? undefined : outlineLevel === undefined ? styleHeading : Number(outlineLevel) + 1
     const headingPreserved = !tableCell && !!heading && heading <= 6
-    if (heading && !headingPreserved || styleId && !/^normal$/i.test(styleId) && !headingPreserved ||
-      properties?.children.some(child => !isWord(child) || !['pStyle', 'outlineLvl', 'numPr', 'sectPr'].includes(child.tag.local))) {
+    const numPr = properties && wordChild(properties, 'numPr')
+    const layout: { textAlign?: string; indent?: string } = {}
+    let layoutApproximated = false
+    const justification = properties && wordChild(properties, 'jc')
+    if (justification) {
+      const value = wordAttr(justification)
+      const alignment = value && ({ left: undefined, start: undefined, center: 'center', right: 'right', end: 'right', both: 'justify' } as Record<string, string | undefined>)[value]
+      if (alignment) layout.textAlign = alignment
+      else if (!['left', 'start'].includes(value ?? '')) layoutApproximated = true
+    }
+    const indentation = properties && wordChild(properties, 'ind')
+    if (indentation) {
+      const left = wordAttr(indentation, 'left') ?? wordAttr(indentation, 'start')
+      const others = Object.values(indentation.tag.attributes)
+        .some(attr => attr.prefix !== 'xmlns' && !['left', 'start'].includes(attr.local) && attr.value !== '0')
+      const twips = left === undefined ? 0 : Number(left)
+      // List paragraphs take their indentation from the list numbering.
+      if (others || !Number.isInteger(twips) || twips < 0 || numPr && twips) layoutApproximated = true
+      else {
+        const { indent, exact } = indentFromTwips(twips)
+        if (indent) layout.indent = indent
+        if (!exact) layoutApproximated = true
+      }
+    }
+    if (heading && !headingPreserved || styleId && !/^normal$/i.test(styleId) && !headingPreserved || layoutApproximated ||
+      properties?.children.some(child => !isWord(child) || !['pStyle', 'outlineLvl', 'numPr', 'sectPr', 'jc', 'ind'].includes(child.tag.local))) {
       approximate('paragraph-formatting', 'Paragraph formatting', location, 'Custom paragraph styles or layout use Folio defaults.')
     }
     const sectPr = properties && wordChild(properties, 'sectPr')
     if (sectPr) section(sectPr, location)
-    const numPr = properties && wordChild(properties, 'numPr')
     const numId = numPr && wordChild(numPr, 'numId')
     const number = numId && wordAttr(numId)
     const listId = number === '0' ? undefined : number
@@ -352,7 +429,8 @@ export function readDocx(bytes: Uint8Array<ArrayBuffer>): { document: JSONConten
       else if (!inlineOmitted(child, location)) unsupported(child, location)
     }
     const node = block(headingPreserved ? 'heading' : 'paragraph', content)
-    if (headingPreserved) node.attrs = { level: heading }
+    if (headingPreserved) node.attrs = { level: heading, ...layout }
+    else if (Object.keys(layout).length) node.attrs = layout
     return { node, listId }
   }
 

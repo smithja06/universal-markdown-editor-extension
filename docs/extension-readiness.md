@@ -1,5 +1,9 @@
 # Folio in VS Code
 
+## Phase 10.1 release candidate assessment
+
+Engineering qualification for the claimed Windows scope is complete after the acceptance round 1 and 2 fixes, the table picker and DOCX formatting: lint and both tsc clean; 327/327 unit; 103/103 Chromium; full desktop 89/89 on 1.147.0 in one run; installed VSIX 34/34 on each of 1.100.0, 1.147.0 and 1.148.0; Word 16.0 reads the DOCX formatting fixture correctly. Excel 365 validation passed. Personal acceptance testing passed in round 3 with no issues. Version 1.0.0 is authorized. The source companion is published by the release workflow beside the GitHub Release. Release needs the owner's merge to `main`, the one-time Marketplace token setup and the `v1.0.0` tag. See the [Phase 10.1 record](phase-10.1-release-qualification.md).
+
 ## Phase 10 release assessment
 
 **Verdict: not ready for public release.** The engineering scope is implemented and verified on Windows. Three items remain. [Phase 10 record](phase-10-final-integration.md#15-remaining-release-blockers)

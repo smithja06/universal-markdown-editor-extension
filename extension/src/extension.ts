@@ -162,7 +162,7 @@ export class FolioEditorProvider implements vscode.CustomTextEditorProvider, vsc
   }
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel, token: vscode.CancellationToken) {
-    panel.webview.options = { enableScripts: true, enableForms: false, localResourceRoots: [this.assetsRoot] }
+    panel.webview.options = { enableScripts: true, enableForms: true, localResourceRoots: [this.assetsRoot] }
     const html = await webviewHtml(panel.webview, this.assetsRoot, this.format === 'txt' ? 'TXT' : 'Markdown')
     if (token.isCancellationRequested) return
     const session = this.sessions.get(document) ?? this.createSession(document)

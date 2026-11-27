@@ -30,6 +30,7 @@ interface MarkdownNode {
   ordered?: boolean
   start?: number
   checked?: boolean | null
+  spread?: boolean | null
   align?: (string | null)[]
 }
 
@@ -387,13 +388,16 @@ function portableBlock(node: ProseMirrorNode, htmlMarks: boolean): MarkdownNode 
     case 'orderedList':
     case 'taskList': {
       const children = blocks()
-      return children && { type: 'list', ordered: node.type.name === 'orderedList', start: node.attrs.start, children }
+      // A list is tight, with no blank lines between items, unless an item holds several paragraphs or other blocks.
+      return children && { type: 'list', ordered: node.type.name === 'orderedList', start: node.attrs.start, spread: children.some(item => item.spread), children }
     }
     case 'listItem':
     case 'taskItem': {
       const children = node.children.map((child, index) => index === 0 && isEmptyParagraph(child)
         ? { type: 'paragraph', children: [] } : portableBlock(child, htmlMarks))
-      return children.every(child => child !== undefined) ? { type: 'listItem', checked: node.attrs.checked ?? null, children } : undefined
+      if (!children.every(child => child !== undefined)) return undefined
+      const spread = children.filter(child => child.type !== 'list').length > 1
+      return { type: 'listItem', checked: node.attrs.checked ?? null, spread, children }
     }
     case 'table': return portableTable(node, htmlMarks)
     case 'horizontalRule': return { type: 'thematicBreak' }
@@ -563,8 +567,22 @@ export function writeMarkdown(session: MarkdownSession, document: ProseMirrorNod
   const leading = firstPiece.block === first && firstPiece.unchanged ? lead : leadOffset
   const ending = last ? tail : '\n'
   const indices = new Map(session.blocks.map((block, index) => [block, index]))
-  function assemble(mode: 'original' | 'spaced' | 'protected' | 'wrapped') {
-    const protect = mode === 'protected' || mode === 'wrapped'
+  /** Whether two blocks separated by a blank line would parse as something other than those two blocks, such as one merged list. */
+  function merges(before: string, after: string) {
+    const test = before + '\n\n' + after
+    const tokens = parse(test).filter(node => node.type !== 'yaml')
+    return tokens.length !== 2 || [before, after].some((raw, index) => {
+      const { start, end } = blockRange(tokens[index], test)
+      return test.slice(start, end) !== raw
+    })
+  }
+  /**
+   * 'protected' separates only the changed joins that would merge, 'guarded' separates every changed join, and 'wrapped'
+   * also rewrites blocks that a separator cannot end.
+   */
+  function assemble(mode: 'original' | 'spaced' | 'protected' | 'guarded' | 'wrapped') {
+    const protect = mode === 'protected' || mode === 'guarded' || mode === 'wrapped'
+    let inserted = false
     let source = leading
     const rawPieces: string[] = []
     for (const [index, piece] of pieces.entries()) {
@@ -584,16 +602,19 @@ export function writeMarkdown(session: MarkdownSession, document: ProseMirrorNod
         if (before.block && piece.block && priorIndex !== undefined && nextIndex === priorIndex + 1
           && (mode === 'original' || (mode !== 'wrapped' && before.unchanged && piece.unchanged))) {
           source += session.source.slice(before.block.end, piece.block.start)
+        } else if (protect && (mode !== 'protected' || merges(rawPieces[index - 1], raw))) {
+          source += '\n\n' + boundary + '\n\n'
+          inserted = true
         } else {
-          source += protect ? '\n\n' + boundary + '\n\n' : '\n\n'
+          source += '\n\n'
         }
       }
       source += raw
       rawPieces.push(raw)
     }
-    return { source: source + ending, rawPieces }
+    return { source: source + ending, rawPieces, inserted }
   }
-  for (const mode of ['original', 'spaced', 'protected', 'wrapped'] as const) {
+  for (const mode of ['original', 'spaced', 'protected', 'guarded', 'wrapped'] as const) {
     const assembled = assemble(mode)
     const rawPieces = assembled.rawPieces
     let source = assembled.source
@@ -607,7 +628,7 @@ export function writeMarkdown(session: MarkdownSession, document: ProseMirrorNod
     if (projection.length === pieces.length && projection.every((node, index) => {
       const { start, end } = blockRange(node, source)
       return source.slice(start, end) === rawPieces[index]
-    })) return { source, protectedBoundaries: mode === 'protected' || mode === 'wrapped' }
+    })) return { source, protectedBoundaries: assembled.inserted }
   }
   throw new Error('This arrangement could not be converted safely. Move the preserved blocks or undo the last edit.')
 }

@@ -1,5 +1,24 @@
 # Folio project handoff
 
+## Phase 10.1 release qualification
+
+Phase 10.1 is on local branch `phase-10.1-release-qualification`, based on `origin/main` `6fe1c0f`. It is not pushed, merged, tagged or published. Full details: [Phase 10.1 record](phase-10.1-release-qualification.md).
+
+- **Native Save** is qualified under injected faults: disk-full mid-write, failed flush, failed rollback, journal storage failure, cancellation, an earlier-journal conflict, ambiguous bytes, and a writer process killed mid-write. A stale-journal defect is fixed in `verifiedReplace.ts`. There is no power-loss claim.
+- **PDF clipboard** passes on an interactive session. The Phase 10 failure was the locked session.
+- **XLSX interop.** Folio fixtures, IronCalc structure edits and native Save/Save As outputs pass the independent openpyxl 3.1.5 check and Folio's reopen comparison. **Excel 365 (16.0 build 20625) validation passed** on all four files after the owner ran `excel-check.ps1`, checked by `scripts/interop/excel-report-check.py`.
+- **Reproducible builds.** `.gitattributes` `* text=auto eol=lf`. Two consecutive packages have identical entries.
+- **Release materials.** README/Marketplace page, release notes, `docs/release/marketplace.md`, seven synthetic screenshots, `docs/release/acceptance-checklist.md`.
+- **Harness fix.** The isolated profile no longer sets `extensions.autoUpdate`. VS Code 1.147's migration rewrite raced window reloads.
+- **Acceptance round 1.** The owner's notes found real defects: single Replace, italic display, spreadsheet Ctrl+B, uncalculated formulas, a green dark theme and noisy Markdown list output. All are fixed in `c311e8a` with tests. The checklist records round 1 and lists the round 2 re-test.
+- **Owner requests after round 1.** `72a5c32`: the table size grid locks on click, and DOCX gains font, size in points, color, highlight, strikethrough, alignment and indentation, checked in Microsoft Word.
+- **Acceptance round 2.** Fixed in `63894ca`: clicks beside a line or between paragraphs go to the nearest line, and Backspace at the start of an indented paragraph removes one step. The DOCX text-color note did not reproduce and is re-tested in round 3.
+- **Results.** lint and both tsc clean; 327/327 unit; 103/103 Chromium; full desktop 89/89 on 1.147.0 in one run; installed VSIX 34/34 on each of 1.100.0, 1.147.0 and 1.148.0; Word 16.0 reads the DOCX formatting fixture correctly. VSIX `6c4cde7f…`.
+- **Acceptance round 3.** Passed with no issues on VSIX `6c4cde7f…`. Personal acceptance testing is complete.
+- **Extension icon.** `9d8ac20` adds the Marketplace icon from Folio's brand mark. Current VSIX `54677dac…`, otherwise identical to the accepted build. The repository is public (anonymous GitHub API check), and the docs no longer contain local user paths.
+- **Version 1.0.0.** Named Folio Universal Editor (`smithja06.folio-universal-editor`). `.github/workflows/release.yml` builds, verifies and releases on a `v*` tag, hosts the source archive as a release asset and publishes with `VSCE_PAT` from the `marketplace` environment. See `docs/release/marketplace.md`.
+- **Open steps (owner).** Merge to `main`, set up the Marketplace token and environment once, then push the `v1.0.0` tag.
+
 ## Phase 10 final integration
 
 Phase 10 is implemented and verified on branch `phase-10-final-integration` in the original checkout. It is based on `origin/main` `98cd8ed`, the PR #20 merge of Phase 9.1, whose first parent is the Phase 9 merge `cd3474c`. Implementation ends at `db1429c`, followed by the documentation commit. Nothing is pushed, merged, tagged or published. The user's untracked `KNO3 DATA.xlsx` stays uncommitted. [Phase 10 record, evidence and Next Chat Starter](phase-10-final-integration.md) · [Release matrix](release-capabilities.md#phase-10-release-matrix)

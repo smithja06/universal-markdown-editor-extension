@@ -102,7 +102,7 @@ export class DocxEditorProvider implements vscode.CustomEditorProvider<DocxDocum
   }
 
   async resolveCustomEditor(document: DocxDocument, panel: vscode.WebviewPanel, token: vscode.CancellationToken) {
-    panel.webview.options = { enableScripts: true, enableForms: false, localResourceRoots: [this.assets] }
+    panel.webview.options = { enableScripts: true, enableForms: true, localResourceRoots: [this.assets] }
     const html = await webviewHtml(panel.webview, this.assets, 'DOCX')
     if (token.isCancellationRequested) return
     const view: View = { panel }

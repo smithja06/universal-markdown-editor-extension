@@ -110,7 +110,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<Pd
   }
 
   async resolveCustomEditor(document: PdfDocument, panel: vscode.WebviewPanel, token: vscode.CancellationToken) {
-    panel.webview.options = { enableScripts: true, enableForms: false, localResourceRoots: [this.assets] }
+    panel.webview.options = { enableScripts: true, enableForms: true, localResourceRoots: [this.assets] }
     const html = await webviewHtml(panel.webview, this.assets, 'PDF')
     if (token.isCancellationRequested) return
     const view: View = { panel }
