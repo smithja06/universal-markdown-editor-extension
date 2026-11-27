@@ -53,6 +53,55 @@ const headings = (bytes: Uint8Array) => JSON.stringify(readDocx(Uint8Array.from(
 test.describe('native binary Save on a qualified local NTFS workspace', () => {
   test.use({ customDialogs: true, simpleFileDialog: true })
 
+  test('DOCX Save keeps font, size, color, highlight, strikethrough, alignment and indentation', async ({ desktop }) => {
+    const { page, workspace, command } = desktop
+    const path = join(workspace, 'styled.docx')
+    await writeFile(path, word('Styled heading'))
+    await command('open', { file: 'styled.docx', editor: 'folio.docx' })
+    const frame = folio(page)
+    const heading = frame.getByRole('heading', { name: 'Styled heading' })
+    await heading.click()
+    await page.keyboard.press('Home')
+    await page.keyboard.press('Shift+End')
+    // Narrow windows move these toolbar menus into More formatting.
+    const choose = async (menu: RegExp, item: string, compact: string) => {
+      const trigger = frame.getByRole('button', { name: menu })
+      if (await trigger.isVisible()) {
+        await trigger.click()
+        await frame.getByRole('menuitem', { name: item, exact: true }).click()
+      } else {
+        await frame.getByRole('button', { name: 'More formatting', exact: true }).click()
+        await frame.getByRole('menuitem', { name: compact, exact: true }).click()
+      }
+    }
+    await choose(/^Font family/, 'Georgia', 'Font family – Georgia')
+    await choose(/^Font size in points/, '14', 'Font size – 14 pt')
+    await choose(/^Text color/, 'Ocean', 'Text color – Ocean')
+    await choose(/^Text highlight/, 'Lemon', 'Text highlight – Lemon')
+    await choose(/^Alignment/, 'Align center', 'Align center')
+    await frame.getByRole('button', { name: 'More formatting', exact: true }).click()
+    await frame.getByRole('menuitem', { name: /^Increase indentation/ }).click()
+    const strike = frame.getByRole('button', { name: 'Strikethrough', exact: true })
+    if (await strike.isVisible()) await strike.click()
+    else {
+      await frame.getByRole('button', { name: 'More formatting', exact: true }).click()
+      await frame.getByRole('menuitem', { name: 'Strikethrough', exact: true }).click()
+    }
+    await expect(heading.locator('s')).toHaveText('Styled heading')
+    await expect(heading).toHaveCSS('text-align', 'center')
+    await expect.poll(() => command('activeTabDirty')).toBe(true)
+
+    await confirmSave(page, command, /Replace styled\.docx with the Folio draft\?/)
+    await expect.poll(() => command('activeTabDirty')).toBe(false)
+    const saved = readDocx(Uint8Array.from(await readFile(path)))
+    expect(saved.document.content?.[0]).toMatchObject({ type: 'heading', attrs: { level: 1, textAlign: 'center', indent: '24px' } })
+    expect(saved.document.content?.[0].content?.[0].marks).toEqual([
+      { type: 'strike' },
+      { type: 'textStyle', attrs: { fontFamily: 'Georgia', fontSize: '18.67px', color: '#2869a9', backgroundColor: '#fff0a5' } },
+    ])
+    expect(saved.issues.filter(issue => issue.effect !== 'preserved')).toEqual([])
+  })
+
   test('DOCX Save confirms once, writes in place and refuses locked or externally changed files', async ({ desktop }) => {
     const { page, workspace, command } = desktop
     const path = join(workspace, 'native.docx')

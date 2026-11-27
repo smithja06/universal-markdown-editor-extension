@@ -1,6 +1,7 @@
 import type { JSONContent } from '@tiptap/core'
 import { zipSync } from 'fflate'
 import { canonicalDocx, docxColumnWidth, docxColumnWidthValue, docxMaxFileBytes, docxMaxXmlElements, docxMaxXmlPartBytes } from './model'
+import { docxIndent, highlightName, pixelsToHalfPoints, wordFont, type DocxTextStyle } from './formatting'
 
 const word = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const office = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -93,11 +94,23 @@ function numbering(lists: NumberedList[]): string {
 
 function run(node: JSONContent): string {
   const marks = node.marks ?? []
+  const style: DocxTextStyle = marks.find(mark => mark.type === 'textStyle')?.attrs ?? {}
+  const font = style.fontFamily && escapeXml(wordFont(style.fontFamily))
+  const size = style.fontSize && pixelsToHalfPoints(style.fontSize)
+  const highlight = style.backgroundColor && highlightName(style.backgroundColor)
+  const hex = (color: string) => color.slice(1).toUpperCase()
+  // CT_RPr requires this element order.
   const properties = [
     marks.some(mark => mark.type === 'link') ? '<w:rStyle w:val="Hyperlink"/>' : '',
+    font ? `<w:rFonts w:ascii="${font}" w:hAnsi="${font}" w:eastAsia="${font}" w:cs="${font}"/>` : '',
     marks.some(mark => mark.type === 'bold') ? '<w:b/><w:bCs/>' : '',
     marks.some(mark => mark.type === 'italic') ? '<w:i/><w:iCs/>' : '',
+    marks.some(mark => mark.type === 'strike') ? '<w:strike/>' : '',
+    style.color ? `<w:color w:val="${hex(style.color)}"/>` : '',
+    size ? `<w:sz w:val="${size}"/><w:szCs w:val="${size}"/>` : '',
+    highlight ? `<w:highlight w:val="${highlight}"/>` : '',
     marks.some(mark => mark.type === 'underline') ? '<w:u w:val="single"/>' : '',
+    style.backgroundColor && !highlight ? `<w:shd w:val="clear" w:color="auto" w:fill="${hex(style.backgroundColor)}"/>` : '',
   ].join('')
   const value = node.type === 'hardBreak' ? '<w:br/>' : node.text!.split(/(\t)/)
     .filter(Boolean)
@@ -128,7 +141,11 @@ export function writeDocx(document: JSONContent): Uint8Array<ArrayBuffer> {
     return id
   }
 
-  function paragraph(node: JSONContent, properties = ''): string {
+  /** Paragraph properties in CT_PPr order: style, numbering, indentation, then alignment. */
+  function paragraph(node: JSONContent, leading = ''): string {
+    const indent: string | undefined = node.attrs?.indent
+    const align = ({ center: 'center', right: 'right', justify: 'both' } as Record<string, string>)[node.attrs?.textAlign]
+    const properties = leading + (indent ? `<w:ind w:left="${Number.parseInt(indent, 10) * docxIndent.twipsPerPixel}"/>` : '') + (align ? `<w:jc w:val="${align}"/>` : '')
     const contents: string[] = []
     let currentLink: string | undefined
     for (const inline of node.content ?? []) {

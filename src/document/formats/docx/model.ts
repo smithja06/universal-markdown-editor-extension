@@ -1,4 +1,5 @@
 import type { JSONContent } from '@tiptap/core'
+import { normalizeAlignment, normalizeIndent, normalizeTextStyle } from './formatting'
 
 export interface DocxIssue {
   code: string
@@ -53,8 +54,9 @@ const children: Record<string, readonly string[]> = {
   text: [], hardBreak: [],
 }
 const optionalContent = new Set(['paragraph', 'heading', 'text', 'hardBreak'])
-const markTypes = ['bold', 'italic', 'underline', 'link']
+const markTypes = ['bold', 'italic', 'underline', 'strike', 'textStyle', 'link']
 const defaults: Record<string, unknown> = { frontMatter: '', colspan: 1, rowspan: 1, textAlign: 'left' }
+const paragraphAttributes = new Set(['textAlign', 'indent'])
 
 function invalid(reason: string): never {
   throw new Error(`This DOCX edit is outside Folio’s supported subset. ${reason}`)
@@ -62,16 +64,21 @@ function invalid(reason: string): never {
 
 function marksOf(node: JSONContent) {
   const seen = new Set<string>()
-  const marks = (node.marks ?? []).map(mark => {
+  const marks = (node.marks ?? []).flatMap(mark => {
     const { type, attrs } = mark
     if (!markTypes.includes(type) || seen.has(type)) invalid(`Unsupported ${type} formatting.`)
     seen.add(type)
     if (type === 'link') {
       const href = attrs?.href
       if (typeof href !== 'string' || !safeDocxLink(href)) invalid('Enter a safe absolute link.')
-      return { type, attrs: { href } }
+      return [{ type, attrs: { href } }]
     }
-    return { type }
+    // Font, size, color and highlight. Values Word cannot store, such as CSS fallback lists, are normalized or dropped.
+    if (type === 'textStyle') {
+      const style = normalizeTextStyle(attrs)
+      return style ? [{ type, attrs: { ...style } }] : []
+    }
+    return [{ type }]
   })
   return marks.sort((left, right) => markTypes.indexOf(left.type) - markTypes.indexOf(right.type))
 }
@@ -86,6 +93,7 @@ export function canonicalDocx(input: JSONContent): JSONContent {
     const attrs = node.attrs ?? {}
     for (const [key, value] of Object.entries(attrs)) {
       if (key === 'level' && type === 'heading' || key === 'start' && type === 'orderedList') continue
+      if (paragraphAttributes.has(key) && (type === 'paragraph' || type === 'heading')) continue
       if (key === 'colwidth' && (type === 'tableCell' || type === 'tableHeader')) {
         if (value !== null && value !== undefined && docxColumnWidthValue(value) === undefined) invalid('Use a column width from 24 to 2000 pixels.')
         continue
@@ -116,6 +124,7 @@ export function canonicalDocx(input: JSONContent): JSONContent {
     }
     if (!content.length && !optionalContent.has(type)) invalid(`A ${type} is missing content.`)
     if (type === 'listItem' && content.length !== 1) invalid('A list item supports one paragraph.')
+    if (type === 'listItem' && content[0].attrs?.indent) invalid('List items use the list indentation.')
     if (type === 'table') {
       const columns = content[0].content?.length ?? 0
       for (const [index, row] of content.entries()) {
@@ -135,9 +144,19 @@ export function canonicalDocx(input: JSONContent): JSONContent {
       }
     }
     const result: JSONContent = { type, ...(content.length ? { content } : {}), ...(marks.length ? { marks } : {}) }
-    if (type === 'heading') {
-      if (!Number.isInteger(attrs.level) || attrs.level < 1 || attrs.level > 6) invalid('Use heading levels 1 through 6.')
-      return { type, attrs: { level: attrs.level }, ...(content.length ? { content } : {}) }
+    if (type === 'paragraph' || type === 'heading') {
+      if (attrs.textAlign !== null && attrs.textAlign !== undefined && attrs.textAlign !== 'left' && !normalizeAlignment(attrs.textAlign)) {
+        invalid('Use left, center, right or justified alignment.')
+      }
+      const textAlign = normalizeAlignment(attrs.textAlign)
+      let indent: string | undefined
+      try { indent = normalizeIndent(attrs.indent) } catch (error) { invalid(error instanceof Error ? error.message : 'Unsupported indentation.') }
+      const layout = { ...(textAlign ? { textAlign } : {}), ...(indent ? { indent } : {}) }
+      if (type === 'heading') {
+        if (!Number.isInteger(attrs.level) || attrs.level < 1 || attrs.level > 6) invalid('Use heading levels 1 through 6.')
+        return { type, attrs: { level: attrs.level, ...layout }, ...(content.length ? { content } : {}) }
+      }
+      return { type, ...(Object.keys(layout).length ? { attrs: layout } : {}), ...(content.length ? { content } : {}) }
     }
     if (type === 'orderedList') {
       const start: number = attrs.start ?? 1

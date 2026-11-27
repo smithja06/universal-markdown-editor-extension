@@ -9,6 +9,10 @@ import {
 import { IconButton, Menu, type Item } from './controls'
 
 export const fontChoices = ['Default', 'Inter', 'Arial', 'Georgia', 'Times New Roman', 'Courier New'] as const
+/** Common Word fonts. They display when installed on this computer, and Word keeps them either way. */
+const docxFontChoices = [...fontChoices.slice(0, 2), 'Aptos', 'Calibri', 'Cambria', ...fontChoices.slice(2)] as const
+/** Word users choose sizes in points. Folio stores pixels, at 0.75 pt per pixel. */
+const docxPointSizes = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]
 const colors = [
   ['Ink', '#222d27'], ['Slate', '#546275'], ['Forest', '#16724f'], ['Ocean', '#2869a9'], ['Violet', '#7656a8'],
   ['Berry', '#a92f63'], ['Brick', '#b64339'], ['Amber', '#a95c13'],
@@ -35,6 +39,11 @@ const fontName = (name?: string) => name === 'Inter Variable' ? 'Inter' : name ?
 
 function setParagraphAttribute(editor: Editor, key: string, value: string | null) {
   editor.chain().focus().updateAttributes(editor.isActive('heading') ? 'heading' : 'paragraph', { [key]: value }).run()
+}
+
+/** DOCX lists have one level, so indentation applies to paragraphs and headings only. */
+export function inList(editor: Editor) {
+  return editor.isActive('listItem') || editor.isActive('taskItem')
 }
 
 export function indent(editor: Editor, direction: 1 | -1) {
@@ -70,7 +79,11 @@ export function formatItems(editor: Editor, openLink: () => void, docx?: boolean
     { label: 'Remove link', disabled: !editor.isActive('link'), run: () => editor.chain().focus().extendMarkRange('link').unsetLink().run() },
   ]
   const clear = { label: 'Clear formatting', shortcut: 'Ctrl+\\', run: () => editor.chain().focus().unsetAllMarks().clearNodes().resetAttributes('paragraph', ['displayStyle', 'textAlign', 'lineSpacing', 'paragraphSpacing', 'indent']).run() }
-  if (docx) return [...links, clear]
+  const indentation = [
+    { label: 'Increase indentation', icon: <IndentIncrease size={15} />, disabled: docx && inList(editor), run: () => indent(editor, 1) },
+    { label: 'Decrease indentation', icon: <IndentDecrease size={15} />, disabled: docx && inList(editor), run: () => indent(editor, -1) },
+  ]
+  if (docx) return [...links, { label: '', divider: true }, ...indentation, clear]
   return [
     { label: 'Superscript', active: editor.isActive('superscript'), run: () => editor.chain().focus().toggleSuperscript().run() },
     { label: 'Subscript', active: editor.isActive('subscript'), run: () => editor.chain().focus().toggleSubscript().run() },
@@ -80,8 +93,7 @@ export function formatItems(editor: Editor, openLink: () => void, docx?: boolean
     ...[1, 1.4, 1.7, 2].map(value => ({ label: 'Line spacing ' + value, run: () => setParagraphAttribute(editor, 'lineSpacing', String(value)) })),
     ...[0, 8, 16, 24].map(value => ({ label: 'Paragraph spacing ' + value + ' px', run: () => setParagraphAttribute(editor, 'paragraphSpacing', String(value) + 'px') })),
     { label: '', divider: true },
-    { label: 'Increase indentation', icon: <IndentIncrease size={15} />, run: () => indent(editor, 1) },
-    { label: 'Decrease indentation', icon: <IndentDecrease size={15} />, run: () => indent(editor, -1) },
+    ...indentation,
     clear,
   ]
 }
@@ -130,7 +142,7 @@ export function fullFormatItems(editor: Editor, openLink: () => void, docx?: boo
     { label: 'Bold', icon: <Bold size={15} />, shortcut: 'Ctrl+B', active: editor.isActive('bold'), run: () => editor.chain().focus().toggleBold().run() },
     { label: 'Italic', icon: <Italic size={15} />, shortcut: 'Ctrl+I', active: editor.isActive('italic'), run: () => editor.chain().focus().toggleItalic().run() },
     { label: 'Underline', icon: <Underline size={15} />, shortcut: 'Ctrl+U', active: editor.isActive('underline'), run: () => editor.chain().focus().toggleUnderline().run() },
-    ...(docx ? [] : [{ label: 'Strikethrough', icon: <Strikethrough size={15} />, run: () => editor.chain().focus().toggleStrike().run() }]),
+    { label: 'Strikethrough', icon: <Strikethrough size={15} />, run: () => editor.chain().focus().toggleStrike().run() },
     { label: '', divider: true },
     ...formatItems(editor, openLink, docx),
   ]
@@ -145,19 +157,26 @@ export function Toolbar({ editor, state, source, plainText, docx, ready, execute
   const CurrentAlign = alignments.find(([value]) => value === state?.alignment)?.[1] ?? AlignLeft
   const paragraph = state?.style ?? 'Normal text'
   const family = state?.font ?? 'Inter'
-  const fontSize = state?.size ?? '16'
+  const pixelSize = state?.size ?? '16'
+  const points = (pixels: string) => String(Number((Number.parseFloat(pixels) * 0.75).toFixed(1)))
+  const fontSize = docx ? points(pixelSize) : pixelSize
   const apply = (run: (current: Editor) => void) => () => { if (enabled) run(editor) }
   const label = (name: string, id: string) => shortcut(id) ? `${name} (${shortcut(id)})` : name
-  const fontFamilies = fontChoices.map(label => ({
+  const fontFamilies = (docx ? docxFontChoices : fontChoices).map(label => ({
     label, active: (state?.text.fontFamily ? state.font : 'Default') === label,
     run: apply(current => {
       if (label === 'Default') current.chain().focus().unsetFontFamily().run()
       else current.chain().focus().setFontFamily(label === 'Inter' ? 'Inter Variable' : label).run()
     }),
   }))
-  const fontSizes = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64].map(size => ({
-    label: String(size), active: state?.size === String(size), run: apply(current => current.chain().focus().setFontSize(size + 'px').run()),
-  }))
+  const fontSizes = docx
+    ? docxPointSizes.map(size => ({
+      label: String(size), active: fontSize === String(size),
+      run: apply(current => current.chain().focus().setFontSize(Number((size / 0.75).toFixed(2)) + 'px').run()),
+    }))
+    : [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64].map(size => ({
+      label: String(size), active: state?.size === String(size), run: apply(current => current.chain().focus().setFontSize(size + 'px').run()),
+    }))
   const textColors = colors.map(([label, value]) => ({ label, icon: colorDot(value), run: apply(current => current.chain().focus().setColor(value).run()) }))
   const textHighlights = highlights.map(([label, value]) => ({ label, icon: colorDot(value), run: apply(current => current.chain().focus().setBackgroundColor(value).run()) }))
   const clearColor = { label: 'Reset text color', run: apply(current => current.chain().focus().unsetColor().run()) }
@@ -174,11 +193,11 @@ export function Toolbar({ editor, state, source, plainText, docx, ready, execute
   ].map(({ label, id, mark, Icon }) => ({ label, active: active(mark), icon: <Icon size={16} />, run: () => execute(id) }))
   const strike = { label: 'Strikethrough', active: active('strike'), icon: <Strikethrough size={16} />, run: () => execute('format.strikethrough') }
   const divider = { label: '', divider: true }
-  const compactFormats = docx ? lists : [
+  const compactFormats = [
     strike, ...lists, ...alignItems,
     ...(table.length ? [divider, ...table] : []),
     divider, ...fontFamilies.map(item => ({ ...item, label: 'Font family – ' + item.label })),
-    ...fontSizes.map(item => ({ ...item, label: 'Font size – ' + item.label + ' px' })),
+    ...fontSizes.map(item => ({ ...item, label: 'Font size – ' + item.label + (docx ? ' pt' : ' px') })),
     divider, ...textColors.map(item => ({ ...item, label: 'Text color – ' + item.label })), clearColor,
     ...textHighlights.map(item => ({ ...item, label: 'Text highlight – ' + item.label })), clearHighlight, divider,
   ]
@@ -196,19 +215,18 @@ export function Toolbar({ editor, state, source, plainText, docx, ready, execute
           <Pilcrow size={15} /><span>{paragraph}</span>
         </Menu>
       </div>
-      {!docx && <div className="toolbar-group type-tools wide-toolbar-tool">
+      <div className="toolbar-group type-tools wide-toolbar-tool">
         <Menu label="Font family" value={family} chevron disabled={!enabled} items={fontFamilies}>
           <span>{family}</span>
         </Menu>
-        <Menu label="Font size" value={fontSize} chevron disabled={!enabled} items={fontSizes}>
+        <Menu label={docx ? 'Font size in points' : 'Font size'} value={fontSize} chevron disabled={!enabled} items={fontSizes}>
           <span>{fontSize}</span>
         </Menu>
-      </div>}
+      </div>
       <div className="toolbar-group mark-tools">
         <IconButton label={label('Bold', 'format.bold')} active={active('bold')} disabled={!enabled} onClick={() => execute('format.bold')}><Bold size={16} /></IconButton>
         <IconButton label={label('Italic', 'format.italic')} active={active('italic')} disabled={!enabled} onClick={() => execute('format.italic')}><Italic size={16} /></IconButton>
         <IconButton label={label('Underline', 'format.underline')} active={active('underline')} disabled={!enabled} onClick={() => execute('format.underline')}><Underline size={16} /></IconButton>
-        {!docx && <>
           <IconButton label={strike.label} className="wide-toolbar-tool" active={strike.active} disabled={!enabled} onClick={strike.run}>{strike.icon}</IconButton>
           <Menu label="Text color" className="wide-toolbar-tool" disabled={!enabled} items={[...textColors, clearColor]}>
             <span className="color-letter" style={{ borderBottomColor: state?.text.color ?? 'currentColor' }}>A</span><ChevronDown size={10} />
@@ -216,10 +234,9 @@ export function Toolbar({ editor, state, source, plainText, docx, ready, execute
           <Menu label="Text highlight" className="wide-toolbar-tool" disabled={!enabled} items={[...textHighlights, clearHighlight]}>
             <Highlighter size={17} /><ChevronDown size={10} />
           </Menu>
-        </>}
       </div>
       <div className="toolbar-group list-tools wide-toolbar-tool">
-        {!docx && <Menu label="Alignment" chevron disabled={!enabled} items={alignItems}><CurrentAlign size={17} /></Menu>}
+        <Menu label="Alignment" chevron disabled={!enabled} items={alignItems}><CurrentAlign size={17} /></Menu>
         {lists.map(item => <IconButton key={item.label} label={item.label} disabled={!enabled} active={item.active} onClick={item.run}>{item.icon}</IconButton>)}
       </div>
       <div className="toolbar-group insert-tools">

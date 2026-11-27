@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
-import { strToU8, zipSync } from 'fflate'
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 
 const w = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const office = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -371,4 +371,48 @@ test('DOCX column widths resize by pointer and keyboard, undo, and export to a f
   const reopened = editor(page).getByRole('table')
   await expect.poll(async () => Math.round((await reopened.getByRole('cell', { name: 'Planned' }).boundingBox())!.width)).toBe(Math.round(widened))
   await expect(page.getByText(/Table formatting/)).toHaveCount(0)
+})
+
+test('DOCX applies font, size, color, highlight, strikethrough, alignment and indentation and writes them for Word', async ({ page }) => {
+  await openDocx(page, 'Styled.docx', fixture(), mime)
+  const heading = editor(page).getByRole('heading', { name: 'Project brief', level: 1 })
+  await heading.click()
+  await page.keyboard.press('Home')
+  await page.keyboard.press('Shift+End')
+  const pick = async (menu: RegExp, item: string) => {
+    await page.getByRole('button', { name: menu }).click()
+    await page.getByRole('menuitem', { name: item, exact: true }).click()
+  }
+  await pick(/^Font family/, 'Georgia')
+  await pick(/^Font size in points/, '14')
+  await expect(page.getByRole('button', { name: 'Font size in points 14', exact: true })).toBeVisible()
+  await action(page, 'Text color', 'Ocean')
+  await action(page, 'Text highlight', 'Lemon')
+  await page.getByRole('button', { name: 'Strikethrough', exact: true }).click()
+  await pick(/^Alignment/, 'Align center')
+  await action(page, 'More formatting', /^Increase indentation/)
+  await expect(heading).toHaveCSS('text-align', 'center')
+  await expect(heading).toHaveCSS('margin-left', '24px')
+  const span = heading.locator('span[style]').first()
+  await expect(span).toHaveCSS('font-family', 'Georgia')
+  await expect(span).toHaveCSS('font-size', '18.67px')
+  await expect(span).toHaveCSS('color', 'rgb(40, 105, 169)')
+  await expect(span).toHaveCSS('background-color', 'rgb(255, 240, 165)')
+  await expect(heading.locator('s')).toHaveText('Project brief')
+
+  const copy = await download(page, /^Export DOCX copy/)
+  const xml = strFromU8(unzipSync(new Uint8Array(copy.bytes))['word/document.xml'])
+  const first = xml.slice(xml.indexOf('<w:p>'), xml.indexOf('</w:p>'))
+  expect(first).toContain('<w:pStyle w:val="Heading1"/><w:ind w:left="360"/><w:jc w:val="center"/>')
+  expect(first).toContain('<w:rFonts w:ascii="Georgia" w:hAnsi="Georgia" w:eastAsia="Georgia" w:cs="Georgia"/>')
+  expect(first).toContain('<w:strike/><w:color w:val="2869A9"/><w:sz w:val="28"/><w:szCs w:val="28"/>')
+  expect(first).toContain('<w:shd w:val="clear" w:color="auto" w:fill="FFF0A5"/>')
+
+  await openDocx(page, 'Styled again.docx', copy.bytes, mime)
+  await expect(page.getByRole('tab', { name: 'Styled again.docx' })).toHaveAttribute('aria-selected', 'true')
+  const reopened = editor(page).getByRole('heading', { name: 'Project brief', level: 1 })
+  await expect(reopened).toHaveCSS('text-align', 'center')
+  await expect(reopened.locator('span[style]').first()).toHaveCSS('font-family', 'Georgia')
+  // Notes stay informational: nothing was approximated or lost.
+  await expect(page.getByRole('button', { name: 'DOCX import notes' })).not.toHaveClass(/warning-link/)
 })

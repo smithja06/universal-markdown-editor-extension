@@ -14,6 +14,7 @@
     "test:e2e": "playwright test",
     "test:extension": "npm run build:extension && playwright test --config playwright.vscode.config.ts",
     "source:companion": "node scripts/elk-source-companion.mjs",
+    "interop:docx": "esbuild scripts/interop/docx-fixtures.ts --bundle --platform=node --format=esm --target=node20 --outfile=test-results/interop/docx-fixtures.mjs --log-level=warning && node test-results/interop/docx-fixtures.mjs",
     "interop:xlsx": "esbuild scripts/interop/xlsx-fixtures.ts --bundle --platform=node --format=esm --target=node20 --outfile=test-results/interop/xlsx-fixtures.mjs --log-level=warning && node test-results/interop/xlsx-fixtures.mjs"
   },
   "engines": {

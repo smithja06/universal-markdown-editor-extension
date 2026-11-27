@@ -8,7 +8,7 @@ First release of Folio's optional VS Code editors. Qualified on desktop VS Code 
 
 - **Markdown:** Visual, Markdown source and Split modes with VS Code Save, Undo/Redo and hot exit. Unchanged Markdown stays byte-for-byte. Tables, callouts, checklists, Mermaid, KaTeX math, footnotes, wiki links and a live table of contents. Workspace images render, and relative Markdown links can be followed.
 - **Plain text:** literal UTF-8 editing with find and replace, Save, Undo/Redo and Revert. Mixed line endings open read-only.
-- **DOCX:** visual editing of the supported Word subset, including rectangular tables with column resizing. Unsupported content is explained instead of silently changed.
+- **DOCX:** visual editing of the supported Word subset, including font, size, color, highlight, strikethrough, alignment and indentation, and rectangular tables with column resizing. Unsupported content is explained instead of silently changed.
 - **XLSX and CSV:** spreadsheet grid with formatting, conditional formatting, merges, worksheet management, regional settings and range PNG export. Formulas use IronCalc 0.9.1, with a formula bar, verified function suggestions and argument hints. Row and column insert and delete and sheet rename update formulas. Workbook themes have accent colors. CSV values stay literal.
 - **PDF:** read-only viewer with navigation, zoom, search and copy. Active PDF content stays inert.
 - **PDF export** from Markdown, TXT and DOCX, after a fidelity review and validated preview. Copies are saved only as new files. Exports include a language, a title and bookmarks. They are untagged and do not claim PDF/UA.

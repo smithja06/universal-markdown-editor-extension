@@ -35,7 +35,7 @@ The Folio Plain Text Editor opens `.txt` files as literal text with find and rep
 
 ## Word documents (DOCX)
 
-The Folio DOCX Editor opens the supported subset of `.docx` for visual editing: headings, paragraphs, bold, italic, underline, lists, links, and rectangular tables with column resizing and row and column commands. It also supports find and replace, Undo/Redo, Revert and recovery. Complex packages, or tables with merged or nested cells, open with an explanation instead of being changed. **Download original** retrieves the exact package you opened.
+The Folio DOCX Editor opens the supported subset of `.docx` for visual editing: headings, paragraphs, bold, italic, underline, strikethrough, font, size in points, text color, highlight, alignment, paragraph indentation, lists, links, and rectangular tables with column resizing and row and column commands. It also supports find and replace, Undo/Redo, Revert and recovery. Complex packages, or tables with merged or nested cells, open with an explanation instead of being changed. **Download original** retrieves the exact package you opened.
 
 ## Spreadsheets (XLSX and CSV)
 
@@ -108,7 +108,7 @@ Folio requires a trusted workspace. In Restricted Mode, keep using VS Code's tex
 
 ## Known limitations
 
-- DOCX: page layout, headers and footers, comments, tracked changes, text boxes, fields, merged or nested tables, and other unsupported content are listed before the first Save and are not kept.
+- DOCX: page layout, headers and footers, comments, tracked changes, text boxes, fields, merged or nested tables, and other unsupported content are listed before the first Save and are not kept. Theme fonts use Folio's default font, and theme colors use the fixed color Word stores with them. Both are listed as approximations. A highlight color outside Word's named highlight colors is saved as character shading. Fonts display only when installed on your computer.
 - XLSX: charts, pivot tables, defined names, structured table metadata, external connections and other unsupported workbook parts are listed before the first Save and are not kept. Macros are rejected. Theme colors are stored as fixed colors. Files are limited to 16 MiB, 64 sheets and 150,000 cells.
 - PDF export is untagged, has no OCR, and prints characters without a bundled font as code points.
 - Image insertion references existing workspace images only. It is available on Windows NTFS workspaces only, and Folio never uploads or copies images.

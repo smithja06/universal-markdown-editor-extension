@@ -255,8 +255,30 @@ describe('DOCX import', () => {
     expect(() => readDocx(fixture('<w:p><w:ins><w:r><w:t>Inserted text</w:t></w:r></w:ins></w:p>'))).toThrow(/tracked changes/i)
   })
 
+  it('imports Word fonts, sizes, colors, highlights, shading, strikethrough, alignment and indentation', () => {
+    const result = readDocx(fixture('<w:p><w:pPr><w:ind w:left="720"/><w:jc w:val="both"/></w:pPr>' +
+      '<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:strike/><w:color w:val="00FF00"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:highlight w:val="yellow"/></w:rPr><w:t>Styled</w:t></w:r>' +
+      '<w:r><w:rPr><w:shd w:val="clear" w:color="auto" w:fill="D6E9FF"/></w:rPr><w:t> shaded</w:t></w:r></w:p>' +
+      '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Inter" w:hAnsi="Inter"/></w:rPr><w:t>Inter</w:t></w:r></w:p>'))
+    expect(result.document.content).toEqual([
+      { type: 'paragraph', attrs: { textAlign: 'justify', indent: '48px' }, content: [
+        { type: 'text', text: 'Styled', marks: [{ type: 'strike' }, { type: 'textStyle', attrs: { fontFamily: 'Calibri', fontSize: '14.67px', color: '#00ff00', backgroundColor: '#ffff00' } }] },
+        { type: 'text', text: ' shaded', marks: [{ type: 'textStyle', attrs: { backgroundColor: '#d6e9ff' } }] },
+      ] },
+      { type: 'paragraph', attrs: { textAlign: 'center' }, content: [{ type: 'text', text: 'Inter', marks: [{ type: 'textStyle', attrs: { fontFamily: 'Inter Variable' } }] }] },
+    ])
+    expect(result.issues).toEqual([expect.objectContaining({ feature: 'Document body', effect: 'preserved' })])
+  })
+
+  it('approximates theme colors, theme fonts, odd indents and distributed alignment', () => {
+    const result = readDocx(fixture('<w:p><w:pPr><w:ind w:left="500" w:hanging="200"/><w:jc w:val="distribute"/></w:pPr>' +
+      '<w:r><w:rPr><w:rFonts w:asciiTheme="minorHAnsi"/><w:color w:val="4472C4" w:themeColor="accent1"/></w:rPr><w:t>Theme</w:t></w:r></w:p>'))
+    expect(result.document.content?.[0].content?.[0].marks).toEqual([{ type: 'textStyle', attrs: { color: '#4472c4' } }])
+    expect(result.issues.map(issue => issue.feature)).toEqual(expect.arrayContaining(['Text formatting', 'Paragraph formatting']))
+  })
+
   it('reports run formatting outside the supported subset', () => {
-    const result = readDocx(fixture('<w:p><w:r><w:rPr><w:color w:val="00FF00"/></w:rPr><w:t>Body</w:t></w:r></w:p>'))
+    const result = readDocx(fixture('<w:p><w:r><w:rPr><w:caps/></w:rPr><w:t>Body</w:t></w:r></w:p>'))
     expect(result.issues).toEqual([
       expect.objectContaining({ feature: 'Text formatting', effect: 'approximated', location: expect.any(String) }),
       expect.objectContaining({ feature: 'Document body', effect: 'preserved' }),

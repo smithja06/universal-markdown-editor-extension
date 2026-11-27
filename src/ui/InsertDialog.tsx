@@ -53,6 +53,9 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
   const [rows, setRows] = useState(3)
   const [columns, setColumns] = useState(3)
   const [header, setHeader] = useState(true)
+  // Hovering the size grid follows the pointer until a click or a typed size locks the choice.
+  const [sizeLocked, setSizeLocked] = useState(false)
+  const [hovered, setHovered] = useState<{ rows: number; columns: number }>()
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const picked = useRef<number | undefined>(undefined)
@@ -173,10 +176,19 @@ export function InsertDialog({ request, editor, anchors, close, chooseLocalImage
       submit(event.currentTarget)
     }}>
       {name === 'table' && <>
-        <div className="table-picker" role="group" aria-label="Table size grid">{Array.from({ length: 6 }, (_, row) => Array.from({ length: 8 }, (_, column) =>
-          <button key={row + '-' + column} type="button" tabIndex={-1} className={row < rows && column < columns ? 'selected' : ''} title={(row + 1) + ' rows by ' + (column + 1) + ' columns'} aria-label={(row + 1) + ' rows by ' + (column + 1) + ' columns'} onMouseEnter={() => { setRows(row + 1); setColumns(column + 1) }} onClick={() => { setRows(row + 1); setColumns(column + 1) }} />
+        <div className="table-picker" role="group" aria-label="Table size grid" onMouseLeave={() => setHovered(undefined)}>{Array.from({ length: 6 }, (_, row) => Array.from({ length: 8 }, (_, column) =>
+          <button key={row + '-' + column} type="button" tabIndex={-1}
+            className={[row < rows && column < columns && 'selected', sizeLocked && hovered && row < hovered.rows && column < hovered.columns && 'preview'].filter(Boolean).join(' ')}
+            title={(row + 1) + ' rows by ' + (column + 1) + ' columns'} aria-label={(row + 1) + ' rows by ' + (column + 1) + ' columns'}
+            aria-pressed={sizeLocked && rows === row + 1 && columns === column + 1}
+            onMouseEnter={() => {
+              if (sizeLocked) setHovered({ rows: row + 1, columns: column + 1 })
+              else { setRows(row + 1); setColumns(column + 1) }
+            }}
+            onClick={() => { setRows(row + 1); setColumns(column + 1); setSizeLocked(true); setHovered(undefined) }} />
         ))}</div>
-        <div className="field-row"><label className="field">Rows<input data-dialog-focus type="number" min={1} max={20} value={rows} onChange={event => setBounded(event.target.value, setRows)} /></label><label className="field">Columns<input type="number" min={1} max={20} value={columns} onChange={event => setBounded(event.target.value, setColumns)} /></label></div>
+        <p className="table-picker-status" aria-live="polite">{rows} × {columns} table · {sizeLocked ? 'Click another square to change the size.' : 'Click a square to choose this size.'}</p>
+        <div className="field-row"><label className="field">Rows<input data-dialog-focus type="number" min={1} max={20} value={rows} onChange={event => { setSizeLocked(true); setBounded(event.target.value, setRows) }} /></label><label className="field">Columns<input type="number" min={1} max={20} value={columns} onChange={event => { setSizeLocked(true); setBounded(event.target.value, setColumns) }} /></label></div>
         <label className="check-field"><input type="checkbox" checked={header} onChange={event => setHeader(event.target.checked)} /> Include a header row</label>
       </>}
       {name === 'link' && <>
