@@ -16,8 +16,8 @@ Phase 10.1 is on local branch `phase-10.1-release-qualification`, based on `orig
 - **Results.** lint and both tsc clean; 327/327 unit; 103/103 Chromium; full desktop 89/89 on 1.147.0 in one run; installed VSIX 34/34 on each of 1.100.0, 1.147.0 and 1.148.0; Word 16.0 reads the DOCX formatting fixture correctly. VSIX `6c4cde7f…`.
 - **Acceptance round 3.** Passed with no issues on VSIX `6c4cde7f…`. Personal acceptance testing is complete.
 - **Extension icon.** `9d8ac20` adds the Marketplace icon from Folio's brand mark. Current VSIX `54677dac…`, otherwise identical to the accepted build. The repository is public (anonymous GitHub API check), and the docs no longer contain local user paths.
-- **Version 1.0.0.** Named Folio Universal Editor (`smithja06.folio-universal-editor`). `.github/workflows/release.yml` builds, verifies and releases on a `v*` tag, hosts the source archive as a release asset and publishes with `VSCE_PAT` from the `marketplace` environment. See `docs/release/marketplace.md`.
-- **Open steps (owner).** Merge to `main`, set up the Marketplace token and environment once, then push the `v1.0.0` tag.
+- **Version 1.0.0.** Named Folio Universal Editor (`smithja06.folio-universal-editor`). `.github/workflows/release.yml` builds, verifies and releases on a `v*` tag, hosts the source archive as a release asset and publishes with Trusted Publishing (OIDC) from the `marketplace` environment. See `docs/release/marketplace.md`.
+- **Open steps (owner).** Merge to `main`. Once, create the publisher's Trusted Publishing policy (repository `smithja06/universal-markdown-editor-extension`, workflow `release.yml`, environment `marketplace`) and the GitHub `marketplace` environment. Then push the `v1.0.0` tag. Publishing uses OIDC and needs no personal access token, because Azure DevOps retires global PATs on 2026-12-01.
 
 ## Phase 10 final integration
 
