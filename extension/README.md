@@ -1,60 +1,126 @@
 # Folio Markdown Editor
 
-Folio offers optional VS Code editors for Markdown, plain text, supported Word documents, XLSX workbooks and CSV files, and a read-only PDF viewer. Right-click a supported file in the Explorer or an editor tab and choose **Open with Folio**, run **Folio: Open with Folio** from the Command Palette, or use **Reopen Editor With…**. VS Code's native editors remain the default.
+Folio adds optional, local-first editors to desktop VS Code. You can write Markdown visually or as source, edit plain text, supported Word documents, Excel workbooks and CSV files, view PDFs read-only, and export reviewed PDF copies. VS Code's built-in editors stay the default. You choose Folio per file.
 
-Use **Visual** for rich editing, **Markdown** for source, or **Split** to see both. Folio exposes mode changes, document properties, and heading navigation through the Command Palette and the editor title’s **Folio** submenu. Mode shortcuts are Ctrl+Alt+Shift+V/M/S on Windows and Linux and Cmd+Option+Shift+V/M/S on macOS. The shortcuts apply while Folio is active and an input does not have focus.
+> **Folio is not a complete replacement for Microsoft Word, Microsoft Excel or Adobe Acrobat.** It edits a documented subset of each format. When a file contains something Folio cannot keep, Folio tells you before saving and never changes the original without your confirmation.
 
-## Appearance
+## Supported formats
 
-Folio matches your VS Code color theme by default. To use Folio's own palette, open **Document properties → Appearance** in the Markdown, TXT and DOCX editors, or select the **Appearance** button in the spreadsheet and PDF editors. Then choose **Light** or **Dark** and drag the **Accent color** bar. Your choice applies to every open Folio editor and is kept for later sessions. Choose **Match VS Code** to return to the workbench colors.
+| Format | Folio editor | What you can do |
+| --- | --- | --- |
+| Markdown (`.md`, `.markdown`) | Folio Markdown Editor | Visual, Markdown source and Split editing with VS Code Save and Undo |
+| Plain text (`.txt`) | Folio Plain Text Editor | Literal text editing with find and replace, Save, Undo and Revert |
+| Word (`.docx`) | Folio DOCX Editor | Visual editing of the supported subset, tables, Save and Save As on qualified Windows |
+| Excel (`.xlsx`) | Folio XLSX Editor | Spreadsheet grid with formulas, formatting, themes, Save and Save As on qualified Windows |
+| CSV (`.csv`) | Folio CSV Editor | Spreadsheet grid with literal values. VS Code's text editor stays the default for CSV. |
+| PDF (`.pdf`) | Folio PDF Viewer | Read-only viewing, search and copy. PDF export from Markdown, TXT and DOCX. |
 
-## Plain text and Word documents
+## Open a file with Folio
 
-- **Folio Plain Text Editor** opens `.txt` as literal text with find/replace, native Save, Undo/Redo and Revert. The qualified editing scope is local UTF-8 with optional BOM and uniform LF or CRLF, up to 16 MiB. Folio displays mixed and CR-only line endings read-only because VS Code's own Save can normalize them.
-- **Folio DOCX Editor** opens the supported `.docx` subset for visual editing, table column resizing, find/replace, native Undo/Redo, and recovery. **Download original** retrieves the opened package. **File → Revert to disk** loads the current file. Complex or invalid packages open with an explanation.
-- **Folio XLSX Editor** and **Folio CSV Editor** open workbooks and CSV tables in a spreadsheet grid. They support formula suggestions, workbook themes, formatting, native Undo/Redo, Revert, recovery and reviewed copies. CSV still opens in VS Code's text editor by default, which saves the exact text.
+- Right-click a supported file in the Explorer or an editor tab and choose **Open with Folio**.
+- Or run **Folio: Open with Folio** from the Command Palette.
+- Or use **Reopen Editor With…** and pick the Folio editor.
 
-## Saving DOCX, XLSX and CSV
+To go back, use **Reopen Editor With…** and choose **Text Editor**.
 
-On Windows, for a local file on a fixed NTFS drive, **Save** writes your edits back to the file you opened. Folio checks that the file has not changed since you opened it and locks it while writing, so a newer change from another app is never overwritten. The first Save of each file asks before replacing it with Folio's supported format and lists what the original loses, such as Word page layout or unsupported workbook features. **Save As** creates a new file and never replaces an existing one. If another app has the file open, or the file changed on disk, Folio keeps your draft and tells you why.
+## Markdown: Visual, Markdown and Split
 
-Everywhere else, including macOS, Linux, Remote windows and other drives, Save is not available for these formats. Folio keeps a recoverable draft and the editor explains this. Use **Export DOCX copy…** or the spreadsheet **Export** menu to save a separate file. The status in the editor shows whether your edits are saved to the file or only kept as a recoverable draft.
+Choose **Visual** for rich editing, **Markdown** for source, or **Split** to see both side by side with optional synchronized scrolling. Every edit goes through VS Code's own document, so Save, Undo/Redo, dirty state and hot exit work as usual. Folio keeps unchanged Markdown byte-for-byte, including whitespace, fence styles and line endings.
+
+Visual mode supports headings, lists and checklists, tables with row and column commands and resizing, callouts, Mermaid diagrams, KaTeX math, footnotes, links, wiki links and a live table of contents. Existing workspace raster images render in Visual and Split. Ctrl+click (Cmd+click on macOS) follows a relative Markdown link.
+
+## Plain text
+
+The Folio Plain Text Editor opens `.txt` files as literal text with find and replace, native Save, Undo/Redo and Revert. Editing is qualified for local UTF-8 files, with or without a BOM, with uniform LF or CRLF line endings, up to 16 MiB. Files with mixed or CR-only line endings open read-only, because saving would normalize them.
+
+## Word documents (DOCX)
+
+The Folio DOCX Editor opens the supported subset of `.docx` for visual editing: headings, paragraphs, bold, italic, underline, lists, links, and rectangular tables with column resizing and row and column commands. It also supports find and replace, Undo/Redo, Revert and recovery. Complex packages, or tables with merged or nested cells, open with an explanation instead of being changed. **Download original** retrieves the exact package you opened.
+
+## Spreadsheets (XLSX and CSV)
+
+The Folio XLSX and CSV editors show a spreadsheet grid with:
+
+- A toolbar for number, currency and percent formats, fonts, colors, borders, alignment and wrapping, merges, and conditional formatting.
+- A formula bar with function suggestions and argument hints.
+- Worksheet tabs to add, rename, reorder and delete sheets.
+- Row and column insert and delete. Folio updates formulas that refer to them, including references from other sheets and after a sheet rename.
+- Workbook themes with accent colors.
+- Regional number and date settings.
+- PNG export of a selected range.
+
+**Formulas use the IronCalc engine (0.9.1).** Folio calculates common spreadsheet functions and suggests only functions verified against IronCalc. Formula text and Excel's stored results are kept. When a workbook contains functions IronCalc does not calculate, Folio shows Excel's stored results and tells you which values may be out of date. INDIRECT, OFFSET, external links and structured table references are not rewritten during row or column changes.
+
+CSV cells are literal text, so leading zeros and long identifiers are never converted. Folio detects comma, semicolon, tab and pipe separators and keeps the original dialect when saving.
+
+## Saving DOCX, XLSX and CSV in place
+
+**Native Save requires Windows and a local file on a fixed NTFS drive.** There, **Save** writes your edits back to the file you opened. Folio checks that the file has not changed since you opened it, holds an exclusive lock while writing, reads the result back to verify it, and keeps a save journal so an interrupted save can be finished or undone the next time you open the file. A newer change from another app is never overwritten. The first Save of each file asks before replacing it in Folio's supported format and lists what the original will lose, such as Word page layout, or workbook charts and pivot tables. **Save As** always creates a new file and never replaces an existing one.
+
+Everywhere else, including macOS, Linux, WSL, Remote windows, network drives and removable drives, in-place Save is not available for these formats. Folio keeps a recoverable draft, and the editor explains why. Use **Export DOCX copy…** or the spreadsheet **Export** menu to save a separate file. CSV files still save exactly as text when you edit them in VS Code's text editor.
+
+## Original files and recovery
+
+- Folio never writes to a file just by opening or viewing it.
+- If another app changes or locks the file, Folio keeps your draft and tells you why. It does not overwrite the other change.
+- Markdown and TXT edits live in VS Code's document. If an edit is interrupted or conflicts, **View pending Markdown** and **Copy pending draft** let you inspect and reconcile it.
+- For DOCX, reopen the file and use **View pending DOCX → Restore draft as an edit**. Unsaved DOCX and workbook edits are also part of VS Code's hot exit backups and come back as an undoable edit when VS Code restores the editor.
+- No save is immune to power loss or hardware failure. The save journal lets Folio recognize and finish or reverse an interrupted save.
 
 ## PDF viewing and export
 
-- **Folio PDF Viewer** opens local `.pdf` files read-only with page navigation, zoom and fit modes, embedded-text find with highlights, and text selection and copy. Pages without embedded text are labelled, and Folio does not perform OCR. Scripts, links, form fields and attachments in the PDF are inert. Password-protected PDFs open with an explanation. If the file changes on disk, choose **Reload from disk**. Folio never writes PDFs you view.
-- In the Markdown, TXT and DOCX editors, use **Export → Export PDF…** to choose the page size, orientation, margins and file name, review fidelity changes and a validated preview, then select **Save PDF copy…**. Folio saves only to a new local `.pdf` file and never replaces an existing one. If the document changes after the preview, export again from the current revision. Characters without a bundled font, such as CJK text and emoji, print as Unicode code points like `[U+4E2D]`. Exported PDFs include a document language, title and heading bookmarks, but they are not tagged and are not guaranteed to meet PDF/UA accessibility requirements.
+- The **Folio PDF Viewer** opens local PDFs read-only, with page navigation, zoom and fit modes, embedded-text search with highlights, and text selection and copy. Scripts, links, form fields and attachments stay inert. Password-protected PDFs open with an explanation. Folio does not perform OCR and never writes a PDF you view.
+- In the Markdown, TXT and DOCX editors, choose **Export → Export PDF…**. Pick the page size, orientation, margins and file name, review the listed fidelity changes and a validated preview, then choose **Save PDF copy…**. Folio saves only to a new file.
+- Exported PDFs include a document language, a title and heading bookmarks. **They are not tagged and are not guaranteed to meet PDF/UA accessibility requirements.** Characters without a bundled font, such as CJK text and emoji, print as code points like `[U+4E2D]`.
 
-## Install a VSIX
+## Appearance
 
-This package requires desktop VS Code 1.100 or later. Release-candidate testing uses desktop VS Code 1.100, 1.147 and 1.148 on Windows. Other platforms are not yet qualified. See the [platform qualification record](https://github.com/smithja06/universal-markdown-editor-extension/blob/main/docs/extension-qualification.md) for the tested build, filesystem, and coverage.
+Folio follows your VS Code color theme by default, including high contrast themes. To use Folio's own palette, open **Document properties → Appearance** in the Markdown, TXT and DOCX editors, or the **Appearance** button in the spreadsheet and PDF editors. Then choose **Light** or **Dark** and an accent color. The choice applies to every Folio editor and is kept between sessions.
 
-In the Command Palette, run **Extensions: Install from VSIX…** and select `folio.vsix`. Or run `code --install-extension path/to/folio.vsix`. Folio requires a trusted workspace. If the workspace is in Restricted Mode, continue using the native Text Editor or grant trust through VS Code when you trust that workspace.
+## Keyboard shortcuts
 
-## Workspace images and links
+| Action | Windows and Linux | macOS |
+| --- | --- | --- |
+| Visual mode | Ctrl+Alt+Shift+V | Cmd+Option+Shift+V |
+| Markdown source mode | Ctrl+Alt+Shift+M | Cmd+Option+Shift+M |
+| Split mode | Ctrl+Alt+Shift+S | Cmd+Option+Shift+S |
+| Save | Ctrl+S | Cmd+S |
+| Undo, Redo | Ctrl+Z, Ctrl+Y | Cmd+Z, Cmd+Shift+Z |
+| Find | Ctrl+F | Cmd+F |
 
-In Visual or the Visual pane of Split, open **Insert content → Image or image caption**. In Markdown or the Source pane of Split, open **Insert image**. Select **Browse workspace images**, choose an existing raster image in the document’s workspace folder, and add alternative text. Select **Insert** or press Enter. The generated reference is relative to the Markdown document.
+The mode shortcuts apply in the Markdown editor when no input has focus. Folio's mode, properties and heading commands are also in the Command Palette under **Folio**.
 
-- Browsing requires a local Windows workspace on a fixed NTFS drive. macOS, Linux, VS Code Remote, non-file providers, and other Windows volume types display a message when you try to browse. You can enter a relative image reference manually.
-- The picker accepts PNG, JPEG, GIF, WebP, AVIF, BMP, and ICO up to 5 MiB. Folio checks the selection again when you insert it. If the document or selection changed, reopen **Insert image** at the intended location.
-- Folio reads existing images and writes the reference as Markdown. Automatic uploads are disabled. If you move or replace the image, the preview can change or break.
-- Existing workspace raster images render in Visual and Split. Ctrl+click or Cmd+click follows a relative workspace Markdown link. Provider behavior varies. Network images are blocked in the webview.
+## Privacy
 
-## Pending edits and privacy
+Folio has no telemetry and makes no network requests for your documents. Documents are processed locally in VS Code. Network images are blocked in the editor. Recovery drafts and save journals are stored locally in VS Code's workspace and extension storage, and can contain document content. VS Code's own telemetry follows your VS Code settings.
 
-If an interrupted edit or a conflict leaves a pending draft, reopen a Markdown file in the same VS Code workspace. **View pending Markdown** and **Copy pending draft** let you inspect and reconcile the change. Folio keeps the original file URI after a move or deletion and leaves reconciliation to you. A native Save writes edits that VS Code has received. In-app Save waits for Folio’s pending changes to settle first.
+## Supported environments
 
-Folio has no extension telemetry. The extension processes Markdown and image previews in VS Code and stores recovery copies in the webview’s local storage and VS Code’s workspace storage. Pending drafts can contain document text. A crash before either copy is stored, storage failures, or removal of profile data can limit recovery. VS Code manages its own telemetry settings.
+| Environment | Status |
+| --- | --- |
+| Desktop VS Code 1.100.0, 1.147.0 and 1.148.0 on Windows 11 x64 | **Qualified.** All editors, plus native Save on local fixed NTFS drives. |
+| Other Windows drives (network, removable, non-NTFS) | Editors work. DOCX, XLSX and CSV grid edits use recoverable drafts and exported copies. |
+| macOS, Linux, WSL, Remote and Codespaces | **Not qualified.** These have not been tested for this release. |
+| VS Code for the Web | Not supported |
 
-TXT offers the same manual review and copy of pending text. For DOCX, reopen the document and use **View pending DOCX → Restore draft as an edit** when the package matches. After an extension-host interruption, the old custom-editor tab may need to be closed first. VS Code hot exit can restore a DOCX backup that includes the original package. These backups and journals are local and can contain document content.
+Folio requires a trusted workspace. In Restricted Mode, keep using VS Code's text editor.
 
-## Build from source
+## Known limitations
 
-Use Node 22.13+ on the 22.x line or Node 24+. Run these commands from the repository root.
+- DOCX: page layout, headers and footers, comments, tracked changes, text boxes, fields, merged or nested tables, and other unsupported content are listed before the first Save and are not kept.
+- XLSX: charts, pivot tables, defined names, structured table metadata, external connections and other unsupported workbook parts are listed before the first Save and are not kept. Macros are rejected. Theme colors are stored as fixed colors. Files are limited to 16 MiB, 64 sheets and 150,000 cells.
+- PDF export is untagged, has no OCR, and prints characters without a bundled font as code points.
+- Image insertion references existing workspace images only. It is available on Windows NTFS workspaces only, and Folio never uploads or copies images.
+- Native Save for DOCX and XLSX is limited to Windows local fixed NTFS drives.
+
+## Install
+
+This release candidate is distributed as a VSIX file. In VS Code, run **Extensions: Install from VSIX…** and select `folio.vsix`, or run:
 
 ```sh
-npm ci
-npm run package:extension
+code --install-extension path/to/folio.vsix
 ```
 
-Install the resulting `extension/dist/folio.vsix`. The build uses the lockfile. The package includes Folio's MIT license, `EPL-1.0.txt`, `EPL-2.0.txt`, and third-party notices, including `dist/PDF_THIRD_PARTY_NOTICES.txt` for pdf.js, pdfmake and the embedded PDF fonts. The top-level notices link to the upstream ELK, EMF GWT, and Xbase sources. `npm run source:companion` builds the verified source archive for the Eclipse-licensed components. This candidate is for local validation. A public release will publish that archive beside the package. Run `npm run test:extension` for the isolated desktop tests. Set `FOLIO_VSCODE_EXECUTABLE` to the installed VS Code application binary if discovery fails.
+## License
+
+Folio is licensed under the MIT license. Bundled third-party components keep their own licenses. See `THIRD_PARTY_NOTICES.md`, `EPL-1.0.txt`, `EPL-2.0.txt` and the notices in `dist/`. These cover Mermaid's Eclipse Layout Kernel runtime, pdf.js, pdfmake and its fonts, the IronCalc engine, the DOCX and workbook codecs, and the Unicode data they include.

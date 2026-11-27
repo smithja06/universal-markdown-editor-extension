@@ -66,6 +66,10 @@ The PDF viewer bundles pdf.js (pdfjs-dist 6.5.438, Apache 2.0, Copyright Mozilla
 
 Folio uses the MIT option for IronCalc XLSX 0.9.1. The complete engine notice, published Rust dependency notices and Unicode CLDR license accompany the WASM in dist/SPREADSHEET_THIRD_PARTY_NOTICES.txt.
 
+## DOCX and workbook codecs
+
+The DOCX and spreadsheet codecs in `dist/docx-codec.cjs` and `dist/spreadsheet-codec.cjs` bundle fflate 0.8.3 (MIT) for ZIP packages and the saxes 6.0.0 (ISC) XML parser with its xmlchars 2.2.0 (MIT) dependency. Their license texts are in dist/DOCX_THIRD_PARTY_NOTICES.txt.
+
 ## DOMPurify
 
 DOMPurify 3.4.18 is dual-licensed. This package uses it under Apache 2.0. Copyright (c) Cure53 and other contributors. The generated notices include the Apache 2.0 text. Folio bundles and minifies the published module. [Upstream license](https://github.com/cure53/DOMPurify/blob/37abc335c6a0aad2ac4f9dce6bd256d40c17acc4/LICENSE)
