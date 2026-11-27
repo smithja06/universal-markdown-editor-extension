@@ -80,7 +80,7 @@ function legibleAccent(color: AccentColor, background: AccentColor, toward: Acce
 
 export function accentTheme(color: AccentColor, theme: Theme) {
   const dark = theme === 'dark'
-  const background = dark ? { red: 28, green: 36, blue: 32 } : white
+  const background = dark ? { red: 31, green: 31, blue: 31 } : white
   const surface = mix(background, color, dark ? 0.22 : 0.12)
   const tone = legibleAccent(color, surface, dark ? white : black)
   const whiteText = contrast(white, color) >= contrast(black, color)

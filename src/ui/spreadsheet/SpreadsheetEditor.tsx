@@ -209,6 +209,31 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
   const formulaDisabled = !allowedCalculation || !formulaCount
   const result = !formulaDisabled && calculation?.workbook === workbook ? calculation.result : undefined
   const sheetCalculation = result?.[sheet.id]
+  const calculationPending = !formulaDisabled && !result && !(calculation?.workbook === workbook && calculation.error)
+  const settled = useRef<{ workbook: Workbook; result: Calculation }>(undefined)
+  /**
+   * While a recalculation runs, the grid keeps the previous result of each formula whose text is unchanged at the same
+   * address. Exports and search use only the current result.
+   */
+  const shownCalculation = useMemo(() => {
+    if (sheetCalculation || !calculationPending) return sheetCalculation
+    const previous = settled.current
+    const before = previous?.workbook.sheets.find(item => item.id === sheet.id)
+    const values = previous?.result[sheet.id]
+    if (!before || !values) return
+    const kept: Record<string, CellValue> = {}
+    for (const [address, value] of Object.entries(values)) {
+      const now = sheet.cells[address]
+      const then = before.cells[address]
+      if (now?.kind === 'formula' && then?.kind === 'formula' && now.value === then.value) kept[address] = value
+    }
+    return kept
+  }, [calculationPending, sheet, sheetCalculation])
+  // Any worksheet counts, since a row insert on one sheet can rewrite formulas on another.
+  const uncalculated = useMemo(() => format === 'xlsx' && workbook.sheets.some(item => {
+    const values = item.id === sheet.id ? shownCalculation : result?.[item.id]
+    return Object.entries(item.cells).some(([address, cell]) => cell.kind === 'formula' && (values?.[address] ?? cell.cached) === undefined)
+  }), [format, result, sheet.id, shownCalculation, workbook])
   const cancelCalculation = useRef<AbortController>(undefined)
   const bounds = useMemo(() => bounding(sheet), [sheet])
   const disabled = readOnly
@@ -237,7 +262,9 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     const timer = window.setTimeout(() => {
       setCalculation({ workbook, busy: true })
       void import('../../document/formats/spreadsheet/workerClient').then(module => module.calculateWorkbook(workbook, controller.signal)).then(result => {
-        if (!controller.signal.aborted) setCalculation({ workbook, result })
+        if (controller.signal.aborted) return
+        settled.current = { workbook, result }
+        setCalculation({ workbook, result })
       }).catch(error => {
         if (!controller.signal.aborted) setCalculation({ workbook, error: error instanceof Error ? error.message : 'Calculation is unavailable.' })
       })
@@ -448,8 +475,17 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
       if (raw === cellInput(sheet.cells[address])) return true
       const next = enterCell(raw, format)
       changeCells(normalizeRange(point, point), previous => valueWithoutFormatting(previous, next), { csvInputWidth: () => 1 })
+      // Typing a formula asks for its result, so it turns on local calculation for an imported workbook.
+      if (next?.kind === 'formula' && format === 'xlsx' && !allowedCalculation) {
+        enableCalculation()
+        setNotice('Local calculation is on for this workbook because you entered a formula.')
+      }
       return true
     } catch (error) { report(error); return false }
+  }
+  function enableCalculation() {
+    setAllowedCalculation(true)
+    setCalculationRequest(value => value + 1)
   }
   function beginEditing(point = active, seed?: string) {
     if (readOnly) return
@@ -574,8 +610,25 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
     setSelection({ anchor: active, end: { row: target.endRow, col: target.endCol } })
   }
 
+  /**
+   * Ctrl+B, Ctrl+I and Ctrl+U toggle the style of the selected cells from the grid, the cell editor and the formula bar.
+   * Cells hold one style, so a partial text selection formats the whole cell. The key never reaches VS Code,
+   * where Ctrl+B would toggle the side bar.
+   */
+  function formatShortcut(event: KeyboardEvent<HTMLElement>) {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.nativeEvent.isComposing) return false
+    const key = event.key.toLowerCase()
+    const property = key === 'b' ? 'bold' : key === 'i' ? 'italic' : key === 'u' ? 'underline' : undefined
+    if (!property) return false
+    event.preventDefault()
+    event.stopPropagation()
+    stylePatch({ [property]: !style[property] })
+    return true
+  }
+
   function key(event: KeyboardEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest('input, textarea')) return
+    if (formatShortcut(event)) return
     const command = event.ctrlKey || event.metaKey
     if (command) {
       switch (event.key.toLowerCase()) {
@@ -584,9 +637,6 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
         case 'f': event.preventDefault(); event.stopPropagation(); setDialog('find'); return
         case 's': if (onSave) { event.preventDefault(); event.stopPropagation(); onSave() } return
         case 'a': event.preventDefault(); setSelection({ anchor: initialPoint, end: bounds }); return
-        case 'b': event.preventDefault(); stylePatch({ bold: !style.bold }); return
-        case 'i': event.preventDefault(); stylePatch({ italic: !style.italic }); return
-        case 'u': event.preventDefault(); stylePatch({ underline: !style.underline }); return
       }
     }
     if (event.key.startsWith('Arrow')) {
@@ -799,6 +849,12 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
       border={setBorderMode} dialog={setDialog} merge={mergeRange} unmerge={unmerge} gridLines={sheet.gridLines}
       toggleGrid={() => replaceSheet({ ...sheet, gridLines: !sheet.gridLines })} find={() => setDialog('find')}
       rangePng={() => openExport('png')} currency={currencyFormat(workbook.locale)} theme={theme} themes={format === 'xlsx'} />
+    {uncalculated && !calculationPending && (!allowedCalculation || calculationState?.error) &&
+      <div className="folio-sheet-csv-banner folio-sheet-calculation-banner" role="status"><CircleAlert size={15} />
+        <span>{allowedCalculation ? 'Some formulas are not calculated. ' + calculationState?.error
+          : 'Some formulas are not calculated. Folio shows the results stored in the file until you enable calculation.'}</span>
+        <button type="button" className="secondary-button" onClick={enableCalculation}>{allowedCalculation ? 'Recalculate' : 'Enable calculation'}</button>
+      </div>}
     {workbook.csv?.ambiguous && <div className="folio-sheet-csv-banner" role="status"><CircleAlert size={15} />
       <span>Check the detected delimiter against the columns below.</span>
       {onCsvDialect && <button type="button" className="secondary-button" onClick={() => setDialog('dialect')}>Choose delimiter</button>}
@@ -823,7 +879,7 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
           trackAssist('bar', event.target)
         }} onBlur={commitFormula} onSelect={event => { if (formulaDraft) trackAssist('bar', event.currentTarget) }}
         onKeyDown={event => {
-          if (assistKey('bar', event)) return
+          if (formatShortcut(event) || assistKey('bar', event)) return
           if (event.key === 'Enter' && !event.altKey) { event.preventDefault(); commitFormula(); focus() }
           if (event.key === 'Escape') { event.preventDefault(); setFormulaDraft(undefined); focus() }
         }} />
@@ -833,13 +889,13 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
         <FormulaAssistPanel id={assistId} state={assistState} index={assist.index} open={assistOpen} pick={index => pickSuggestion(assist.field, index)} />}
     </div>
     <div className="folio-sheet-grid-frame">
-      <SpreadsheetGrid sheet={sheet} locale={workbook.locale} date1904={workbook.date1904} calculated={sheetCalculation}
+      <SpreadsheetGrid sheet={sheet} locale={workbook.locale} date1904={workbook.date1904} calculated={shownCalculation} calculating={calculationPending}
         range={range} active={active} scrollRef={scroll} editing={editing} readOnly={readOnly} header={workbook.csv?.header}
         onSelect={select} onSelectAxis={selectAxis} onBeginEdit={beginEditing}
         onEdit={value => setEditing(previous => previous && { ...previous, value: applyEditorText(previous.value, value) })}
         onCommit={direction => { setAssist(undefined); commitEditing(direction) }} onCancel={() => { setAssist(undefined); setEditing(undefined); focus() }} onKey={key}
         onCopy={copy} onPaste={paste} onResize={resizeAxis} onAutoFit={autoFit} onContext={openContext}
-        onEditorKey={event => assistKey('cell', event)} onEditorCursor={field => trackAssist('cell', field)} editorCursor={cellCursor}
+        onEditorKey={event => formatShortcut(event) || assistKey('cell', event)} onEditorCursor={field => trackAssist('cell', field)} editorCursor={cellCursor}
         editorAssist={format === 'xlsx' ? { list: assistId, active: assist?.field === 'cell' ? assistActive : undefined,
           expanded: assist?.field === 'cell' && assistOpen } : undefined} />
       {notice && <div role="status" className="folio-sheet-toast"><span>{notice}</span><IconButton label="Dismiss message" onClick={() => setNotice('')}><X size={14} /></IconButton></div>}
@@ -933,7 +989,7 @@ export function SpreadsheetEditor({ workbook, format, title, onChange, readOnly 
             cancelCalculation.current?.abort(); setCalculation({ workbook, error: 'Calculation canceled.' })
           }}><LoaderCircle size={14} className="spinner" /> Cancel calculation</button>}
           <button className="secondary-button" type="button" onClick={() => { setAllowedCalculation(false); dismiss() }}>Use stored results</button>
-          <button className="primary-button" type="button" onClick={() => { setAllowedCalculation(true); setCalculationRequest(value => value + 1); dismiss() }}>
+          <button className="primary-button" type="button" onClick={() => { enableCalculation(); dismiss() }}>
             {allowedCalculation ? 'Recalculate' : 'Enable local calculation'}
           </button>
         </div>

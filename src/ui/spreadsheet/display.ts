@@ -101,10 +101,13 @@ function formatDate(value: Date, locale: string, options: Intl.DateTimeFormatOpt
   return formatter.format(value)
 }
 
-export function displayCell(cell: Cell | undefined, locale: string, date1904: boolean, calculated?: CellValue): string {
+/** Shown for a formula that has neither a calculated nor a stored result. */
+export const notCalculated = 'Not calculated'
+
+export function displayCell(cell: Cell | undefined, locale: string, date1904: boolean, calculated?: CellValue, missing = notCalculated): string {
   if (!cell) return ''
   const value = cell.kind === 'formula' ? calculated ?? cell.cached : cell.value
-  if (value === undefined) return '—'
+  if (value === undefined) return missing
   if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
   if (typeof value !== 'number') return value
   const specifiedFormat = cell.style?.numberFormat

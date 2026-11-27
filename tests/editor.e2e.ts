@@ -327,7 +327,7 @@ test('HTML export preserves rich content and blocks active markup', async ({ pag
   const svg = decodeURIComponent((await output.getByRole('img', { name: /Mermaid diagram/ }).getAttribute('src'))!.split(',')[1])
   expect(svg).not.toMatch(/javascript:|<script|onload=/i)
   expect(await output.evaluate(() => document.documentElement.scrollWidth)).toBe(420)
-  await expect(output.locator('body')).toHaveCSS('background-color', 'rgb(32, 40, 35)')
+  await expect(output.locator('body')).toHaveCSS('background-color', 'rgb(31, 31, 31)')
   await output.emulateMedia({ media: 'print' })
   await expect(output.locator('body')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
 })
@@ -406,6 +406,12 @@ test('a mixed Markdown file exports cleanly after source and toolbar edits and r
   await input.setInputFiles({ name: 'Mixed.md', mimeType: 'text/markdown', buffer: Buffer.from(fixture) })
   const visual = visualEditor(page)
   await expect(visual.getByRole('heading', { name: 'Six' })).toBeVisible()
+  // Emphasis must render with Inter's real italic face, which is bundled rather than synthesized.
+  await expect(visual.locator('em', { hasText: 'italic' })).toHaveCSS('font-style', 'italic')
+  await expect.poll(() => page.evaluate(async () => {
+    await document.fonts.load('italic 400 16px "Inter Variable"', 'italic')
+    return [...document.fonts].some(face => face.family.replace(/"/g, '') === 'Inter Variable' && face.style === 'italic' && face.status === 'loaded')
+  })).toBe(true)
   await page.getByRole('button', { name: 'Markdown Source', exact: true }).click()
   await expect(sourceEditor(page)).toBeFocused()
   await page.keyboard.press('ControlOrMeta+a')

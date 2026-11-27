@@ -277,6 +277,46 @@ describe('Markdown source preservation', () => {
     editor.destroy()
   })
 
+  it('separates only the adjacent lists that would merge and leaves other blocks clean', () => {
+    const { editor, session } = open('Intro\n')
+    const paragraph = (text: string) => ({ type: 'paragraph', content: [{ type: 'text', text }] })
+    editor.commands.setContent({ type: 'doc', content: [
+      paragraph('Heading text'),
+      { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: true }, content: [paragraph('Done')] }, { type: 'taskItem', attrs: { checked: false }, content: [paragraph('Open')] }] },
+      { type: 'bulletList', content: [{ type: 'listItem', content: [paragraph('A note')] }] },
+      paragraph('Next section'),
+      { type: 'bulletList', content: [{ type: 'listItem', content: [paragraph('Plain item')] }] },
+    ] })
+    const { source, protectedBoundaries } = writeMarkdown(session, editor.state.doc)
+    expect(protectedBoundaries).toBe(true)
+    expect(source.match(/<!--folio:boundary-->/g)).toHaveLength(1)
+    expect(source).toMatch(/- \[ \] Open\n\n<!--folio:boundary-->\n\n- A note\n\nNext section\n\n- Plain item\n$/)
+    expect(source.startsWith('Heading text\n\n- [x] Done\n- [ ] Open\n')).toBe(true)
+    const reopened = open(source).editor
+    expect(Array.from({ length: reopened.state.doc.childCount }, (_, index) => reopened.state.doc.child(index).type.name))
+      .toEqual(['paragraph', 'taskList', 'bulletList', 'paragraph', 'bulletList'])
+    editor.destroy()
+    reopened.destroy()
+  })
+
+  it('writes new lists tight unless an item holds several paragraphs', () => {
+    const { editor, session } = open('Intro\n')
+    const paragraph = (text: string) => ({ type: 'paragraph', content: [{ type: 'text', text }] })
+    const item = (...texts: string[]) => ({ type: 'listItem', content: texts.map(paragraph) })
+    editor.commands.setContent({ type: 'doc', content: [
+      { type: 'bulletList', content: [item('One'), { type: 'listItem', content: [paragraph('Two'), { type: 'bulletList', content: [item('Nested')] }] }] },
+      paragraph('Between'),
+      { type: 'orderedList', attrs: { start: 1 }, content: [item('First', 'Second paragraph'), item('Next')] },
+    ] })
+    const { source } = writeMarkdown(session, editor.state.doc)
+    expect(source).toBe('- One\n- Two\n  - Nested\n\nBetween\n\n1. First\n\n   Second paragraph\n\n2. Next\n')
+    const reopened = open(source).editor
+    expect(reopened.state.doc.child(2).child(0).childCount).toBe(2)
+    expect(reopened.state.doc.child(0).child(1).child(1).type.name).toBe('bulletList')
+    editor.destroy()
+    reopened.destroy()
+  })
+
   it('edits portable blocks and reopens rich formatting and special blocks', () => {
     const { editor, session } = open('A styled line\n\n- [x] Completed\n  - Nested\n\n| A | B |\n| :- | -: |\n| 1 | 2 |\n\n> [!TIP]\n> Try this\n\n```mermaid\nflowchart TD\n  A --> B\n```\n\n$$\nx^2\n$$\n\n```js special\nlet x = 1\n```\n')
     editor.chain().setTextSelection({ from: 1, to: 9 }).setColor('#16724f').toggleUnderline().setTextAlign('right').run()

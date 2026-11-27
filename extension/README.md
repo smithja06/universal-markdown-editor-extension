@@ -49,7 +49,7 @@ The Folio XLSX and CSV editors show a spreadsheet grid with:
 - Regional number and date settings.
 - PNG export of a selected range.
 
-**Formulas use the IronCalc engine (0.9.1).** Folio calculates common spreadsheet functions and suggests only functions verified against IronCalc. Formula text and Excel's stored results are kept. When a workbook contains functions IronCalc does not calculate, Folio shows Excel's stored results and tells you which values may be out of date. INDIRECT, OFFSET, external links and structured table references are not rewritten during row or column changes.
+**Formulas use the IronCalc engine (0.9.1).** Folio calculates common spreadsheet functions and suggests only functions verified against IronCalc. Formula text and Excel's stored results are kept. An existing workbook opens with its stored results, and calculation starts when you choose **Enable calculation** or type a formula. A formula with no result shows **Not calculated**. When a workbook contains functions IronCalc does not calculate, Folio shows Excel's stored results and tells you which values may be out of date. INDIRECT, OFFSET, external links and structured table references are not rewritten during row or column changes.
 
 CSV cells are literal text, so leading zeros and long identifiers are never converted. Folio detects comma, semicolon, tab and pipe separators and keeps the original dialect when saving.
 
@@ -75,7 +75,7 @@ Everywhere else, including macOS, Linux, WSL, Remote windows, network drives and
 
 ## Appearance
 
-Folio follows your VS Code color theme by default, including high contrast themes. To use Folio's own palette, open **Document properties → Appearance** in the Markdown, TXT and DOCX editors, or the **Appearance** button in the spreadsheet and PDF editors. Then choose **Light** or **Dark** and an accent color. The choice applies to every Folio editor and is kept between sessions.
+Folio follows your VS Code color theme by default, including high contrast themes. To use Folio's own palette, open **Document properties → Appearance** in the Markdown, TXT and DOCX editors, or the **Appearance** button in the spreadsheet and PDF editors. Then choose **Light** or **Dark**, a neutral palette, and an accent color. The choice applies to every Folio editor and is kept between sessions.
 
 ## Keyboard shortcuts
 
@@ -87,6 +87,7 @@ Folio follows your VS Code color theme by default, including high contrast theme
 | Save | Ctrl+S | Cmd+S |
 | Undo, Redo | Ctrl+Z, Ctrl+Y | Cmd+Z, Cmd+Shift+Z |
 | Find | Ctrl+F | Cmd+F |
+| Bold, italic, underline (Markdown, DOCX and spreadsheet cells) | Ctrl+B, Ctrl+I, Ctrl+U | Cmd+B, Cmd+I, Cmd+U |
 
 The mode shortcuts apply in the Markdown editor when no input has focus. Folio's mode, properties and heading commands are also in the Command Palette under **Folio**.
 

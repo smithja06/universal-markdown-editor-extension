@@ -103,6 +103,111 @@ test('XLSX opens as an opt-in editor and loads multiple worksheets and cached fo
   await expect(frame.getByRole('button', { name: 'Stored results' })).toBeVisible()
 })
 
+test('XLSX Ctrl+B, Ctrl+I and Ctrl+U format cells from the grid, cell editor and formula bar without reaching VS Code', async ({ desktop }) => {
+  const { page, workspace, command } = desktop
+  const workbook = createWorkbook('xlsx')
+  workbook.sheets[0].cells.A1 = { kind: 'text', value: 'Grid' }
+  workbook.sheets[0].cells.A2 = { kind: 'text', value: 'Editor' }
+  workbook.sheets[0].cells.A3 = { kind: 'text', value: 'Bar' }
+  const wasm = new Uint8Array(await readFile('node_modules/@ironcalc/wasm-xlsx/wasm_bg.wasm'))
+  const original = processSpreadsheet({ operation: 'write', workbook }, wasm)
+  if (original.operation !== 'write') throw new Error(original.message)
+  await writeFile(join(workspace, 'shortcuts.xlsx'), original.bytes)
+  await command('open', { file: 'shortcuts.xlsx', editor: 'folio.xlsx' })
+  const frame = folio(page)
+  const sidebar = page.locator('.part.sidebar')
+  const sidebarVisible = await sidebar.isVisible()
+  const cell = (address: string) => frame.getByRole('gridcell', { name: new RegExp(`^${address} `) })
+
+  await cell('A1').click()
+  await page.keyboard.press('ControlOrMeta+b')
+  await expect(cell('A1')).toHaveCSS('font-weight', '700')
+  expect(await sidebar.isVisible()).toBe(sidebarVisible)
+
+  await cell('A2').dblclick()
+  const editor = frame.getByRole('textbox', { name: 'Edit A2', exact: true })
+  await editor.press('ControlOrMeta+a')
+  await editor.press('ControlOrMeta+b')
+  await editor.press('ControlOrMeta+i')
+  await expect(editor).toBeFocused()
+  await expect(editor).toHaveValue('Editor')
+  await editor.press('End')
+  await editor.pressSequentially(' typed')
+  await editor.press('Enter')
+  await expect(cell('A2')).toHaveAccessibleName('A2 Editor typed')
+  await expect(cell('A2')).toHaveCSS('font-weight', '700')
+  await expect(cell('A2')).toHaveCSS('font-style', 'italic')
+  expect(await sidebar.isVisible()).toBe(sidebarVisible)
+
+  await cell('A3').click()
+  const bar = frame.getByRole('textbox', { name: 'Formula bar' })
+  await bar.click()
+  await bar.press('ControlOrMeta+u')
+  await expect(cell('A3')).toHaveCSS('text-decoration-line', 'underline')
+  await bar.press('ControlOrMeta+u')
+  await expect(cell('A3')).not.toHaveCSS('text-decoration-line', 'underline')
+  expect(await sidebar.isVisible()).toBe(sidebarVisible)
+  await expect.poll(() => command('activeTabDirty')).toBe(true)
+})
+
+test('XLSX calculates a typed formula and offers calculation for formulas without stored results', async ({ desktop }) => {
+  const { page, workspace, command } = desktop
+  const workbook = createWorkbook('xlsx')
+  workbook.sheets[0].cells.A1 = { kind: 'formula', value: '=2+3' }
+  const wasm = new Uint8Array(await readFile('node_modules/@ironcalc/wasm-xlsx/wasm_bg.wasm'))
+  const original = processSpreadsheet({ operation: 'write', workbook }, wasm)
+  if (original.operation !== 'write') throw new Error(original.message)
+  const file = 'uncalculated.xlsx'
+  await writeFile(join(workspace, file), original.bytes)
+  await command('open', { file, editor: 'folio.xlsx' })
+  const frame = folio(page)
+  const banner = frame.getByRole('status').filter({ hasText: 'Some formulas are not calculated.' })
+  await expect(frame.getByRole('gridcell', { name: 'A1 Not calculated' })).toBeVisible()
+  await expect(banner).toBeVisible()
+  await editCell(page, 'C1', '=SUM(1,2,3)')
+  await expect(frame.getByRole('gridcell', { name: 'C1 6' })).toBeVisible()
+  await expect(frame.getByRole('gridcell', { name: 'A1 5' })).toBeVisible()
+  await expect(frame.getByText('Local calculation is on for this workbook because you entered a formula.')).toBeVisible()
+  await expect(banner).toHaveCount(0)
+  await expect(frame.getByRole('button', { name: 'Calculated' })).toBeVisible()
+
+  await command('revert')
+  await expect(frame.getByRole('gridcell', { name: 'A1 Not calculated' })).toBeVisible()
+  await banner.getByRole('button', { name: 'Enable calculation' }).click()
+  await expect(frame.getByRole('gridcell', { name: 'A1 5' })).toBeVisible()
+  await expect(banner).toHaveCount(0)
+})
+
+test('XLSX offers calculation when a row insert rewrites a stored formula on another worksheet', async ({ desktop }) => {
+  const { page, workspace, command } = desktop
+  const workbook = createWorkbook('xlsx')
+  workbook.sheets[0].name = 'Summary'
+  workbook.sheets[0].cells.A1 = { kind: 'formula', value: '=SUM(Data!A1:A2)', cached: 7 }
+  const data = createSheet('Data')
+  data.cells.A1 = { kind: 'number', value: 3 }
+  data.cells.A2 = { kind: 'number', value: 4 }
+  workbook.sheets.push(data)
+  const wasm = new Uint8Array(await readFile('node_modules/@ironcalc/wasm-xlsx/wasm_bg.wasm'))
+  const original = processSpreadsheet({ operation: 'write', workbook }, wasm)
+  if (original.operation !== 'write') throw new Error(original.message)
+  await writeFile(join(workspace, 'linked.xlsx'), original.bytes)
+  await command('open', { file: 'linked.xlsx', editor: 'folio.xlsx' })
+  const frame = folio(page)
+  const banner = frame.getByRole('status').filter({ hasText: 'Some formulas are not calculated.' })
+  await expect(frame.getByRole('gridcell', { name: 'A1 7' })).toBeVisible()
+  await expect(banner).toHaveCount(0)
+  await frame.getByRole('tab', { name: 'Data', exact: true }).click()
+  await frame.getByRole('rowheader').filter({ hasText: /^2$/ }).click({ button: 'right' })
+  await frame.getByRole('menuitem', { name: 'Insert row above' }).click()
+  await expect(banner).toBeVisible()
+  await banner.getByRole('button', { name: 'Enable calculation' }).click()
+  await expect(banner).toHaveCount(0)
+  await frame.getByRole('tab', { name: 'Summary', exact: true }).click()
+  await expect(frame.getByRole('gridcell', { name: 'A1 7' })).toBeVisible()
+  await frame.getByRole('gridcell', { name: 'A1 7' }).click()
+  await expect(frame.getByRole('textbox', { name: 'Formula bar' })).toHaveValue('=SUM(Data!A1:A3)')
+})
+
 test.describe('workbook hot exit', () => {
   test.use({ hotExit: 'onExitAndWindowClose' })
 
@@ -242,7 +347,7 @@ test('Open with Folio opens XLSX and shares the chosen theme and accent with oth
   await popover.getByRole('combobox', { name: 'Theme' }).selectOption('dark')
   await expect(sheetApp).toHaveAttribute('data-theme', 'dark')
   await expect(sheetApp).not.toHaveAttribute('data-host-colors')
-  await expect(sheetApp).toHaveCSS('background-color', 'rgb(28, 36, 32)')
+  await expect(sheetApp).toHaveCSS('background-color', 'rgb(24, 24, 24)')
   await popover.getByRole('slider', { name: 'Accent hue' }).fill('210')
   const hex = accentHex(accentAtHue(210))
   await expect(popover.getByLabel('Accent hex value')).toHaveText(hex)

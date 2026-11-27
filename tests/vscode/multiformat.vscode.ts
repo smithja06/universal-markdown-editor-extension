@@ -101,6 +101,24 @@ test('TXT replaces literal matches, reflects edits from the native buffer and re
   await expect.poll(async () => (await read(file)).dirty).toBe(false)
 })
 
+test('TXT Replace changes only the current match through the find form', async ({ desktop }) => {
+  const { page, workspace, command, read } = desktop
+  const file = 'single.txt'
+  await writeFile(join(workspace, file), 'one two one\n')
+  await command('open', { file, editor: 'folio.txt' })
+  const frame = folio(page)
+  await frame.getByRole('textbox', { name: 'Plain text editor' }).press('ControlOrMeta+h')
+  await frame.getByRole('textbox', { name: 'Find text' }).fill('one')
+  await expect(frame.getByText('1 of 2 matches')).toBeVisible()
+  const replacement = frame.getByRole('textbox', { name: 'Replace with' })
+  await replacement.fill('three')
+  await frame.getByRole('button', { name: 'Replace', exact: true }).click()
+  await expect.poll(async () => (await read(file)).text).toBe('three two one\n')
+  await expect(frame.getByText('1 match replaced.')).toBeVisible()
+  await replacement.press('Enter')
+  await expect.poll(async () => (await read(file)).text).toBe('three two three\n')
+})
+
 test('DOCX offers reviewed copy export and verifies original and edited downloads', async ({ desktop }) => {
   const { page, workspace, command } = desktop
   const file = 'review.docx'
