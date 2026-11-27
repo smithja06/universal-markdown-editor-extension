@@ -19,7 +19,9 @@ Phase 10.1 closes the Phase 10 technical release blockers where this machine all
 | `c311e8a` | Acceptance round 1 fixes, tests, README and checklist (section 15) |
 | `01df136` | Round 2 records |
 | `72a5c32` | Table size picker and DOCX formatting, with Word interop scripts (section 16) |
-| (next commit) | Section 16 records |
+| `e98db32` | Section 16 records |
+| `63894ca` | Caret placement and Backspace indentation (section 17) |
+| (next commit) | Section 17 records |
 
 ## 2. PDF clipboard qualification
 
@@ -228,7 +230,7 @@ Use a separate VS Code profile if you prefer to keep your normal profile untouch
 
 ## 12. Remaining blockers
 
-The current candidate is in section 16.
+The current candidate is in section 17.
 
 1. **Personal acceptance testing.** Round 1 found defects, now fixed (section 15). Complete the round 2 re-test in the checklist.
 2. **Source companion hosting.** Needs authorization: host it, record the URL in the notices, repackage and recheck.
@@ -343,7 +345,7 @@ The new desktop case saves DOCX formatting with native Save and rereads the file
 - the rejected-mark case now uses inline code
 - the "unsupported run formatting" case now uses `w:caps`, because color is now supported
 
-**Current VSIX.**
+**`72a5c32` VSIX (superseded by section 17).**
 
 | Property | Value |
 | --- | --- |
@@ -357,3 +359,44 @@ Two consecutive packages had identical entries, and the tested archive was resto
 **Source companion.** The ELK worker is now `dist/webview/assets/elk-XV6XMXQE-CTwVByd_.js`, SHA-256 `73a7025f1abaa2e655200b6621204eaeede74b1d70ae662128ddd53cdae61185`. The archive was rebuilt with all 8 pinned inputs verified: 22,222,039 bytes, SHA-256 `89178e378ae24a0f5bac605b5a45fef4eda716a1a057985c85166750ba6b7854`. It is not uploaded.
 
 **Pushed.** `phase-10.1-release-qualification` was pushed to `origin` through `01df136` at the owner's request. `72a5c32` and later are local until the owner asks to push them.
+
+## 17. Acceptance round 2 and the current candidate
+
+The owner tested `730c0db1…`. Everything passed except four notes, recorded in the checklist.
+
+| Note | Finding | Change |
+| --- | --- | --- |
+| A click on the right side of a line goes to the start of the next line, or does nothing. | Reproduced in VS Code. A click in the editor's padding beside a line, or in the margin between paragraphs, has no text under it. ProseMirror resolved it to the next block boundary. | `src/editor/caretPlacement.ts` maps such clicks to the nearest text block. It is the line's end for a click to the right, and the closer line for a gap. Shift+click extends the selection. The click must land on the editor or a list or table container, never on text, a node view or a table resize handle. The first version blocked column resizing, which two Chromium tests caught, and it now leaves resize handles alone. |
+| An indent cannot be removed with Backspace. | Backspace had no indentation handling. | At the start of an indented paragraph or heading, Backspace removes one 24 px step. With no indent it joins as before. |
+| DOCX text color does not show in the editor, but Word has it. | Not reproduced. A VS Code probe showed the color in headings, paragraphs, links, list items, header and body cells, both selected and deselected. The likely cause is the click defect above: Shift+Home after a misplaced caret selects nothing. | Re-tested in round 3. |
+| Only one boundary comment, between the checklist and the bulleted list | Expected. Adjacent lists need a separator. | None |
+
+Tests:
+
+- **Desktop:** DOCX clicks in the right padding, in a gap and on a list item, then Backspace through two indentation steps. It fails without the extension.
+- **Chromium:** the same checks in Markdown, plus Shift+Arrow after a gap click and the join at zero indentation.
+
+**Regression (`63894ca`).**
+
+| Check | Result |
+| --- | --- |
+| ESLint, TypeScript (app, tests, scripts and extension) | Pass, 0 warnings |
+| Unit and integration | 36 files, **327 passed** |
+| Standalone Chromium | **103 passed** of 103 |
+| Full desktop suite, VS Code 1.147.0 portable | **89 passed of 89** in one uninterrupted run |
+| Installed VSIX on VS Code 1.100.0, 1.147.0 and 1.148.0 | **34 passed** of 34 on each |
+
+**Current VSIX.**
+
+| Property | Value |
+| --- | --- |
+| Path | `extension/dist/folio.vsix` |
+| Source commit | `63894ca`. Only `docs/` changed afterwards, and it is not packaged. |
+| SHA-256 | `6c4cde7f6535d4841b972719e844032d092afbec824366f5a0a278202b60f9fc` |
+| Size | 9,056,958 bytes, 212 files |
+
+Two consecutive packages had identical entries, and the tested archive was restored. The inventory checks pass.
+
+**Source companion.** The worker is now `dist/webview/assets/elk-XV6XMXQE-BeFJUSYP.js`, SHA-256 `e93f36945c1718c1c2a299369958060b1ea55ae5286a79497181f295c3bcdf6a`. The archive was rebuilt with all 8 inputs verified: 22,222,039 bytes, SHA-256 `b70c071821988d93d71330b90ebb122f68d76125b35d97a090b300143f05eb53`. It is not uploaded.
+
+**Push status.** `origin` has commits through `01df136`. `72a5c32` and later are local.

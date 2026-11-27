@@ -12,8 +12,9 @@ Phase 10.1 is on local branch `phase-10.1-release-qualification`, based on `orig
 - **Harness fix.** The isolated profile no longer sets `extensions.autoUpdate`. VS Code 1.147's migration rewrite raced window reloads.
 - **Acceptance round 1.** The owner's notes found real defects: single Replace, italic display, spreadsheet Ctrl+B, uncalculated formulas, a green dark theme and noisy Markdown list output. All are fixed in `c311e8a` with tests. The checklist records round 1 and lists the round 2 re-test.
 - **Owner requests after round 1.** `72a5c32`: the table size grid locks on click, and DOCX gains font, size in points, color, highlight, strikethrough, alignment and indentation, checked in Microsoft Word.
-- **Results.** lint and both tsc clean; 327/327 unit; 102/102 Chromium; full desktop 88/88 on 1.147.0 in one run; installed VSIX 33/33 on each of 1.100.0, 1.147.0 and 1.148.0; Word 16.0 reads the DOCX formatting fixture correctly. VSIX `730c0db1…`.
-- **Open gates.** Round 2 acceptance re-test, source-companion hosting (needs authorization), publication authorization.
+- **Acceptance round 2.** Fixed in `63894ca`: clicks beside a line or between paragraphs go to the nearest line, and Backspace at the start of an indented paragraph removes one step. The DOCX text-color note did not reproduce and is re-tested in round 3.
+- **Results.** lint and both tsc clean; 327/327 unit; 103/103 Chromium; full desktop 89/89 on 1.147.0 in one run; installed VSIX 34/34 on each of 1.100.0, 1.147.0 and 1.148.0; Word 16.0 reads the DOCX formatting fixture correctly. VSIX `6c4cde7f…`.
+- **Open gates.** Round 3 acceptance re-test, source-companion hosting (needs authorization), publication authorization.
 
 ## Phase 10 final integration
 

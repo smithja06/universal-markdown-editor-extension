@@ -4,12 +4,12 @@
 
 [Phase 10.1 record](phase-10.1-release-qualification.md)
 
-Candidate `extension/dist/folio.vsix` from `72a5c32` (acceptance round 2, with the table picker and DOCX formatting): SHA-256 `730c0db13528a93ac4d2b04402f001d042bed4286d89c428d79e9e7c27329168`, 9,056,370 bytes, 212 files. It supersedes `4e374c34…` from `c311e8a`. It is local only. The round 1 candidate was `e44a231b…` from `c7329eb`, 205 files. The 7 added files are Inter's italic font subsets.
+Candidate `extension/dist/folio.vsix` from `63894ca` (acceptance round 3): SHA-256 `6c4cde7f6535d4841b972719e844032d092afbec824366f5a0a278202b60f9fc`, 9,056,958 bytes, 212 files. It supersedes `730c0db1…` from `72a5c32` and `4e374c34…` from `c311e8a`. It is local only. The round 1 candidate was `e44a231b…` from `c7329eb`, 205 files. The 7 added files are Inter's italic font subsets.
 
 - **Reproducibility.** `.gitattributes` checks out text with LF on every platform. Two consecutive `npm run package:extension` builds produced 212 entries with identical SHA-256. Only the zip timestamps differ, so the archive hash changes between builds while the content does not.
 - **Inventory.** 212 files, all within the manifest allowlist. No source maps, tests, fixtures, logs, archives, Office or PDF documents. No personal paths, names or credentials: the only key-shaped match is inside the base64-inlined IronCalc WASM, and the only path-shaped text match is a coincidental byte sequence inside base64-inlined font data. Lazy workers: `csvWorker`, `pdfjsWorker`, `searchWorker` and `workerClient`. IronCalc WASM ships on disk (`dist/spreadsheet.wasm`, 2,546,925 bytes) and in the webview assets.
 - **Notices.** All required notices are present. `THIRD_PARTY_NOTICES.md` now also points to `dist/DOCX_THIRD_PARTY_NOTICES.txt` for fflate, saxes and xmlchars.
-- **Source companion.** Rebuilt and verified for the round 2 VSIX: SHA-256 `89178e378ae24a0f5bac605b5a45fef4eda716a1a057985c85166750ba6b7854`, worker `elk-XV6XMXQE-CTwVByd_.js` `73a7025f…53cdae61185`. The worker's name and hash changed because its import names of shared chunks changed; the ELK code is unchanged. **Not uploaded.** The URL plan is in `docs/release/marketplace.md`. Publication stays blocked until it is hosted, recorded and repackaged.
+- **Source companion.** Rebuilt and verified for the round 2 VSIX: SHA-256 `b70c071821988d93d71330b90ebb122f68d76125b35d97a090b300143f05eb53`, worker `elk-XV6XMXQE-BeFJUSYP.js` `e93f3694…295c3bcdf6a`. The worker's name and hash changed because its import names of shared chunks changed; the ELK code is unchanged. **Not uploaded.** The URL plan is in `docs/release/marketplace.md`. Publication stays blocked until it is hosted, recorded and repackaged.
 
 ## Phase 10 distribution record
 

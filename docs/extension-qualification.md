@@ -6,16 +6,18 @@ Same host as Phase 10 (Windows 11 Pro x64, fixed NTFS `C:`, local `file:` worksp
 
 | Host | Build | Result |
 | --- | --- | --- |
-| VS Code 1.147.0 portable (`8a14f0cc1b`) | Development bundle, full desktop suite, `72a5c32` | **88 passed of 88** in one uninterrupted run |
-| VS Code 1.100.0 portable (`19e0f9e6`) | Installed VSIX `730c0db1…` | 33 passed of 33 |
-| VS Code 1.147.0 portable | Installed VSIX | 33 passed of 33 |
-| VS Code 1.148.0 installed (`661626d0e7`) | Installed VSIX | 33 passed of 33 |
+| VS Code 1.147.0 portable (`8a14f0cc1b`) | Development bundle, full desktop suite, `63894ca` | **89 passed of 89** in one uninterrupted run |
+| VS Code 1.100.0 portable (`19e0f9e6`) | Installed VSIX `6c4cde7f…` | 34 passed of 34 |
+| VS Code 1.147.0 portable | Installed VSIX | 34 passed of 34 |
+| VS Code 1.148.0 installed (`661626d0e7`) | Installed VSIX | 34 passed of 34 |
+
+`72a5c32` (VSIX `730c0db1…`) was 88 of 88 on the development bundle and 33 of 33 installed on each host.
 
 `c311e8a` (VSIX `4e374c34…`) was 87 of 87 on the development bundle, after one theme expectation was updated, and 32 of 32 installed on each host.
 
 Round 1 (`c7329eb`, VSIX `e44a231b…`) was 83 of 83 on the development bundle and 28 of 28 installed on each host.
 
-The PDF clipboard case passes on every host. The installed runs add `XLSX Save and Save As keep sheets, styles, merges, rules, theme and formulas`. Round 2 adds single Replace through the find form, Enter in the PDF page box, Ctrl+B/I/U in the grid, cell editor and formula bar without toggling the side bar, calculation on a typed formula, and the calculation banner after a cross-sheet row insert. `72a5c32` adds DOCX native Save of font, size, color, highlight, strikethrough, alignment and indentation.
+The PDF clipboard case passes on every host. The installed runs add `XLSX Save and Save As keep sheets, styles, merges, rules, theme and formulas`. Round 2 adds single Replace through the find form, Enter in the PDF page box, Ctrl+B/I/U in the grid, cell editor and formula bar without toggling the side bar, calculation on a typed formula, and the calculation banner after a cross-sheet row insert. `72a5c32` adds DOCX native Save of font, size, color, highlight, strikethrough, alignment and indentation. `63894ca` adds caret placement for clicks beside lines and Backspace removing an indent (`DOCX clicks beside`, added to the runbook filter).
 
 **Harness change.** `tests/vscode/desktop.ts` no longer writes `extensions.autoUpdate` to the isolated profile. VS Code 1.147 migrates `false` to `"off"` by rewriting `settings.json` about two seconds after startup. A window reload during that write waited forever on VS Code's backup veto (`onBeforeShutdown … pending operations: veto.backups`). The recovery-after-reload case failed 3 of 13 repeats before the change and 0 of 12 after it. `extensions.autoCheckUpdates: false` still prevents updates.
 
@@ -36,7 +38,7 @@ The failure is the same in every row. `PDF opens only through the opt-in viewer�
 
 ```powershell
 $env:FOLIO_TEST_VSIX = 'extension/dist/folio.vsix'
-npx playwright test --config playwright.vscode.config.ts binarySave.vscode.ts spreadsheet.vscode.ts pdf.vscode.ts pdfExport.vscode.ts editor.vscode.ts multiformat.vscode.ts -g "native binary Save|XLSX|CSV|PDF|Markdown exports|TXT and DOCX export|opens optionally|TXT defaults to native|TXT Replace changes|DOCX offers reviewed|DOCX flags|Restricted Mode|native DOCX backups|Save As" --output test-results/p10-installed
+npx playwright test --config playwright.vscode.config.ts binarySave.vscode.ts spreadsheet.vscode.ts pdf.vscode.ts pdfExport.vscode.ts editor.vscode.ts multiformat.vscode.ts -g "native binary Save|XLSX|CSV|PDF|Markdown exports|TXT and DOCX export|opens optionally|TXT defaults to native|TXT Replace changes|DOCX clicks beside|DOCX offers reviewed|DOCX flags|Restricted Mode|native DOCX backups|Save As" --output test-results/p10-installed
 ```
 
 **Environment workaround.** A pending background update of the installed VS Code held the `vscode-updating` installer mutex. Every new instance logged `checkInnoSetupMutex: vscode-updating is held` and exited, so the harness could not start. Portable zip builds skip that mutex: `https://update.code.visualstudio.com/1.147.0/win32-x64-archive/stable` (zip SHA-256 `42d65f18009959964d7cff8ca6f33149a195d52c08622821c8c681a08469c26e`) and `https://update.code.visualstudio.com/1.100.0/win32-x64-archive/stable` (zip SHA-256 `6fa62a8f07a2b42993b19f81ed90c95a2de78299b7e227f226c76d87ceb06a9c`). Both carried valid Microsoft signatures. Point the harness at them with `FOLIO_VSCODE_EXECUTABLE`.

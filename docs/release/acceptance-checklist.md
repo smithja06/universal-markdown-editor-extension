@@ -40,52 +40,86 @@ The round 2 candidate also contains two features requested after round 1: a tabl
 Install the round 2 VSIX first: SHA-256 `730c0db13528a93ac4d2b04402f001d042bed4286d89c428d79e9e7c27329168`, built from `72a5c32`. Mark each box ☐ → ☑. Note anything confusing, slow or wrong.
 
 **Table size picker (new)**
-- ☐ In `notes.md` choose **Insert → Table**. Move the pointer over the grid: the highlighted size follows it. Click a square: the line under the grid reads, for example, "3 × 4 table · Click another square to change the size."
-- ☐ Move the pointer across other squares and on to **Insert**: the size does not change, and squares you pass over only show a dashed preview. Click **Insert**: the table has the size you clicked. Click a different square first to change the size. Typing in **Rows** or **Columns** also keeps the size.
-- ☐ The same in your DOCX.
+
+- [x] &#x20;In `notes.md` choose **Insert → Table**. Move the pointer over the grid: the highlighted size follows it. Click a square: the line under the grid reads, for example, "3 × 4 table · Click another square to change the size."
+- [x] Move the pointer across other squares and on to **Insert**: the size does not change, and squares you pass over only show a dashed preview. Click **Insert**: the table has the size you clicked. Click a different square first to change the size. Typing in **Rows** or **Columns** also keeps the size.
+- [x] &#x20;The same in your DOCX.
 
 **DOCX formatting (new)**
-- ☐ In your DOCX select some text. Change **Font family** (try Calibri and Georgia) and **Font size**, which is shown in points as in Word. Change **Text color** and **Text highlight**, and click **Strikethrough**.
-- ☐ Use **Alignment** for left, center, right and justified paragraphs. In **More formatting** use **Increase indentation** and **Decrease indentation** (Ctrl+] and Ctrl+[) on a paragraph or heading. Indentation is unavailable inside a list item, because Word lists use their own indentation.
-- ☐ Ctrl+S, close and reopen with Folio: all formatting is kept.
-- ☐ Open the saved file in Word: the font, size, color, strikethrough, alignment and indentation match. Folio's highlight colors appear as character shading, since Word's highlight tool has its own fixed colors.
-- ☐ In Word, make a document with a font, a size, a font color, a yellow highlight, centered and justified paragraphs and an indent, then open it with Folio: they show in Folio. Theme fonts or theme colors are listed in **DOCX import notes** as approximations.
+
+- [x] &#x20;In your DOCX select some text. Change **Font family** (try Calibri and Georgia) and **Font size**, which is shown in points as in Word. Change **Text color** and **Text highlight**, and click **Strikethrough**.
+- [ ] NOTE: Text color doesnt register on the editor for doc x however it does register on the word file. i also notice that sometime when click on a line on the right side of the documnent it doesnt take you to that line and sometimes just brings you the the first character of the line below it or it just doesnt register at all.
+- [x] &#x20;Use **Alignment** for left, center, right and justified paragraphs. In **More formatting** use **Increase indentation** and **Decrease indentation** (Ctrl+] and Ctrl+\[) on a paragraph or heading. Indentation is unavailable inside a list item, because Word lists use their own indentation.
+- [ ] NOTE: indention works but you cant backspaace an indentation its lcoked and you must decrease indentation to remove it
+- [x] &#x20;Ctrl+S, close and reopen with Folio: all formatting is kept.
+- [x] &#x20;Open the saved file in Word: the font, size, color, strikethrough, alignment and indentation match. Folio's highlight colors appear as character shading, since Word's highlight tool has its own fixed colors.
+- [x] &#x20;In Word, make a document with a font, a size, a font color, a yellow highlight, centered and justified paragraphs and an indent, then open it with Folio: they show in Folio. Theme fonts or theme colors are listed in **DOCX import notes** as approximations.
 
 **Find and replace**
-- ☐ Open `plain.txt` with Folio. Ctrl+H, find a word that appears twice, type a replacement and click **Replace**: only the current match changes. Press Enter in the **Replace with** box: the next match changes.
-- ☐ The same in `notes.md` (Visual) and in your DOCX.
+
+- [x] &#x20;Open `plain.txt` with Folio. Ctrl+H, find a word that appears twice, type a replacement and click **Replace**: only the current match changes. Press Enter in the **Replace with** box: the next match changes.
+- [x] The same in `notes.md` (Visual) and in your DOCX.
 
 **Italic**
-- ☐ In `notes.md` and your DOCX, select text and press Ctrl+I or click **Italic**: the text slants in the editor. Save and reopen: it is still italic. The DOCX shows italic in Word.
-- ☐ Export `notes.md` with **Export → Export PDF…**. Italic text is italic in the PDF.
+
+- [x] &#x20;In `notes.md` and your DOCX, select text and press Ctrl+I or click **Italic**: the text slants in the editor. Save and reopen: it is still italic. The DOCX shows italic in Word.
+- [x] Export `notes.md` with **Export → Export PDF…**. Italic text is italic in the PDF.
 
 **Markdown cleanliness**
-- ☐ In a new Markdown file, add a checklist directly followed by a bulleted list, then a paragraph and another list. Save and open the file in the text editor. There is no blank line between list items. At most one `<!--folio:boundary-->` appears, between the two adjacent lists.
+
+- [x] &#x20;In a new Markdown file, add a checklist directly followed by a bulleted list, then a paragraph and another list. Save and open the file in the text editor. There is no blank line between list items. At most one `<!--folio:boundary-->` appears, between the two adjacent lists.
+- [ ] NOTE: only one appears between checklist and bulleted list &#x20;
 
 **XLSX shortcuts**
-- ☐ Click a cell and press Ctrl+B, Ctrl+I and Ctrl+U: the cell toggles bold, italic and underline, and VS Code's side bar does not open or close.
-- ☐ Double-click a cell, select some of its text and press Ctrl+B: the whole cell turns bold and you keep typing in the cell. Press Enter: the text and bold are kept.
-- ☐ Click into the formula bar and press Ctrl+B: the selected cell toggles bold.
+
+- [x] &#x20;Click a cell and press Ctrl+B, Ctrl+I and Ctrl+U: the cell toggles bold, italic and underline, and VS Code's side bar does not open or close.
+- [x] Double-click a cell, select some of its text and press Ctrl+B: the whole cell turns bold and you keep typing in the cell. Press Enter: the text and bold are kept.
+- [x] &#x20;Click into the formula bar and press Ctrl+B: the selected cell toggles bold.
 
 **XLSX formulas**
-- ☐ Open `folio-features.xlsx`. In an empty cell type `=SUM(1,2,3)` and press Enter: the cell shows 6 and a notice says local calculation is on. `=SUM(C2, C3)` shows the sum of those cells.
-- ☐ Insert a row above data referenced by a formula. The formula still points to the right cells and shows the right result. Rename a sheet: references follow.
-- ☐ Close the workbook without saving and reopen it. Insert a row again without typing a formula. Any formula Folio had to change shows **Not calculated**, and a banner offers **Enable calculation**. Click it: the results appear and the banner goes away.
+
+- [x] &#x20;Open `folio-features.xlsx`. In an empty cell type `=SUM(1,2,3)` and press Enter: the cell shows 6 and a notice says local calculation is on. `=SUM(C2, C3)` shows the sum of those cells.
+- [x] &#x20;Insert a row above data referenced by a formula. The formula still points to the right cells and shows the right result. Rename a sheet: references follow.
+- [x] &#x20;Close the workbook without saving and reopen it. Insert a row again without typing a formula. Any formula Folio had to change shows **Not calculated**, and a banner offers **Enable calculation**. Click it: the results appear and the banner goes away.
 
 **PDF**
-- ☐ Open a PDF with three or more pages. Type a page number in the page box and press Enter: Folio jumps to that page.
+
+- [x] &#x20;Open a PDF with three or more pages. Type a page number in the page box and press Enter: Folio jumps to that page.
 
 **Recovery**
-- ☐ Edit a DOCX or XLSX without saving and close VS Code (hot exit). On restart the edit is back and the tab shows unsaved changes. Make one more edit: Ctrl+Z undoes that edit and keeps the restored draft. **File: Revert File** discards the draft and shows the saved file.
+
+- [x] Edit a DOCX or XLSX without saving and close VS Code (hot exit). On restart the edit is back and the tab shows unsaved changes. Make one more edit: Ctrl+Z undoes that edit and keeps the restored draft. **File: Revert File** discards the draft and shows the saved file.
 
 **Appearance**
-- ☐ Choose Folio's own **Dark** in Appearance. The editor is neutral grey with no green tint, and only the accent you choose adds color. **Match VS Code** returns to your workbench theme's exact colors.
-- ☐ Folio's **Light**, a VS Code light theme and a high contrast theme still look right.
+
+- [x] Choose Folio's own **Dark** in Appearance. The editor is neutral grey with no green tint, and only the accent you choose adds color. **Match VS Code** returns to your workbench theme's exact colors.
+- [x] &#x20;Folio's **Light**, a VS Code light theme and a high contrast theme still look right.
 
 **Quick regression**
-- ☐ Repeat any round 1 item you want. The full round 1 list is in Git history (`30109ac`).
+
+- [x] &#x20;Repeat any round 1 item you want. The full round 1 list is in Git history (`30109ac`).
+
+## Round 2 results (November 27, 2026, VSIX `730c0db1…`)
+
+Everything passed except the notes above, so round 2 did not accept the release yet.
+
+| Owner's note | Cause and fix |
+| --- | --- |
+| Clicking on the right side of a line sometimes goes to the first character of the line below, or does nothing. | Reproduced in VS Code. A click in the editor's padding beside a line, or in the space between paragraphs, has no text under it, so the browser chose the start of the next block. Folio now places the caret on the nearest line: at its end for a click to the right, and on the closer line for a click between paragraphs. Shift+click extends the selection. Table column resizing is unaffected. This applies to Markdown and DOCX. |
+| DOCX text color doesn't show in the editor, but Word has it. | Not reproduced. In VS Code, color showed in headings, paragraphs, links, lists and table cells, both while selected and after. The likely cause is the click problem above: after a click on the right of a line the caret sat at the start of the next line, so a following Shift+Home selected nothing and the color went somewhere else. Re-test below. Also note that **Ink**, the first color, is almost the default text color in light themes. |
+| An indent can't be removed with Backspace. | Backspace at the start of an indented paragraph or heading now removes one indentation step, as in Word. At no indentation it joins lines as before. This applies to Markdown and DOCX. |
+| Only one `<!--folio:boundary-->` appears, between the checklist and the bulleted list. | That is the expected result. Two different Markdown lists directly next to each other need a separator, or every Markdown reader would merge them into one list. |
+
+## Round 3 re-test
+
+Install the round 3 VSIX: SHA-256 `6c4cde7f6535d4841b972719e844032d092afbec824366f5a0a278202b60f9fc`, built from `63894ca`.
+
+- ☐ In your DOCX and in `notes.md`, click to the right of the text on several lines, including short lines, a heading and a list item: the caret goes to the end of that line. Click in the space between two paragraphs: the caret goes to the nearer line. Shift+click to the right of a later line selects up to its end.
+- ☐ Select a few words by clicking to the right of a line and pressing Shift+Home, or by dragging. Choose **Text color → Ocean** or **Brick**: the words change color in the editor. Save and reopen: the color is kept. Word shows the same color.
+- ☐ Indent a paragraph twice. Put the caret at its start and press Backspace: one indentation step goes. Press Backspace again: the indentation is gone. Press it once more: the paragraph joins the one above, as before.
+- ☐ Table columns still resize by dragging a column border, in DOCX and Markdown.
 
 ## Result
 
 - ☐ Accept for publication, or
-- ☐ Issues found (list them): ____________________
+- ☐ Issues found (list them): \_\_\_\_\_\_\_\_CHECK NOTES ABOVE ONLY A FEW LEFT\_\_\_\_\_\_\_\_\_\_\_\_
