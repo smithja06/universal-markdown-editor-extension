@@ -1,5 +1,18 @@
 # Folio project handoff
 
+## Phase 10.1 release qualification
+
+Phase 10.1 is on local branch `phase-10.1-release-qualification`, based on `origin/main` `6fe1c0f`. It is not pushed, merged, tagged or published. Full details: [Phase 10.1 record](phase-10.1-release-qualification.md).
+
+- **Native Save** is qualified under injected faults: disk-full mid-write, failed flush, failed rollback, journal storage failure, cancellation, an earlier-journal conflict, ambiguous bytes, and a writer process killed mid-write. A stale-journal defect is fixed in `verifiedReplace.ts`. There is no power-loss claim.
+- **PDF clipboard** passes on an interactive session. The Phase 10 failure was the locked session.
+- **XLSX interop.** Folio fixtures, IronCalc structure edits and native Save/Save As outputs pass the independent openpyxl 3.1.5 check and Folio's reopen comparison. Microsoft Excel validation is **open**: Office's first-run privacy dialog blocks automation, and the owner must run the manual steps.
+- **Reproducible builds.** `.gitattributes` `* text=auto eol=lf`. Two consecutive packages have identical entries.
+- **Release materials.** README/Marketplace page, release notes, `docs/release/marketplace.md`, seven synthetic screenshots, `docs/release/acceptance-checklist.md`.
+- **Harness fix.** The isolated profile no longer sets `extensions.autoUpdate`. VS Code 1.147's migration rewrite raced window reloads.
+- **Results.** lint and both tsc clean; 320/320 unit; 101/101 Chromium; full desktop 83/83 on 1.147.0 in one run; installed VSIX 28/28 on each of 1.100.0, 1.147.0 and 1.148.0. VSIX `e44a231b…`.
+- **Open gates.** Excel 365 manual check, personal acceptance testing, source-companion hosting (needs authorization), publication authorization.
+
 ## Phase 10 final integration
 
 Phase 10 is implemented and verified on branch `phase-10-final-integration` in the original checkout. It is based on `origin/main` `98cd8ed`, the PR #20 merge of Phase 9.1, whose first parent is the Phase 9 merge `cd3474c`. Implementation ends at `db1429c`, followed by the documentation commit. Nothing is pushed, merged, tagged or published. The user's untracked `KNO3 DATA.xlsx` stays uncommitted. [Phase 10 record, evidence and Next Chat Starter](phase-10-final-integration.md) · [Release matrix](release-capabilities.md#phase-10-release-matrix)

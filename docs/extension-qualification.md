@@ -1,5 +1,22 @@
 # VS Code platform qualification
 
+## Phase 10.1 qualification
+
+Same host as Phase 10 (Windows 11 Pro x64, fixed NTFS `C:`, local `file:` workspace). [Phase 10.1 record](phase-10.1-release-qualification.md).
+
+| Host | Build | Result |
+| --- | --- | --- |
+| VS Code 1.147.0 portable (`8a14f0cc1b`) | Development bundle, full desktop suite | **83 passed of 83** in one uninterrupted run, after the harness fix below. The run before it was 82 passed, 1 failed. |
+| VS Code 1.100.0 portable (`19e0f9e6`) | Installed VSIX `e44a231b…` | 28 passed of 28 |
+| VS Code 1.147.0 portable | Installed VSIX | 28 passed of 28 |
+| VS Code 1.148.0 installed (`661626d0e7`) | Installed VSIX | 28 passed of 28 |
+
+The PDF clipboard case passes on every host. The installed runs add `XLSX Save and Save As keep sheets, styles, merges, rules, theme and formulas`.
+
+**Harness change.** `tests/vscode/desktop.ts` no longer writes `extensions.autoUpdate` to the isolated profile. VS Code 1.147 migrates `false` to `"off"` by rewriting `settings.json` about two seconds after startup. A window reload during that write waited forever on VS Code's backup veto (`onBeforeShutdown … pending operations: veto.backups`). The recovery-after-reload case failed 3 of 13 repeats before the change and 0 of 12 after it. `extensions.autoCheckUpdates: false` still prevents updates.
+
+**Screenshots** are captured with `FOLIO_SCREENSHOTS=1` (`tests/vscode/release.screens.ts`).
+
 ## Phase 10 qualification
 
 Windows 11 Pro 25H2 x64 (10.0.26200.9974), fixed NTFS `C:`, local `file:` workspaces, Node 24.13.0, npm 11.21.0, Playwright 1.65.1.

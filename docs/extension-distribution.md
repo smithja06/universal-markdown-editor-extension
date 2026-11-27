@@ -1,5 +1,16 @@
 # Folio VSIX distribution record
 
+## Phase 10.1 distribution record
+
+[Phase 10.1 record](phase-10.1-release-qualification.md)
+
+Candidate `extension/dist/folio.vsix` from `c7329eb`: SHA-256 `e44a231bb91e369328e75e0123f99bc47c3b34aecf96f54f9e7bdb7e2d5b0304`, 8,814,429 bytes, 205 files. It is local only.
+
+- **Reproducibility.** `.gitattributes` checks out text with LF on every platform. Two consecutive `npm run package:extension` builds produced 205 entries with identical SHA-256. Only the zip timestamps differ, so the archive hash changes between builds while the content does not.
+- **Inventory.** 205 files, all within the manifest allowlist. No source maps, tests, fixtures, logs, archives, Office or PDF documents. No personal paths, names or credentials: the only key-shaped match is inside the base64-inlined IronCalc WASM. Lazy workers: `csvWorker`, `pdfjsWorker`, `searchWorker` and `workerClient`. IronCalc WASM ships on disk (`dist/spreadsheet.wasm`, 2,546,925 bytes) and in the webview assets.
+- **Notices.** All required notices are present. `THIRD_PARTY_NOTICES.md` now also points to `dist/DOCX_THIRD_PARTY_NOTICES.txt` for fflate, saxes and xmlchars.
+- **Source companion.** Rebuilt and verified: SHA-256 `9021b673fb8fb987fb3e4bf1c787deac6ecbd50a217f9ae769d6f008310f9a99`, worker `elk-XV6XMXQE-LmPXhOG2.js` `52ee6432…96593b3aa4d`. **Not uploaded.** The URL plan is in `docs/release/marketplace.md`. Publication stays blocked until it is hosted, recorded and repackaged.
+
 ## Phase 10 distribution record
 
 Final candidate: `extension/dist/folio.vsix` built from the Phase 10 documentation commit, whose code is identical to `db1429c`, 205 entries, 8,814,394 bytes, SHA-256 `aa1f09b71d4628573a83a94349f4ee59a9f038cd5a114a24af14a8058bf3d1c3`.

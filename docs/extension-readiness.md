@@ -1,5 +1,9 @@
 # Folio in VS Code
 
+## Phase 10.1 release candidate assessment
+
+Engineering qualification for the claimed Windows scope is complete: lint and both tsc clean; 320/320 unit; 101/101 Chromium; full desktop 83/83 on 1.147.0 in one run; installed VSIX 28/28 on each of 1.100.0, 1.147.0 and 1.148.0. Release still needs the Excel 365 manual check, the owner's personal acceptance testing, hosting of the source companion with notice and package updates, and publication authorization. See the [Phase 10.1 record](phase-10.1-release-qualification.md).
+
 ## Phase 10 release assessment
 
 **Verdict: not ready for public release.** The engineering scope is implemented and verified on Windows. Three items remain. [Phase 10 record](phase-10-final-integration.md#15-remaining-release-blockers)

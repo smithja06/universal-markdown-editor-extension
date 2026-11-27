@@ -1,5 +1,17 @@
 # Folio first-release capability matrix
 
+## Phase 10.1 status changes
+
+[Phase 10.1 record](phase-10.1-release-qualification.md)
+
+| Capability | Phase 10 | Phase 10.1 |
+| --- | --- | --- |
+| Native DOCX/XLSX Save | Implemented on qualified Windows; disk-full and power loss covered by design only | **Implemented, fault-qualified.** Disk-full, flush, rollback, journal and killed-writer tests pass. No power-loss claim. |
+| XLSX interoperability | Excel 365 reread of the Phase 10 output not completed | **Independent check passed** with openpyxl 3.1.5 and the Folio reopen check. **Excel 365 open** (manual owner steps). |
+| PDF viewer copy | Failed on a locked session | **Passes** on an interactive session |
+| Third-party source and notices | Content complete; hosting outstanding | Unchanged: verified, **hosting blocks publication**. The DOCX codec notices are now referenced. |
+| Platform qualification | Windows 1.100.0, 1.147.0, 1.148.0 | Unchanged; macOS, Linux, WSL and Remote are not claimed |
+
 This matrix tracks the approved first-release scope across standalone Folio and the VS Code extension. Phase 6 qualified the Windows Markdown checkpoint. Phases 7A and 7B added standalone TXT and DOCX. Phase 7C added native TXT and the DOCX draft and reviewed-copy workflow in VS Code. Phase 8 added read-only PDF viewing in both hosts and validated PDF export from Markdown, TXT and DOCX. Public GitHub and Marketplace releases require qualified Markdown, TXT, DOCX, PDF, and XLSX workflows, completion of the applicable release capability scope, the distribution review, and explicit authorization. CSV is also in the Phase 9 scope. [Project handoff](PROJECT_HANDOFF.md) · [Distribution requirements](extension-distribution.md#requirements-and-release-decision)
 
 **Implemented** means the scoped workflow exists on the stated host. **Partial** means the current workflow covers part of the capability. **Planned** identifies work with a target phase. **Blocked** identifies a prerequisite that must be resolved before enabling the capability. A capability status alone does not certify a release artifact or additional platforms.
