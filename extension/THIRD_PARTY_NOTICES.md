@@ -9,9 +9,54 @@ Mermaid 12.3.0 loads elkjs 0.12.1 for ELK layouts. Folio bundles and minifies th
 - **elkjs 0.12.1 and Eclipse Layout Kernel 0.12.1, EPL 2.0.** Copyright (c) 2017 and 2021 Kiel University and others for the elkjs wrappers. ELK content is the property of the respective authors or their employers. Eclipse Layout Kernel is a trademark of the Eclipse Foundation. The upstream notices also identify GPL 3.0 or later as a secondary license when the EPL conditions are met. [elkjs sources and build instructions](https://github.com/kieler/elkjs/tree/624ae90aa37110033a8af59c5ccbb292708b4317) · [elkjs source archive](https://codeload.github.com/kieler/elkjs/tar.gz/624ae90aa37110033a8af59c5ccbb292708b4317) · [ELK source archive](https://codeload.github.com/eclipse-elk/elk/tar.gz/3aa3b9fb98d8f9a41285b3061cff5efe79ed2ba4) · [ELK upstream notices](https://github.com/eclipse-elk/elk/blob/3aa3b9fb98d8f9a41285b3061cff5efe79ed2ba4/NOTICE.md)
 - **EMF GWT common and ecore 2.12.4, EPL 1.0.** Copyright (c) 2002–2010 IBM Corporation and others, among the copyright notices in the sources. The full license is in `EPL-1.0.txt`. [emf-common sources](https://repo.maven.apache.org/maven2/com/genmymodel/emf/gwt/emf-common/2.12.4/emf-common-2.12.4-sources.jar) · [emf-ecore sources](https://repo.maven.apache.org/maven2/com/genmymodel/emf/gwt/emf-ecore/2.12.4/emf-ecore-2.12.4-sources.jar)
 - **Eclipse Xtext Xbase runtime 2.36.0, EPL 2.0.** Copyright (c) itemis AG and others, as identified by each source file. The source JAR includes the Eclipse notice for the plug-in. [Xbase library sources and notice](https://repo.maven.apache.org/maven2/org/eclipse/xtext/org.eclipse.xtext.xbase.lib/2.36.0/org.eclipse.xtext.xbase.lib-2.36.0-sources.jar)
-- **GWT user runtime 2.13.0 and Guava GWT 31.1-jre, Apache 2.0.** Copyright Google Inc., the Guava Authors, and other contributors as identified in the sources. [GWT sources](https://repo.maven.apache.org/maven2/org/gwtproject/gwt-user/2.13.0/gwt-user-2.13.0-sources.jar) · [Guava GWT sources](https://repo.maven.apache.org/maven2/com/google/guava/guava-gwt/31.1-jre/guava-gwt-31.1-jre-sources.jar)
+- **GWT user runtime 2.13.0 and Guava GWT 31.1-jre, Apache 2.0.** Copyright Google Inc., the GWT Project Authors, the Guava Authors and other contributors as identified in the sources. Neither source JAR includes an Apache NOTICE file. [GWT sources](https://repo.maven.apache.org/maven2/org/gwtproject/gwt-user/2.13.0/gwt-user-2.13.0-sources.jar) · [Guava GWT sources](https://repo.maven.apache.org/maven2/com/google/guava/guava-gwt/31.1-jre/guava-gwt-31.1-jre-sources.jar)
+- **Unicode CLDR locale data, Unicode License V3.** GWT's i18n runtime classes compiled into the worker, such as `DateTimeFormatInfoImpl`, are based on Unicode CLDR data. The license follows.
 
-This release candidate is for local validation. The pinned links identify the upstream materials examined for it. A complete release source archive and distribution terms are pending review. [EPL 2.0 text](https://www.eclipse.org/legal/epl/epl-v20.html) · [EPL 1.0 text](https://www.eclipse.org/legal/epl-v10.html)
+
+```text
+UNICODE LICENSE V3
+
+COPYRIGHT AND PERMISSION NOTICE
+
+Copyright © 1991-2023 Unicode, Inc.
+
+NOTICE TO USER: Carefully read the following legal agreement. BY
+DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of data files and any associated documentation (the "Data Files") or
+software and any associated documentation (the "Software") to deal in the
+Data Files or Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, and/or sell
+copies of the Data Files or Software, and to permit persons to whom the
+Data Files or Software are furnished to do so, provided that either (a)
+this copyright and permission notice appear with all copies of the Data
+Files or Software, or (b) this copyright and permission notice appear in
+associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+THIRD PARTY RIGHTS.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+FILES OR SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall
+not be used in advertising or otherwise to promote the sale, use or other
+dealings in these Data Files or Software without prior written
+authorization of the copyright holder.
+
+The EPL 2.0 text is in `EPL-2.0.txt` (copied from the elkjs 0.12.1 package) and the EPL 1.0 text in `EPL-1.0.txt`. Folio selects the EPL 2.0 for elkjs and ELK.
+
+**Corresponding source.** `npm run source:companion` (scripts/elk-source-companion.mjs) downloads the pinned elkjs and ELK commits, the EMF GWT, Xtext Xbase, Guava GWT and GWT source JARs and the published elkjs package. It verifies each SHA-256 (and the lockfile integrity for the npm package) and writes `folio-elk-source-companion.zip` with build instructions, the licenses, Folio's lockfile and build configuration, and the hash of the packaged ELK chunk. The `.melk` option sources and the MELK generator source are in the ELK archive. The generator itself is a build tool and is not distributed. Before any public distribution, host that archive at a durable public URL beside the release and record the URL here. Until then the archive is local only.
 
 ## PDF viewer and export
 

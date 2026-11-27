@@ -15,7 +15,7 @@
   "main": "./dist/extension.cjs",
   "extensionKind": ["workspace"],
   "capabilities": { "virtualWorkspaces": true, "untrustedWorkspaces": { "supported": false } },
-  "files": ["dist/extension.cjs", "dist/docx-codec.cjs", "dist/spreadsheet-codec.cjs", "dist/spreadsheet.wasm", "dist/DOCX_THIRD_PARTY_NOTICES.txt", "dist/PDF_THIRD_PARTY_NOTICES.txt", "dist/SPREADSHEET_THIRD_PARTY_NOTICES.txt", "dist/webview", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "EPL-1.0.txt"],
+  "files": ["dist/extension.cjs", "dist/docx-codec.cjs", "dist/spreadsheet-codec.cjs", "dist/spreadsheet.wasm", "dist/DOCX_THIRD_PARTY_NOTICES.txt", "dist/PDF_THIRD_PARTY_NOTICES.txt", "dist/SPREADSHEET_THIRD_PARTY_NOTICES.txt", "dist/webview", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "EPL-1.0.txt", "EPL-2.0.txt"],
   "contributes": {
     "commands": [
       { "command": "folio.openWith", "title": "Open with Folio", "category": "Folio" },
