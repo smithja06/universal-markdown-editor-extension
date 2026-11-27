@@ -140,15 +140,30 @@ async function readAll(handle: FileHandle, size: number) {
   return bytes.subarray(0, offset)
 }
 
-async function writeAll(handle: FileHandle, bytes: Uint8Array) {
+const chunkBytes = 1024 * 1024
+
+/** Writes in bounded chunks, then truncates and flushes. `faults` lets tests fail a chunk or the flush. */
+async function writeAll(handle: FileHandle, bytes: Uint8Array, faults?: ReplaceFaults) {
   let offset = 0
   while (offset < bytes.byteLength) {
-    const { bytesWritten } = await handle.write(bytes, offset, bytes.byteLength - offset, offset)
+    await faults?.chunk?.(offset, handle)
+    const length = Math.min(faults?.chunkBytes ?? chunkBytes, bytes.byteLength - offset)
+    const { bytesWritten } = await handle.write(bytes, offset, length, offset)
     if (bytesWritten <= 0) throw new Error('The disk accepted no more bytes.')
     offset += bytesWritten
   }
   await handle.truncate(bytes.byteLength)
+  await faults?.flush?.()
   await handle.sync()
+}
+
+/** Test-only fault injection for the replacement write. The restore write never uses it. */
+export interface ReplaceFaults {
+  /** Called before each chunk is written, with the offset reached so far. Throw to simulate a failing disk. */
+  chunk?: (offset: number, handle: FileHandle) => Promise<void> | void
+  /** Called before the replacement is flushed. Throw to simulate a failed flush. */
+  flush?: () => Promise<void> | void
+  chunkBytes?: number
 }
 
 export interface ReplaceOptions {
@@ -160,6 +175,7 @@ export interface ReplaceOptions {
   beforeWrite?: () => void
   /** Test hook that runs after the replacement bytes are written and before they are verified. */
   afterWrite?: (handle: FileHandle) => Promise<void>
+  faults?: ReplaceFaults
   attempts?: number
 }
 
@@ -177,6 +193,7 @@ export async function replaceVerified(path: string, expected: string, bytes: Uin
   })
   if (linked.isSymbolicLink() || !linked.isFile()) throw new ReplaceConflictError('Folio saves only regular files, not links or special files.')
   const handle = await openExclusive(path, options.attempts ?? 6)
+  let journaled = false
   let written = false
   let committed = false
   let previous: Uint8Array<ArrayBuffer> | undefined
@@ -198,9 +215,10 @@ export async function replaceVerified(path: string, expected: string, bytes: Uin
       return { fingerprint: next, unchanged: true }
     }
     await writeJournal(options.journalDirectory, { version: 1, path, expected, next, created: Date.now(), previous, replacement: bytes })
+    journaled = true
     options.beforeWrite?.()
     written = true
-    await writeAll(handle, bytes)
+    await writeAll(handle, bytes, options.faults)
     await options.afterWrite?.(handle)
     const check = await readAll(handle, bytes.byteLength)
     if (check.byteLength !== bytes.byteLength || digest(check) !== next) throw new Error('The saved file did not match the draft when Folio read it back.')
@@ -218,7 +236,9 @@ export async function replaceVerified(path: string, expected: string, bytes: Uin
     if (!restored) {
       throw new Error('Folio could not finish saving or restore the previous file. Reopen it in Folio to recover from the save journal.', { cause: error })
     }
-    if (written) await removeJournal(options.journalDirectory, path).catch(() => undefined)
+    // The file still holds the previous bytes, untouched or verified after the restore, so this call's journal is not
+    // needed. A journal from an earlier interrupted save is left alone when this call never wrote its own.
+    if (journaled) await removeJournal(options.journalDirectory, path).catch(() => undefined)
     throw error
   }
 }
