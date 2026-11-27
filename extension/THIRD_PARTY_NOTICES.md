@@ -2,6 +2,28 @@
 
 Folio's own code is licensed under MIT. The components listed here and in `dist/webview/THIRD_PARTY_NOTICES.md` retain their own licenses. The generated file records the detected packages and their available license texts, including EPL 2.0, Apache 2.0, and the SIL Open Font License.
 
+## Extension icon
+
+`media/icon.png` draws the `file-text` glyph from Lucide (lucide-react 1.77.0) on Folio's accent tile. The glyph is under the ISC License:
+
+```text
+ISC License
+
+Copyright (c) 2026 Lucide Icons and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
 ## Eclipse Layout Kernel and its compiled runtime
 
 Mermaid 12.3.0 loads elkjs 0.12.1 for ELK layouts. Folio bundles and minifies the upstream JavaScript, which already contains Java code compiled by GWT. The relevant upstream source is available under the licenses below. Download the source archives or source JARs from these links.
